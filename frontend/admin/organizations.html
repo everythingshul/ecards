@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organizations — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+if (Auth.user()?.role !== 'super_admin') { location.href = '/admin/dashboard.html'; }
+renderShell('/admin/organizations.html', `
+  <div class="flex-between"><h2>Organizations</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Organization</button></div>
+  <p class="small-muted">Each organization can run its own branding, domain, and email sending account. everythingshul.com is used as the default sender for any org that hasn't configured its own.</p>
+  <div id="org-list"></div>
+`);
+
+async function load() {
+  const { organizations } = await api('/orgs');
+  qs('#org-list').innerHTML = organizations.map(o => `<div class="card" style="margin-bottom:12px">
+      <div class="flex-between">
+        <div><strong>${esc(o.name)}</strong><br><span class="small-muted">${esc(o.subdomain||'')}${o.subdomain&&o.custom_domain?' · ':''}${esc(o.custom_domain||'')}</span></div>
+        <button class="btn btn-sm btn-outline" onclick="openOrg('${o.id}')">Manage</button>
+      </div>
+    </div>`).join('');
+}
+
+const CARD_PROVIDER_OPTIONS = [{ value: 'disccardpromos', label: 'disccardpromos.com' }, { value: 'generic_rest', label: 'Generic REST provider' }];
+
+async function openOrg(id) {
+  try {
+    const [{ organizations }, { settings: es }, { settings: cs }] = await Promise.all([api('/orgs'), api(`/orgs/${id}/email-settings`), api(`/orgs/${id}/card-provider-settings`)]);
+    const o = organizations.find(x => x.id === id);
+    const body = `
+      <div class="tabs" id="otabs"><button class="active" data-t="info">Org Info</button><button data-t="email">Email Settings</button><button data-t="cards">Gift Card Provider</button></div>
+      <div id="otab-info">
+        <label>Name</label><input id="e-name" value="${esc(o.name)}">
+        <div class="grid-2">
+          <div><label>Subdomain</label><input id="e-subdomain" value="${esc(o.subdomain||'')}" placeholder="e.g. mainorg"></div>
+          <div><label>Custom Domain</label><input id="e-custom_domain" value="${esc(o.custom_domain||'')}" placeholder="e.g. cards.theirdomain.org"></div>
+        </div>
+        <div class="grid-2">
+          <div><label>Primary Color</label><input id="e-primary_color" type="color" value="${o.primary_color||'#241a15'}"></div>
+          <div><label>Accent Color</label><input id="e-accent_color" type="color" value="${o.accent_color||'#c9a76a'}"></div>
+        </div>
+        <label>Support Email</label><input id="e-support_email" value="${esc(o.support_email||'')}">
+        <label>Support Phone</label><input id="e-support_phone" value="${esc(o.support_phone||'')}">
+        <button class="btn btn-sm btn-primary" style="margin-top:16px" onclick="saveOrg('${id}')">Save</button>
+      </div>
+      <div id="otab-email" style="display:none">
+        <p class="small-muted">${es.using_platform_default ? 'Currently sending from the <strong>everythingshul.com platform default</strong> account.' : '<strong>This org has its own Brevo sending account configured.</strong>'}</p>
+        <label>Brevo API Key ${es.has_api_key ? '<span class="small-muted">(already set — leave blank to keep it)</span>' : ''}</label>
+        <input id="em-api_key" type="password" placeholder="${es.has_api_key ? '••••••••••••' : 'xkeysib-...'}">
+        <div class="grid-2">
+          <div><label>Sender Email</label><input id="em-sender_email" value="${esc(es.sender_email)}" placeholder="noreply@theirdomain.org"></div>
+          <div><label>Sender Name</label><input id="em-sender_name" value="${esc(es.sender_name)}" placeholder="Their Org Name"></div>
+        </div>
+        <label>Reply-To (optional)</label><input id="em-reply_to" value="${esc(es.reply_to)}">
+        <div style="margin-top:16px;display:flex;gap:8px">
+          <button class="btn btn-sm btn-primary" onclick="saveEmail('${id}')">Save Email Settings</button>
+          ${!es.using_platform_default ? `<button class="btn btn-sm btn-outline" onclick="clearEmail('${id}')">Revert to Platform Default</button>` : ''}
+        </div>
+      </div>
+      <div id="otab-cards" style="display:none">
+        <p class="small-muted">${cs.using_platform_default ? 'Using the <strong>platform default</strong> gift card provider (or mock mode if none is configured at all).' : '<strong>This org has its own gift card provider configured.</strong>'} Every org can run a completely different vendor/account — nothing is hardcoded platform-wide.</p>
+        <label>Provider</label>
+        <select id="cp-provider">${CARD_PROVIDER_OPTIONS.map(p => `<option value="${p.value}" ${cs.provider===p.value?'selected':''}>${p.label}</option>`).join('')}</select>
+        <label>API Base URL</label><input id="cp-api_base" value="${esc(cs.api_base)}" placeholder="https://api.example.com/v1">
+        <label>API Key ${cs.has_api_key ? '<span class="small-muted">(already set — leave blank to keep it)</span>' : ''}</label>
+        <input id="cp-api_key" type="password" placeholder="${cs.has_api_key ? '••••••••••••' : 'API key'}">
+        <div style="margin-top:16px;display:flex;gap:8px">
+          <button class="btn btn-sm btn-primary" onclick="saveCardProvider('${id}')">Save Provider Settings</button>
+          ${!cs.using_platform_default ? `<button class="btn btn-sm btn-outline" onclick="clearCardProvider('${id}')">Revert to Platform Default</button>` : ''}
+        </div>
+      </div>`;
+    openModal(o.name, body);
+    qsa('#otabs button').forEach(b => b.addEventListener('click', () => {
+      qsa('#otabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+      ['info','email','cards'].forEach(t => qs('#otab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+    }));
+  } catch (err) { toast(err.message, true); }
+}
+
+window.saveOrg = async (id) => {
+  const fields = ['name','subdomain','custom_domain','primary_color','accent_color','support_email','support_phone'];
+  const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
+  try { await api(`/orgs/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+window.saveEmail = async (id) => {
+  const body = { api_key: qs('#em-api_key').value || undefined, sender_email: qs('#em-sender_email').value, sender_name: qs('#em-sender_name').value, reply_to: qs('#em-reply_to').value };
+  try { await api(`/orgs/${id}/email-settings`, { method: 'PUT', body }); toast('Email settings saved'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+window.clearEmail = async (id) => {
+  if (!confirm('Revert this org to the platform default sending account?')) return;
+  try { await api(`/orgs/${id}/email-settings`, { method: 'PUT', body: { clear: true } }); toast('Reverted to platform default'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+window.saveCardProvider = async (id) => {
+  const body = { provider: qs('#cp-provider').value, api_base: qs('#cp-api_base').value, api_key: qs('#cp-api_key').value || undefined };
+  try { await api(`/orgs/${id}/card-provider-settings`, { method: 'PUT', body }); toast('Gift card provider saved'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+window.clearCardProvider = async (id) => {
+  if (!confirm('Revert this org to the platform default gift card provider?')) return;
+  try { await api(`/orgs/${id}/card-provider-settings`, { method: 'PUT', body: { clear: true } }); toast('Reverted to platform default'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+
+qs('#btn-new').addEventListener('click', () => {
+  const body = `<label>Organization Name *</label><input id="n-name">
+    <label>Subdomain</label><input id="n-subdomain" placeholder="e.g. mainorg">`;
+  openModal('New Organization', body, `<button class="btn btn-primary btn-sm" onclick="createOrg()">Create</button>`);
+});
+window.createOrg = async () => {
+  try { await api('/orgs', { method: 'POST', body: { name: qs('#n-name').value, subdomain: qs('#n-subdomain').value } }); toast('Organization created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+</body>
+</html>

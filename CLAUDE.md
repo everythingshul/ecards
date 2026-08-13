@@ -3,14 +3,16 @@
 ## What this is
 Season-based gift card assistance management: shuls register + e-sign a contract,
 admin approves and allocates applicant slots, shuls submit applicants, admin
-approves applicants and issues disccardpromos.com gift cards, and participating
-stores have a self-service billing portal. Deploy target: `ecards.everythingshul.com`.
+approves applicants and issues gift cards (via a per-org configurable provider),
+and participating stores apply/onboard and get a self-service portal with
+billing. Multi-org from one account, each org can run its own branding, email
+sending account, and gift card provider. Deploy target: `ecards.everythingshul.com`.
 
 ## Stack (mirrors the existing "Mamudem" product's conventions in this org)
 - **Backend:** Node.js + Express (ES modules), SQLite via `better-sqlite3`
 - **Frontend:** Vanilla HTML/CSS/JS, no framework/build step
 - **PDF contracts:** `pdf-lib` (generated + signature-stamped in-process)
-- **Email:** Nodemailer (Gmail SMTP by default — same pattern as Mamudem)
+- **Email:** Brevo transactional API (platform default + optional per-org account)
 - **Spreadsheet import:** `xlsx` (reads both .csv and .xlsx)
 - **Auth:** JWT, bcrypt password hashing
 
@@ -23,22 +25,26 @@ src/
     auth.js               — JWT auth, role guards
     permissions.js         — Field-level + page-level RBAC (see "Permissions" below)
   services/
-    mail.js                — Branded email templates + send
+    mail.js                — Brevo send + branded templates, per-org sender resolution
     pdf.js                  — Contract PDF generation + e-signature stamping
-    giftcard.js              — disccardpromos.com adapter (MOCK MODE until keys set — see below)
     duplicates.js             — Duplicate detection + account pause/unpause
     importer.js                — CSV/XLSX parsing + template generation
+    cardProviders/
+      index.js                  — Per-org gift card provider registry (getProvider(orgId))
+      restAdapter.js              — Shared REST adapter factory (MOCK MODE until configured)
   routes/
     auth.js, users.js, orgs.js, seasons.js, settings.js,
     shuls.js, applicants.js, cards.js, stores.js, forms.js, dashboard.js
 frontend/
   css/theme.css           — Brand tokens (deep espresso brown + antique gold, from the org logo)
-  js/app.js                — Auth/api/toast/modal/sidebar/signature-pad helpers, shared by every page
-  index.html, apply.html, login.html, sign-contract.html, accept-invite.html,
-  forgot-password.html, reset-password.html, form.html (generic public form renderer)
-  admin/                  — Internal staff/admin app (dashboard, shuls, applicants, cards, stores, forms, users, settings)
+  js/app.js                — Auth/api/toast/modal/sidebar/signature-pad/compare-table helpers, shared by every page
+  index.html, apply.html, apply-store.html, login.html, sign-contract.html,
+  accept-invite.html, forgot-password.html, reset-password.html,
+  form.html (generic public form renderer)
+  admin/                  — Internal staff/admin app (dashboard, shuls, applicants, cards, stores,
+                             forms, users, settings, organizations [super_admin only])
   shul-portal/            — Shul login: their own applicants, bulk upload, contract status
-  store-portal/           — Store login: overview + billing
+  store-portal/           — Store login: onboarding wizard, overview, billing
 ```
 
 ## Data model highlights
@@ -53,7 +59,10 @@ frontend/
   phone / email collisions. A match creates a `duplicate_flags` row and pauses
   **both** records' accounts (`is_paused=1`) — logins are blocked (HTTP 423) and
   shul/applicant actions are rejected until an admin resolves or bypasses the
-  flag from the Shuls/Applicants > Duplicates panel.
+  flag. The Shuls/Applicants > Duplicates panel lists open flags and can open a
+  **full side-by-side comparison** (`renderCompareTable()` in `app.js`, fed by
+  `GET /shuls|applicants/duplicates/open` which now returns the complete record
+  for both sides, differing fields highlighted) before bypassing or resolving.
 - **Field-level RBAC** (`middleware/permissions.js`): each internal user gets a
   `permissions` row per resource (`shuls`, `applicants`, `cards`, `stores`,
   `forms`, `users`, `settings`, `dashboard`) with `can_view`/`can_edit`/
@@ -68,25 +77,65 @@ frontend/
 - **Audit trail**: `audit_log` records create/update/approve/esign/etc with
   before/after JSON; nothing is ever hard-deleted (deactivate/reject flags only).
 
-## disccardpromos.com integration — IMPORTANT
-`src/services/giftcard.js` is the **only** file that talks to disccardpromos.
-It runs in **MOCK MODE** (simulated card ids/activation, empty transaction
-feed) until both `DISCCARDPROMOS_API_BASE` and `DISCCARDPROMOS_API_KEY` are
-set — the admin Cards page shows a banner whenever mock mode is active. Their
-real endpoint paths/payloads weren't available to confirm at build time (their
-docs host blocked automated fetching from this environment); the function
-signatures (`assignCard`, `activateCard`, `deactivateCard`, `getCardStatus`,
-`listTransactions`, `listAllTransactions`) already match what `routes/cards.js`
-needs — wire the real paths into that one file once confirmed with their team,
-nothing else in the app has to change.
+## Gift card providers — per-org, not hardcoded
+`src/services/cardProviders/index.js` is the registry `routes/cards.js` calls
+(`getProvider(orgId)`) — **every organization can run a completely different
+vendor/account**, configured by a super_admin under Admin > Organizations >
+Gift Card Provider (`org_card_provider_settings` table: provider, api_base,
+api_key). No org config → falls back to the platform-wide
+`DISCCARDPROMOS_API_BASE`/`DISCCARDPROMOS_API_KEY` env vars → no config at all
+→ **mock mode** (simulated card ids/activation, empty transaction feed; the
+admin Cards page shows a banner whenever mock mode is active for that org).
+
+Both currently-registered provider keys (`disccardpromos`, `generic_rest`) are
+built from the same `restAdapter.js` factory implementing a conventional REST
+contract (`POST /cards/assign`, `POST /cards/:id/activate`, etc) — this is a
+best-guess placeholder shape since disccardpromos.com's docs host blocked
+automated fetching from the build environment. **If a vendor's real API turns
+out to need a different shape**, add a new factory function in
+`cardProviders/` and register it under a new key in `index.js`'s
+`PROVIDER_FACTORIES` map — `routes/cards.js` and the rest of the app never
+change, since every adapter exposes the same method signatures (`assignCard`,
+`activateCard`, `deactivateCard`, `getCardStatus`, `listTransactions`,
+`listAllTransactions`).
+
+## Email — Brevo, per-org sending accounts
+`src/services/mail.js` sends via the Brevo transactional API
+(`https://api.brevo.com/v3/smtp/email`). The platform default sends from
+`everythingshul.com` (`BREVO_API_KEY` / `EMAIL_DEFAULT_SENDER` /
+`EMAIL_DEFAULT_SENDER_NAME` env vars). Any org can be given its **own** Brevo
+account + verified sender identity — configured by a super_admin under Admin >
+Organizations > Email Settings (`org_email_settings` table). Every
+`sendMail(orgId, to, subject, html)` call resolves that org's settings first,
+falling back to the platform default; email branding (name/colors in the
+template wrapper) also follows the org. No API key configured anywhere →
+dry-run mode, emails are logged to console instead of sent (so the app is
+fully testable without credentials).
+
+## Store onboarding
+Mirrors the shul flow: `apply-store.html` is a public application form
+(`POST /api/stores/apply`, no auth) that creates a `pending` store with
+`source='application'` (vs. `'admin'` for ones the admin adds directly from
+Admin > Stores). Either way, an admin invites the store to its portal
+(`POST /stores/:id/invite`) the same way shuls are invited. On first login, a
+store with an incomplete onboarding (`onboarding_step < 3`) is routed to
+`store-portal/onboarding.html`, a 3-step wizard (confirm store/contact info →
+owner/billing contact + agree to program terms → done) that
+`PUT /stores/:id/onboarding` persists; completing it flips `setup_status` from
+`pending` to `in_progress` (final `active` status remains an admin call, since
+that typically also means the admin finished setting them up on the card
+processor side). The Admin > Stores list/detail shows source and onboarding
+progress; a dashboard banner nags an incomplete store until they finish.
 
 ## Required external setup to go fully live
-1. **SMTP** — `SMTP_USER` / `SMTP_PASS` (Gmail app password). Without it, emails
-   just log to console (dry-run) so the app is still fully usable for testing.
+1. **Brevo** — `BREVO_API_KEY` for the platform default sender; individual orgs
+   can set their own key in Admin > Organizations. Without any key, email is
+   dry-run (console only) — the app is fully usable for testing regardless.
 2. **Google Maps** — `GOOGLE_MAPS_API_KEY` (restrict to your domain in Google
    Cloud Console; Places API + Maps JavaScript API enabled). Without it, address
    fields fall back to plain manual text entry — nothing breaks.
-3. **disccardpromos.com** — see above.
+3. **Gift card provider(s)** — see above; configure per-org in Admin >
+   Organizations, or set the platform-default `DISCCARDPROMOS_API_BASE`/`_KEY`.
 4. **DNS** — point `ecards.everythingshul.com` (and any per-org custom domain)
    at the Render service; `organizations.custom_domain` / `.subdomain` resolve
    branding per-host via `/api/orgs/resolve`.
@@ -100,8 +149,9 @@ nothing else in the app has to change.
 - **ES modules** everywhere, matching the sibling Mamudem product.
 - **No build step** — plain HTML files under `frontend/`, one shared
   `js/app.js` with an `api()` fetch wrapper, `Auth` (JWT in localStorage),
-  `renderShell()` (sidebar app shell), `openModal()`, and a small canvas-based
-  signature pad used by both the public contract flow and any future e-sign need.
+  `renderShell()` (sidebar app shell), `openModal()`, `renderCompareTable()`,
+  and a small canvas-based signature pad used by both the public contract flow
+  and any future e-sign need.
 - **Contract signing flow**: a shul filling the public form (`apply.html`)
   generates + signs the contract in the same sitting; shuls added by admin or
   mass-upload get emailed a signing link instead (`send-contract` /
@@ -109,20 +159,25 @@ nothing else in the app has to change.
   `contracts` table and `sign-contract.html` page.
 - **Permissions are enforced server-side**, not just hidden in the UI — every
   protected route runs through `requirePermission()` and `redact()`.
+- **Every vendor integration (email, gift cards) is per-org and pluggable** —
+  see the two sections above. Nothing in the app assumes a single global
+  account for either.
 
 ## Not yet built / explicitly out of scope this pass
-- Real disccardpromos.com wiring (mock mode — see above).
+- Real disccardpromos.com endpoint confirmation (mock mode — see above).
 - Logo file upload UI (organizations.logo_url exists; no upload endpoint yet).
-- Scheduled/cron polling of disccardpromos transactions (manual "Sync Now"
-  button exists per card; a periodic job would call the same `giftcard.js`
-  functions on a timer once the real API is live).
-- Multi-file "which pages a user can see" is implemented; a dedicated
-  audit-log viewer UI is not (data is fully captured in `audit_log`, just no
-  page renders it yet).
+- Scheduled/cron polling of gift card transactions (manual "Sync Now" button
+  exists per card; a periodic job would call the same provider adapter
+  functions on a timer once a real API is live).
+- A dedicated audit-log viewer UI (data is fully captured in `audit_log`, just
+  no page renders it yet).
+- Store e-signature/contract (stores currently just check an "I agree" box in
+  the onboarding wizard — no PDF, unlike the shul contract flow. Say the word
+  if you want the same e-sign treatment stores get as shuls).
 - CSV template for XCLS specifically — `xlsx` reads both `.xlsx` and `.csv`;
   "XCLS" wasn't a recognized format so it's treated as a possible typo for XLS/XLSX.
 
 ## Deployment
 1. `npm install`
-2. Set env vars from `render.yaml` (SMTP, JWT_SECRET, APP_URL, etc.)
+2. Set env vars from `render.yaml` (BREVO_API_KEY, JWT_SECRET, APP_URL, etc.)
 3. `npm start` (or `render.yaml` on Render — same pattern as the Mamudem service)

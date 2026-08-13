@@ -11,27 +11,30 @@
 Auth.requireAuth();
 renderShell('/admin/stores.html', `
   <div class="flex-between"><h2>Participating Stores</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Add Store</button></div>
-  <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+  <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select><select id="f-source"><option value="">All sources</option><option value="application">Self-Applied</option><option value="admin">Admin Added</option></select></div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Store</th><th>Manager</th><th>Owner</th><th>Setup Status</th><th></th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th>Store</th><th>Manager</th><th>Owner</th><th>Setup Status</th><th>Onboarding</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
 
-let state = { search:'', status:'' };
+let state = { search:'', status:'', source:'' };
 async function load() {
   const params = new URLSearchParams({ search: state.search, setup_status: state.status });
   try {
-    const { stores } = await api('/stores?' + params);
+    let { stores } = await api('/stores?' + params);
+    if (state.source) stores = stores.filter(s => (s.source || 'admin') === state.source);
     qs('#tbody').innerHTML = stores.length ? stores.map(s => `<tr>
-        <td><strong>${esc(s.name)}</strong><br><span class="small-muted">${esc(s.address||'')} ${esc(s.city||'')}, ${esc(s.state||'')}</span></td>
+        <td><strong>${esc(s.name)}</strong>${s.source === 'application' ? ' ' + badge('applied','pending') : ''}<br><span class="small-muted">${esc(s.address||'')} ${esc(s.city||'')}, ${esc(s.state||'')}</span></td>
         <td>${esc(s.manager_name||'—')}<br><span class="small-muted">${esc(s.manager_phone||'')}</span></td>
         <td>${esc(s.owner_name||'—')}<br><span class="small-muted">${esc(s.owner_phone||'')}</span></td>
         <td>${badge(s.setup_status,s.setup_status)}${s.has_provider_account ? ' <span class="small-muted">(existing account)</span>' : ''}</td>
+        <td>${(s.onboarding_step||0) >= 3 ? badge('complete','active') : (s.portal_user_id ? `Step ${s.onboarding_step||0} of 3` : 'Not invited')}</td>
         <td><button class="btn btn-sm btn-outline" onclick="openStore('${s.id}')">Manage</button></td>
-      </tr>`).join('') : '<tr><td colspan="5" class="empty-state">No stores yet.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="6" class="empty-state">No stores yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
+qs('#f-source').addEventListener('change', () => { state.source = qs('#f-source').value; load(); });
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; load(); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -47,6 +50,7 @@ async function openStore(id) {
           <div><label>Store Name</label><input id="e-name" value="${esc(s.name)}"></div>
           <div><label>Setup Status</label><select id="e-status"><option ${s.setup_status==='pending'?'selected':''}>pending</option><option ${s.setup_status==='in_progress'?'selected':''}>in_progress</option><option ${s.setup_status==='active'?'selected':''}>active</option><option ${s.setup_status==='inactive'?'selected':''}>inactive</option></select></div>
         </div>
+        <p class="small-muted">Source: ${s.source === 'application' ? 'Self-applied' : 'Added by admin'} · Onboarding: ${(s.onboarding_step||0) >= 3 ? 'Complete' : (s.portal_user_id ? `Step ${s.onboarding_step||0} of 3` : 'Not yet invited to portal')}</p>
         <label>Address</label><input id="e-address" value="${esc(s.address||'')}">
         <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(s.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(s.state||'')}"></div></div>
         <label>Phone</label><input id="e-phone" value="${esc(s.phone||'')}">

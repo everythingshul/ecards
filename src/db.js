@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS seasons (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS org_card_provider_settings (
+  org_id TEXT PRIMARY KEY REFERENCES organizations(id),
+  provider TEXT DEFAULT 'disccardpromos',
+  api_base TEXT,
+  api_key TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS org_email_settings (
+  org_id TEXT PRIMARY KEY REFERENCES organizations(id),
+  provider TEXT DEFAULT 'brevo',
+  api_key TEXT,
+  sender_email TEXT,
+  sender_name TEXT,
+  reply_to TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ===================== Users / RBAC =====================
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -218,6 +236,10 @@ CREATE TABLE IF NOT EXISTS stores (
   has_provider_account INTEGER DEFAULT 0, -- already had a disccardpromos account
   provider_store_id TEXT,
   portal_user_id TEXT REFERENCES users(id),
+  source TEXT DEFAULT 'admin',        -- admin | application (self-submitted)
+  onboarding_step INTEGER DEFAULT 0,  -- 0=not started .. 3=complete, driven by the store's own portal wizard
+  onboarding_completed_at TEXT,
+  agreed_terms_at TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -321,6 +343,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id)
 // Guarded additive migrations (safe to re-run; never destructive).
 function safeAlter(sql) { try { db.exec(sql); } catch (e) { /* column already exists */ } }
 safeAlter(`ALTER TABLE users ADD COLUMN phone TEXT`);
+safeAlter(`ALTER TABLE stores ADD COLUMN source TEXT DEFAULT 'admin'`);
+safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_step INTEGER DEFAULT 0`);
+safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_completed_at TEXT`);
+safeAlter(`ALTER TABLE stores ADD COLUMN agreed_terms_at TEXT`);
 
 // ---------------------------------------------------------------------------
 // Seed a default organization + super admin on first boot so the app is usable

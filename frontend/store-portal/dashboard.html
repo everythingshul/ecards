@@ -11,12 +11,17 @@
 Auth.requireAuth();
 renderShell('/store-portal/dashboard.html', `
   <h2>Store Overview</h2>
+  <div id="onboarding-banner"></div>
   <div class="card" id="wrap">Loading…</div>
 `);
 (async () => {
   const u = Auth.user();
   try {
     const { store: s, transactionTotals } = await api(`/stores/${u.store_id}`);
+    if ((s.onboarding_step || 0) < 3) {
+      qs('#onboarding-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px">
+        <div class="flex-between"><span>Your store setup isn't finished yet.</span><a class="btn btn-sm btn-primary" href="/store-portal/onboarding.html">Finish Setup</a></div></div>`;
+    }
     qs('#wrap').innerHTML = `
       <div class="stat-grid">
         <div class="stat-tile"><div class="num">${badge(s.setup_status, s.setup_status)}</div><div class="label">Setup Status</div></div>

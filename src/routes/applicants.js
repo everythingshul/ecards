@@ -108,7 +108,7 @@ router.post('/:id/approve', requireAdmin, (req, res) => {
   db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
     .run(req.user.id, amount, applicant.id);
   const tmpl = templates.applicantApproved(`${applicant.first_name} ${applicant.last_name}`);
-  if (applicant.email) sendMail(applicant.email, tmpl.subject, tmpl.body);
+  if (applicant.email) sendMail(req.user.org_id, applicant.email, tmpl.subject, tmpl.body);
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
 });
 
@@ -194,8 +194,8 @@ router.get('/duplicates/open', requireAdmin, (req, res) => {
   const rows = db.prepare(`SELECT * FROM duplicate_flags WHERE org_id = ? AND entity_type='applicant' AND status='open' ORDER BY created_at DESC`).all(req.user.org_id);
   const withEntities = rows.map(r => ({
     ...r,
-    entity: db.prepare('SELECT id, first_name, last_name, created_at FROM applicants WHERE id = ?').get(r.entity_id),
-    matched: db.prepare('SELECT id, first_name, last_name, created_at FROM applicants WHERE id = ?').get(r.matched_entity_id),
+    entity: db.prepare('SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id=a.shul_id WHERE a.id = ?').get(r.entity_id),
+    matched: db.prepare('SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id=a.shul_id WHERE a.id = ?').get(r.matched_entity_id),
   }));
   res.json({ flags: withEntities });
 });

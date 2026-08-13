@@ -22,10 +22,12 @@ services:
         sync: false
       - key: SEED_ADMIN_PASSWORD
         sync: false
-      - key: SMTP_USER
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PASS
-        sync: false
+      - key: EMAIL_DEFAULT_SENDER
+        value: noreply@everythingshul.com
+      - key: EMAIL_DEFAULT_SENDER_NAME
+        value: everythingshul
       - key: SUPPORT_EMAIL
         sync: false
       - key: GOOGLE_MAPS_API_KEY

@@ -181,17 +181,39 @@ window.runImport = async () => {
   } catch (err) { toast(err.message, true); }
 };
 
+let dupFlagsCache = [];
+const SHUL_COMPARE_FIELDS = [
+  ['name_en','Name (English)'], ['name_he','Name (Hebrew)'], ['address','Address'], ['city','City'], ['state','State'], ['zip','Zip'],
+  ['ruv_first_name','Rav First Name'], ['ruv_last_name','Rav Last Name'], ['ruv_phone','Rav Phone'],
+  ['gabai_first_name','Gabai First Name'], ['gabai_last_name','Gabai Last Name'], ['gabai_cell','Gabai Cell'], ['gabai_email','Gabai Email'],
+  ['status','Status'], ['slots_allocated','Slots Allocated'], ['source','Source'],
+];
+
 async function showDuplicates() {
   try {
     const { flags } = await api('/shuls/duplicates/open');
+    dupFlagsCache = flags;
     const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
         <strong>${esc(f.entity?.name_en)}</strong> (${fmtDate(f.entity?.created_at)}) may duplicate <strong>${esc(f.matched?.name_en)}</strong> (${fmtDate(f.matched?.created_at)})<br>
         <span class="small-muted">Reason: ${esc(f.reason)}</span>
-        <div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="resolveDup('${f.id}','bypass')">Bypass (not a duplicate)</button> <button class="btn btn-sm btn-primary" onclick="resolveDup('${f.id}','resolve')">Mark Resolved</button></div>
+        <div style="margin-top:10px">
+          <button class="btn btn-sm btn-outline" onclick="compareDup('${f.id}')">Compare Side-by-Side</button>
+          <button class="btn btn-sm btn-outline" onclick="resolveDup('${f.id}','bypass')">Bypass (not a duplicate)</button>
+          <button class="btn btn-sm btn-primary" onclick="resolveDup('${f.id}','resolve')">Mark Resolved</button>
+        </div>
       </div>`).join('') : '<p class="small-muted">No open duplicate flags.</p>';
     openModal('Duplicate Shul Flags', body);
   } catch (err) { toast(err.message, true); }
 }
+window.compareDup = (flagId) => {
+  const f = dupFlagsCache.find(x => x.id === flagId);
+  if (!f) return;
+  const body = `<p class="small-muted">Reason flagged: ${esc(f.reason)}</p>` + renderCompareTable(SHUL_COMPARE_FIELDS, f.entity, f.matched);
+  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">&larr; Back to List</button>
+    <button class="btn btn-outline btn-sm" onclick="resolveDup('${flagId}','bypass')">Bypass</button>
+    <button class="btn btn-primary btn-sm" onclick="resolveDup('${flagId}','resolve')">Mark Resolved</button>`;
+  openModal('Compare Records', body, footer);
+};
 window.resolveDup = async (id, action) => { try { await api(`/shuls/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
 load();

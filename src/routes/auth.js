@@ -50,7 +50,7 @@ router.post('/forgot-password', (req, res) => {
     const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
     const resetUrl = `${process.env.APP_URL || ''}/reset-password.html?token=${token}`;
-    sendMail(user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`);
+    sendMail(user.org_id, user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`);
   }
   res.json({ ok: true });
 });

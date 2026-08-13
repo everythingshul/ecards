@@ -35,7 +35,7 @@ qs('#login-form').addEventListener('submit', async (e) => {
     const { token, user } = await api('/auth/login', { method: 'POST', body: data });
     Auth.set(token, user);
     if (user.role === 'shul') location.href = '/shul-portal/dashboard.html';
-    else if (user.role === 'store') location.href = '/store-portal/dashboard.html';
+    else if (user.role === 'store') location.href = await storeLandingUrl(user);
     else location.href = '/admin/dashboard.html';
   } catch (err) { toast(err.message, true); }
 });

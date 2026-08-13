@@ -34,7 +34,7 @@ router.post('/', (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
-  sendMail(email, 'You\'ve been invited', `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
+  sendMail(req.user.org_id, email, 'You\'ve been invited', `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
   res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id) });
 });
 

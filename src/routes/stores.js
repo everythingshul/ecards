@@ -1,10 +1,28 @@
 import { Router } from 'express';
-import { db, uuid } from '../db.js';
+import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMail, templates } from '../services/mail.js';
 
 const router = Router();
+
+// Public: store self-application (mirrors the shul public form) — spec #9 says
+// stores can be added by admin OR sign up themselves. Starts at setup_status
+// 'pending'; admin reviews and invites to the portal same as an admin-added store.
+router.post('/apply', (req, res) => {
+  const orgId = req.body.org_id || DEFAULT_ORG_ID;
+  const b = req.body || {};
+  if (!b.name || !b.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });
+  const id = uuid();
+  db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
+      owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
+    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', b.phone || '',
+      b.manager_name || '', b.manager_phone || '', b.manager_email || '', b.owner_name || '', b.owner_phone || '', b.owner_email,
+      b.comments || '', b.has_provider_account ? 1 : 0);
+  res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
+});
+
 router.use(auth, requirePermission('stores'));
 
 function scopeWhere(req) {
@@ -80,8 +98,34 @@ router.post('/:id/invite', requireAdmin, (req, res) => {
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
   const portalUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
   const tmpl = templates.storeSetup(store.name, portalUrl);
-  sendMail(email, tmpl.subject, tmpl.body);
+  sendMail(req.user.org_id, email, tmpl.subject, tmpl.body);
   res.json({ ok: true });
+});
+
+// ---- Store portal onboarding wizard ----
+// Steps: 1 = confirm store/contact info, 2 = billing contact + agree to terms, 3 = complete.
+// Callable by the store's own portal login OR an admin walking them through it.
+router.put('/:id/onboarding', (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role === 'store' && store.id !== req.user.store_id) return res.status(403).json({ error: 'Not your store' });
+  if (!['store', 'super_admin', 'org_admin', 'staff'].includes(req.user.role)) return res.status(403).json({ error: 'Not permitted' });
+
+  const { step, info, agree_terms } = req.body || {};
+  if (info) {
+    const fields = ['name', 'address', 'city', 'state', 'zip', 'phone', 'manager_name', 'manager_phone', 'manager_email', 'owner_name', 'owner_phone', 'owner_email'];
+    const sets = fields.filter(f => info[f] !== undefined);
+    if (sets.length) db.prepare(`UPDATE stores SET ${sets.map(f => `${f}=?`).join(',')} WHERE id=?`).run(...sets.map(f => info[f]), store.id);
+  }
+  if (agree_terms) db.prepare(`UPDATE stores SET agreed_terms_at = datetime('now') WHERE id = ?`).run(store.id);
+
+  const newStep = Math.max(store.onboarding_step || 0, +step || 0);
+  const isComplete = newStep >= 3;
+  db.prepare(`UPDATE stores SET onboarding_step = ?, onboarding_completed_at = CASE WHEN ? THEN COALESCE(onboarding_completed_at, datetime('now')) ELSE onboarding_completed_at END,
+      setup_status = CASE WHEN setup_status = 'pending' AND ? THEN 'in_progress' ELSE setup_status END
+    WHERE id = ?`).run(newStep, isComplete ? 1 : 0, newStep > 0 ? 1 : 0, store.id);
+
+  res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
 });
 
 // ---- Billing ----

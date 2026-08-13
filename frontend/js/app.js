@@ -56,6 +56,9 @@ const NAV_ITEMS = [
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
 ];
+const SUPER_ADMIN_NAV_ITEMS = [
+  { href: '/admin/organizations.html', label: 'Organizations', icon: '&#9670;' },
+];
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard.html', label: 'My Applicants' },
   { href: '/shul-portal/upload.html', label: 'Bulk Upload' },
@@ -72,6 +75,7 @@ function renderShell(activeHref, contentHtml) {
   let items = NAV_ITEMS;
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
+  else if (role === 'super_admin') items = items.concat(SUPER_ADMIN_NAV_ITEMS);
   const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}">${i.icon ? `<span>${i.icon}</span>` : ''}${esc(i.label)}</a>`).join('');
   document.body.innerHTML = `
     <div class="app-shell">
@@ -138,6 +142,30 @@ async function loadGoogleMaps() {
       document.head.appendChild(s);
     });
   } catch { /* address autofill unavailable — forms remain fully usable manually */ }
+}
+
+// Side-by-side field comparison table for duplicate review (shuls & applicants).
+// fields: [[key, label], ...]. Differing values get a highlighted background.
+function renderCompareTable(fields, a, b) {
+  const rows = fields.map(([key, label]) => {
+    const av = a?.[key], bv = b?.[key];
+    const differs = String(av ?? '') !== String(bv ?? '');
+    const cellStyle = differs ? 'background:#f9efe0' : '';
+    return `<tr><td class="small-muted" style="white-space:nowrap">${esc(label)}</td><td style="${cellStyle}">${esc(av ?? '—')}</td><td style="${cellStyle}">${esc(bv ?? '—')}</td></tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto"><table>
+    <thead><tr><th></th><th>Record A <span class="small-muted">(${fmtDate(a?.created_at)})</span></th><th>Record B <span class="small-muted">(${fmtDate(b?.created_at)})</span></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// Where to send a just-logged-in store user — onboarding wizard until they've
+// completed all 3 steps, dashboard after.
+async function storeLandingUrl(user) {
+  try {
+    const { store } = await api(`/stores/${user.store_id}`);
+    return (store.onboarding_step || 0) >= 3 ? '/store-portal/dashboard.html' : '/store-portal/onboarding.html';
+  } catch { return '/store-portal/dashboard.html'; }
 }
 
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.
