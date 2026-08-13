@@ -79,38 +79,4 @@ router.put('/:id/email-settings', (req, res) => {
   res.json({ ok: true, using_platform_default: !finalKey });
 });
 
-// ---- Per-org gift card provider — super_admin only. Each org picks its own
-// vendor + credentials (see services/cardProviders); the API key is never
-// echoed back once saved. ----
-router.get('/:id/card-provider-settings', (req, res) => {
-  const org = db.prepare('SELECT id FROM organizations WHERE id = ?').get(req.params.id);
-  if (!org) return res.status(404).json({ error: 'Not found' });
-  const row = db.prepare('SELECT * FROM org_card_provider_settings WHERE org_id = ?').get(org.id);
-  res.json({
-    settings: {
-      provider: row?.provider || 'disccardpromos',
-      api_base: row?.api_base || '',
-      has_api_key: !!row?.api_key,
-      using_platform_default: !(row?.api_base && row?.api_key),
-    },
-  });
-});
-
-router.put('/:id/card-provider-settings', (req, res) => {
-  const org = db.prepare('SELECT id FROM organizations WHERE id = ?').get(req.params.id);
-  if (!org) return res.status(404).json({ error: 'Not found' });
-  const { provider, api_base, api_key, clear } = req.body || {};
-  if (clear) {
-    db.prepare('DELETE FROM org_card_provider_settings WHERE org_id = ?').run(org.id);
-    return res.json({ ok: true, using_platform_default: true });
-  }
-  const existing = db.prepare('SELECT * FROM org_card_provider_settings WHERE org_id = ?').get(org.id);
-  const finalKey = api_key || existing?.api_key || null;
-  db.prepare(`INSERT INTO org_card_provider_settings (org_id, provider, api_base, api_key, updated_at)
-    VALUES (?,?,?,?,datetime('now'))
-    ON CONFLICT(org_id) DO UPDATE SET provider=excluded.provider, api_base=excluded.api_base, api_key=excluded.api_key, updated_at=datetime('now')`)
-    .run(org.id, provider || existing?.provider || 'disccardpromos', api_base || null, finalKey);
-  res.json({ ok: true, using_platform_default: !(api_base && finalKey) });
-});
-
 export default router;

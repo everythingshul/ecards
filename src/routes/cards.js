@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
-import { getProvider } from '../services/cardProviders/index.js';
+import * as giftcard from '../services/giftcard.js';
 
 const router = Router();
 router.use(auth, requirePermission('cards'));
@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
   const rows = db.prepare(`SELECT c.*, a.first_name, a.last_name, a.email, s.name_en as shul_name
     FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN shuls s ON s.id=a.shul_id
     ${where} ORDER BY c.created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
-  res.json({ cards: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize, mockMode: getProvider(req.user.org_id).mockMode });
+  res.json({ cards: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize, mockMode: giftcard.MOCK_MODE });
 });
 
 router.get('/:id', (req, res) => {
@@ -43,7 +43,7 @@ router.post('/assign', requireAdmin, async (req, res) => {
   if (applicant.approval_status !== 'approved') return res.status(400).json({ error: 'Applicant must be approved before a card is assigned' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant is paused pending duplicate resolution' });
   const finalAmount = amount ?? applicant.card_amount ?? 0;
-  const result = await getProvider(req.user.org_id).assignCard({ applicantId: applicant.id, amount: finalAmount });
+  const result = await giftcard.assignCard({ applicantId: applicant.id, amount: finalAmount });
   const id = uuid();
   db.prepare(`INSERT INTO cards (id, org_id, applicant_id, season_id, card_number_masked, provider_card_id, status, amount, assigned_at)
     VALUES (?,?,?,?,?,?,'assigned',?,datetime('now'))`)
@@ -61,7 +61,7 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
   if (!card) return res.status(404).json({ error: 'Not found' });
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'Activation phone number is required' });
-  const result = await getProvider(req.user.org_id).activateCard({ providerCardId: card.provider_card_id, phone });
+  const result = await giftcard.activateCard({ providerCardId: card.provider_card_id, phone });
   db.prepare(`UPDATE cards SET status='activated', activation_phone=?, activated_at=? WHERE id=?`).run(phone, result.activatedAt, card.id);
   db.prepare(`INSERT INTO card_transactions (id, card_id, type, amount, occurred_at) VALUES (?,?,?,0,?)`).run(uuid(), card.id, 'activation', result.activatedAt);
   res.json({ card: db.prepare('SELECT * FROM cards WHERE id = ?').get(card.id) });
@@ -70,7 +70,7 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
 router.post('/:id/deactivate', requireAdmin, async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
-  const result = await getProvider(req.user.org_id).deactivateCard({ providerCardId: card.provider_card_id, reason: req.body?.reason });
+  const result = await giftcard.deactivateCard({ providerCardId: card.provider_card_id, reason: req.body?.reason });
   db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=? WHERE id=?`).run(result.deactivatedAt, card.id);
   res.json({ ok: true });
 });
@@ -79,15 +79,14 @@ router.post('/:id/deactivate', requireAdmin, async (req, res) => {
 router.post('/:id/sync', requireAdmin, async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
-  const provider = getProvider(req.user.org_id);
-  const txns = await provider.listTransactions({ providerCardId: card.provider_card_id, since: card.last_synced_at });
+  const txns = await giftcard.listTransactions({ providerCardId: card.provider_card_id, since: card.last_synced_at });
   const insert = db.prepare(`INSERT OR IGNORE INTO card_transactions (id, card_id, provider_txn_id, type, amount, balance_after, store_name, occurred_at, raw_payload)
     VALUES (?,?,?,?,?,?,?,?,?)`);
   for (const t of txns) {
     insert.run(uuid(), card.id, t.id || t.transaction_id, t.type || (t.amount < 0 ? 'purchase' : 'refund'), t.amount, t.balance_after ?? null, t.store_name || t.merchant || '', t.occurred_at || t.date, JSON.stringify(t));
   }
   db.prepare(`UPDATE cards SET last_synced_at = datetime('now') WHERE id = ?`).run(card.id);
-  res.json({ synced: txns.length, mockMode: provider.mockMode });
+  res.json({ synced: txns.length, mockMode: giftcard.MOCK_MODE });
 });
 
 router.get('/:id/transactions', (req, res) => {

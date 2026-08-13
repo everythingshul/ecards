@@ -44,14 +44,8 @@ CREATE TABLE IF NOT EXISTS seasons (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS org_card_provider_settings (
-  org_id TEXT PRIMARY KEY REFERENCES organizations(id),
-  provider TEXT DEFAULT 'disccardpromos',
-  api_base TEXT,
-  api_key TEXT,
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
+-- Gift cards are intentionally NOT per-org configurable — see services/giftcard.js.
+-- Email (Brevo) IS per-org configurable — see org_email_settings below.
 CREATE TABLE IF NOT EXISTS org_email_settings (
   org_id TEXT PRIMARY KEY REFERENCES organizations(id),
   provider TEXT DEFAULT 'brevo',
