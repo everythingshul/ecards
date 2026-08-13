@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/settings.html', `
+  <h2>Settings</h2>
+  <div class="tabs">
+    <button class="active" data-t="seasons">Seasons</button>
+    <button data-t="fields">Required Fields</button>
+    <button data-t="contract">Contract Template</button>
+  </div>
+
+  <div id="panel-seasons">
+    <div class="card">
+      <div class="flex-between"><h3 style="margin:0">Seasons</h3><button class="btn btn-sm btn-primary" onclick="openNewSeason()">+ New Season</button></div>
+      <div id="seasons-list" style="margin-top:14px">Loading…</div>
+    </div>
+  </div>
+
+  <div id="panel-fields" style="display:none">
+    <div class="card">
+      <h3>Shul Application — Required Fields</h3>
+      <p class="small-muted">Toggle which fields are required on the public shul form, and which fields admins may fill in even when normally locked.</p>
+      <div id="fields-shul"></div>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('shul')">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Applicant Submission — Required Fields</h3>
+      <div id="fields-applicant"></div>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('applicant')">Save</button>
+    </div>
+  </div>
+
+  <div id="panel-contract" style="display:none">
+    <div class="card">
+      <h3>Contract Template Text</h3>
+      <p class="small-muted">This text is inserted into the generated contract PDF body, below the shul/Rav/Gabai details.</p>
+      <textarea id="contract-text" rows="10"></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveContractText()">Save</button>
+    </div>
+  </div>
+`);
+
+qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
+  qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+  ['seasons','fields','contract'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+}));
+
+const ALL_SHUL_FIELDS = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address'];
+const ALL_APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','shul_id','preferred_contact_method','num_children','home_for_yomtov'];
+
+async function loadSeasons() {
+  const { seasons } = await api('/seasons');
+  qs('#seasons-list').innerHTML = seasons.map(s => `<div class="card" style="margin-bottom:10px">
+      <div class="flex-between"><strong>${esc(s.name)}</strong>${s.is_active ? badge('active','active') : badge('inactive','rejected')}</div>
+      <div class="grid-2" style="margin-top:10px">
+        <div><label style="margin-top:0">Default Card Amount</label><input type="number" step="0.01" value="${s.default_card_amount ?? 0}" onchange="updateSeason('${s.id}',{default_card_amount:+this.value})"></div>
+        <div><label style="margin-top:0">Active</label><select onchange="updateSeason('${s.id}',{is_active:this.value==='1'})"><option value="1" ${s.is_active?'selected':''}>Yes</option><option value="0" ${!s.is_active?'selected':''}>No</option></select></div>
+      </div>
+    </div>`).join('') || '<p class="small-muted">No seasons yet.</p>';
+}
+window.updateSeason = async (id, body) => { try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); loadSeasons(); } catch (err) { toast(err.message, true); } };
+window.openNewSeason = () => {
+  const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">`;
+  openModal('New Season', body, `<button class="btn btn-primary btn-sm" onclick="createSeason()">Create</button>`);
+};
+window.createSeason = async () => {
+  try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
+};
+
+async function loadFields() {
+  const [{ fields: shulFields }, { fields: appFields }] = await Promise.all([api('/settings/fields/shul'), api('/settings/fields/applicant')]);
+  renderFieldEditor('fields-shul', ALL_SHUL_FIELDS, shulFields);
+  renderFieldEditor('fields-applicant', ALL_APPLICANT_FIELDS, appFields);
+}
+function renderFieldEditor(containerId, allFields, saved) {
+  const map = Object.fromEntries(saved.map(f => [f.field_key, f]));
+  qs('#'+containerId).innerHTML = `<table><thead><tr><th>Field</th><th>Required</th><th>Admin Override</th><th>Visible</th></tr></thead><tbody>
+    ${allFields.map(f => { const s = map[f] || { is_required:0, is_admin_override:0, is_visible:1 };
+      return `<tr data-field="${f}"><td>${f}</td>
+        <td><input type="checkbox" class="fr-required" ${s.is_required?'checked':''}></td>
+        <td><input type="checkbox" class="fr-override" ${s.is_admin_override?'checked':''}></td>
+        <td><input type="checkbox" class="fr-visible" ${s.is_visible?'checked':''}></td></tr>`; }).join('')}
+  </tbody></table>`;
+}
+window.saveFields = async (type) => {
+  const containerId = type === 'shul' ? 'fields-shul' : 'fields-applicant';
+  const fields = qsa(`#${containerId} tr[data-field]`).map(tr => ({
+    field_key: tr.dataset.field, is_required: tr.querySelector('.fr-required').checked,
+    is_admin_override: tr.querySelector('.fr-override').checked, is_visible: tr.querySelector('.fr-visible').checked,
+  }));
+  try { await api(`/settings/fields/${type}`, { method: 'PUT', body: { fields } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
+async function loadContractText() {
+  const { settings } = await api('/settings');
+  qs('#contract-text').value = settings.contract_template_text || '';
+}
+window.saveContractText = async () => { try { await api('/settings', { method: 'PUT', body: { contract_template_text: qs('#contract-text').value } }); toast('Saved'); } catch (err) { toast(err.message, true); } };
+
+loadSeasons(); loadFields(); loadContractText();
+</script>
+</body>
+</html>

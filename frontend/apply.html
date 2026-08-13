@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shul Registration — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<div class="public-wrap">
+  <div class="public-header">
+    <div class="dot"><span>&#9670;</span></div>
+    <h1>Shul Registration</h1>
+    <p class="small-muted">Fill out your shul's information below. After submitting, you'll review and sign your season contract right here.</p>
+  </div>
+
+  <form id="apply-form" class="card">
+    <div class="section-title">Shul Information</div>
+    <div class="grid-2">
+      <div><label>Shul Name (English) <span class="req">*</span></label><input name="name_en" required></div>
+      <div><label>Shul Name (Hebrew)</label><input name="name_he" dir="rtl"></div>
+    </div>
+    <label>Shul Address <span class="req">*</span></label>
+    <input id="shul_address" name="address" required autocomplete="off">
+    <div class="grid-2">
+      <div><label>City <span class="req">*</span></label><input id="shul_city" name="city" required></div>
+      <div><label>State <span class="req">*</span></label><input id="shul_state" name="state" required></div>
+    </div>
+    <label>Zip <span class="req">*</span></label>
+    <input id="shul_zip" name="zip" required style="max-width:160px">
+    <input type="hidden" id="shul_place_id" name="place_id"><input type="hidden" id="shul_lat" name="lat"><input type="hidden" id="shul_lng" name="lng">
+
+    <div class="section-title">Rav Information</div>
+    <div class="grid-2">
+      <div><label>First Name <span class="req">*</span></label><input name="ruv_first_name" required></div>
+      <div><label>Last Name <span class="req">*</span></label><input name="ruv_last_name" required></div>
+    </div>
+    <label>Phone Number <span class="req">*</span></label><input name="ruv_phone" required>
+    <label>Address</label><input id="ruv_address" name="ruv_address" autocomplete="off">
+    <div class="grid-2">
+      <div><label>City</label><input id="ruv_city" name="ruv_city"></div>
+      <div><label>State</label><input id="ruv_state" name="ruv_state"></div>
+    </div>
+    <label>Zip</label><input id="ruv_zip" name="ruv_zip" style="max-width:160px">
+
+    <div class="section-title">Gabai Information</div>
+    <div class="grid-2">
+      <div><label>First Name <span class="req">*</span></label><input name="gabai_first_name" required></div>
+      <div><label>Last Name <span class="req">*</span></label><input name="gabai_last_name" required></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Cell Number <span class="req">*</span></label><input name="gabai_cell" required></div>
+      <div><label>Email <span class="req">*</span></label><input type="email" name="gabai_email" required></div>
+    </div>
+    <label>Address</label><input id="gabai_address" name="gabai_address" autocomplete="off">
+    <div class="grid-2">
+      <div><label>City</label><input id="gabai_city" name="gabai_city"></div>
+      <div><label>State</label><input id="gabai_state" name="gabai_state"></div>
+    </div>
+    <label>Zip</label><input id="gabai_zip" name="gabai_zip" style="max-width:160px">
+
+    <div style="margin-top:26px;text-align:right">
+      <button type="submit" class="btn btn-primary" id="submit-btn">Continue to Contract &rarr;</button>
+    </div>
+  </form>
+
+  <div class="card" id="contract-section" style="display:none;margin-top:20px">
+    <h3>Review & Sign Your Contract</h3>
+    <p class="small-muted">Please review your season participation agreement below, then sign to complete registration.</p>
+    <iframe id="contract-frame" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px" src=""></iframe>
+    <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
+    <input id="signer_name" placeholder="Type your full legal name">
+    <label>Signature <span class="req">*</span> <span class="small-muted">(draw with mouse or finger)</span></label>
+    <canvas id="sig-pad"></canvas>
+    <div style="margin-top:8px"><button type="button" class="btn btn-outline btn-sm" id="clear-sig">Clear Signature</button></div>
+    <div style="margin-top:20px;text-align:right">
+      <button class="btn btn-primary" id="sign-btn">Sign & Submit Application</button>
+    </div>
+  </div>
+
+  <div class="card" id="done-section" style="display:none;text-align:center">
+    <h3>&#10003; Application Submitted</h3>
+    <p id="done-message" class="small-muted"></p>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+let shulId = null, signToken = null, sigPad = null;
+
+loadGoogleMaps().then(() => {
+  attachPlacesAutocomplete('shul_address', { address:'shul_address', city:'shul_city', state:'shul_state', zip:'shul_zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });
+  attachPlacesAutocomplete('ruv_address', { address:'ruv_address', city:'ruv_city', state:'ruv_state', zip:'ruv_zip' });
+  attachPlacesAutocomplete('gabai_address', { address:'gabai_address', city:'gabai_city', state:'gabai_state', zip:'gabai_zip' });
+});
+
+qs('#apply-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    const { shul, duplicate, message } = await api('/shuls/apply', { method: 'POST', body: data });
+    shulId = shul.id;
+    if (duplicate) {
+      qs('#apply-form').style.display = 'none';
+      qs('#done-section').style.display = 'block';
+      qs('#done-message').textContent = message;
+      return;
+    }
+    const { sign_token } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
+    signToken = sign_token;
+    qs('#apply-form').style.display = 'none';
+    qs('#contract-section').style.display = 'block';
+    qs('#contract-frame').src = `/api/shuls/contract/${signToken}/pdf-preview`;
+    sigPad = initSignaturePad('sig-pad');
+    qs('#clear-sig').onclick = () => sigPad.clear();
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = 'Continue to Contract →';
+  }
+});
+
+qs('#sign-btn').addEventListener('click', async () => {
+  const signerName = qs('#signer_name').value.trim();
+  if (!signerName) return toast('Please type your full name', true);
+  if (!sigPad || sigPad.isEmpty()) return toast('Please draw your signature', true);
+  const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
+  try {
+    await api(`/shuls/contract/${signToken}/sign`, { method: 'POST', body: { signer_name: signerName, signature_data: sigPad.toDataUrl() } });
+    qs('#contract-section').style.display = 'none';
+    qs('#done-section').style.display = 'block';
+    qs('#done-message').textContent = 'Thank you! Your contract has been signed. An administrator will review your application and email you a link to set up your account once approved.';
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = 'Sign & Submit Application';
+  }
+});
+</script>
+</body>
+</html>

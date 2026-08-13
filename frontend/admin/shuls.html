@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shuls — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/shuls.html', `
+  <div class="flex-between">
+    <h2>Shuls</h2>
+    <div class="pill-row">
+      <button class="btn btn-outline btn-sm" id="btn-template">Download Import Template</button>
+      <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
+      <button class="btn btn-primary btn-sm" id="btn-new">+ Add Shul</button>
+    </div>
+  </div>
+  <div class="toolbar">
+    <input id="f-search" placeholder="Search name, city, Rav, Gabai…">
+    <select id="f-status"><option value="">All statuses</option><option value="submitted">Submitted</option><option value="contract_sent">Contract Sent</option><option value="contract_signed">Contract Signed</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
+    <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
+  </div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table id="tbl">
+      <thead><tr>
+        <th data-sort="name_en">Shul</th><th>City / State</th><th>Rav</th><th>Gabai</th>
+        <th data-sort="status">Status</th><th data-sort="slots_allocated">Slots</th><th>Applicants</th><th data-sort="created_at">Submitted</th><th></th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="paginator" id="pager"></div>
+`);
+
+let state = { search:'', status:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
+if (new URLSearchParams(location.search).get('dup') === '1') showDuplicates();
+
+async function load() {
+  const params = new URLSearchParams({ search: state.search, status: state.status, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize });
+  try {
+    const { shuls, total } = await api('/shuls?' + params);
+    if (!shuls.length) { qs('#tbody').innerHTML = '<tr><td colspan="9" class="empty-state">No shuls found.</td></tr>'; }
+    else qs('#tbody').innerHTML = shuls.map(rowHtml).join('');
+    const pages = Math.max(1, Math.ceil(total / state.pageSize));
+    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
+  } catch (err) { toast(err.message, true); }
+}
+function changePage(d) { state.page += d; load(); }
+
+function rowHtml(s) {
+  return `<tr onclick="openShul('${s.id}')" style="cursor:pointer">
+    <td><strong>${esc(s.name_en)}</strong>${s.name_he ? `<br><span dir="rtl" class="small-muted">${esc(s.name_he)}</span>` : ''}${s.is_paused ? ' ' + badge('paused','paused') : ''}</td>
+    <td>${esc(s.city)}, ${esc(s.state)}</td>
+    <td>${esc(s.ruv_first_name)} ${esc(s.ruv_last_name)}<br><span class="small-muted">${esc(s.ruv_phone)}</span></td>
+    <td>${esc(s.gabai_first_name)} ${esc(s.gabai_last_name)}<br><span class="small-muted">${esc(s.gabai_cell)}</span></td>
+    <td>${badge(s.status, s.status)}</td>
+    <td>${s.slots_allocated ?? 0}</td>
+    <td>${s.applicant_count}</td>
+    <td>${fmtDate(s.created_at)}</td>
+    <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openShul('${s.id}')">View</button></td>
+  </tr>`;
+}
+
+qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
+qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
+qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
+  const key = th.dataset.sort;
+  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
+  state.sort = key; load();
+}));
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+qs('#btn-template').addEventListener('click', () => location.href = '/api/shuls/import/template');
+qs('#btn-new').addEventListener('click', () => openShulForm());
+qs('#btn-import').addEventListener('click', () => openImportModal());
+qs('#f-dupes').addEventListener('click', showDuplicates);
+
+async function openShul(id) {
+  try {
+    const { shul, notes, contract, applicants, flags } = await api(`/shuls/${id}`);
+    const body = `
+      <div class="tabs" id="stabs">
+        <button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button>
+        <button data-t="contract">Contract</button><button data-t="applicants">Applicants (${applicants.length})</button>
+      </div>
+      <div id="tab-info">
+        <div class="grid-2">
+          <div><strong>Address</strong><br>${esc(shul.address)}<br>${esc(shul.city)}, ${esc(shul.state)} ${esc(shul.zip)}</div>
+          <div><strong>Status</strong><br>${badge(shul.status, shul.status)} ${shul.is_paused ? badge('paused','paused') : ''}</div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><strong>Rav</strong><br>${esc(shul.ruv_first_name)} ${esc(shul.ruv_last_name)}<br>${esc(shul.ruv_phone)}<br>${esc(shul.ruv_address||'')} ${esc(shul.ruv_city||'')}</div>
+          <div><strong>Gabai</strong><br>${esc(shul.gabai_first_name)} ${esc(shul.gabai_last_name)}<br>${esc(shul.gabai_cell)} · ${esc(shul.gabai_email)}<br>${esc(shul.gabai_address||'')} ${esc(shul.gabai_city||'')}</div>
+        </div>
+        <div class="divider"></div>
+        <label>Slots Allocated</label><input id="edit-slots" type="number" value="${shul.slots_allocated ?? 0}" style="max-width:140px">
+        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open</strong> — resolve from the Shuls > Duplicates review.</div>` : ''}
+      </div>
+      <div id="tab-notes" style="display:none">
+        <div style="display:flex;gap:8px"><input id="new-note" placeholder="Add an internal note…"><button class="btn btn-sm btn-primary" onclick="addShulNote('${id}')">Add</button></div>
+        <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
+      </div>
+      <div id="tab-contract" style="display:none">
+        ${contract ? `<p>Status: ${badge(contract.status, contract.status)}</p>${contract.signed_at ? `<p>Signed by ${esc(contract.signer_name)} on ${fmtDateTime(contract.signed_at)}</p><a class="btn btn-sm btn-outline" href="/api/shuls/${id}/contract/pdf" target="_blank">View Signed PDF</a>` : `<button class="btn btn-sm btn-primary" onclick="resendContract('${id}')">Resend Signing Link</button>`}` : `<p class="small-muted">No contract generated yet.</p><button class="btn btn-sm btn-primary" onclick="sendContract('${id}')">Generate & Email Contract</button>`}
+      </div>
+      <div id="tab-applicants" style="display:none">
+        ${applicants.length ? `<table><thead><tr><th>Name</th><th>Status</th></tr></thead><tbody>${applicants.map(a=>`<tr><td>${esc(a.first_name)} ${esc(a.last_name)}</td><td>${badge(a.approval_status, a.approval_status)}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No applicants submitted yet.</p>'}
+      </div>
+    `;
+    const footer = `
+      ${shul.is_paused ? `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',false)">Unpause</button>` : `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',true)">Pause</button>`}
+      ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : ''}
+      <button class="btn btn-primary btn-sm" onclick="saveShul('${id}')">Save</button>`;
+    openModal(shul.name_en, body, footer);
+    qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
+      qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+      ['info','notes','contract','applicants'].forEach(t => qs('#tab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+    }));
+  } catch (err) { toast(err.message, true); }
+}
+
+window.saveShul = async (id) => {
+  try { await api(`/shuls/${id}`, { method: 'PUT', body: { slots_allocated: +qs('#edit-slots').value } }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+window.addShulNote = async (id) => {
+  const note = qs('#new-note').value.trim(); if (!note) return;
+  try { await api(`/shuls/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openShul(id); } catch (err) { toast(err.message, true); }
+};
+window.approveShul = async (id) => {
+  const slots = prompt('Number of slots to allocate for this shul this season:', qs('#edit-slots')?.value || '0');
+  if (slots === null) return;
+  try { await api(`/shuls/${id}/approve`, { method: 'POST', body: { slots_allocated: +slots } }); toast('Shul approved — account setup email sent'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+window.rejectShul = async (id) => { if (!confirm('Reject this shul application?')) return; try { await api(`/shuls/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.pauseToggle = async (id, pause) => { try { await api(`/shuls/${id}/${pause?'pause':'unpause'}`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.sendContract = async (id) => { try { await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast('Contract emailed'); closeModal(); openShul(id); } catch (err) { toast(err.message, true); } };
+window.resendContract = async (id) => { try { await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast('Contract re-emailed'); } catch (err) { toast(err.message, true); } };
+
+function openShulForm() {
+  const body = `
+    <label>Shul Name (English) *</label><input id="n-name_en">
+    <label>Shul Name (Hebrew)</label><input id="n-name_he" dir="rtl">
+    <label>Address *</label><input id="n-address">
+    <div class="grid-2"><div><label>City *</label><input id="n-city"></div><div><label>State *</label><input id="n-state"></div></div>
+    <label>Zip *</label><input id="n-zip" style="max-width:160px">
+    <div class="divider"></div>
+    <div class="grid-2"><div><label>Rav First Name *</label><input id="n-ruv_first_name"></div><div><label>Rav Last Name *</label><input id="n-ruv_last_name"></div></div>
+    <label>Rav Phone *</label><input id="n-ruv_phone">
+    <div class="divider"></div>
+    <div class="grid-2"><div><label>Gabai First Name *</label><input id="n-gabai_first_name"></div><div><label>Gabai Last Name *</label><input id="n-gabai_last_name"></div></div>
+    <div class="grid-2"><div><label>Gabai Cell *</label><input id="n-gabai_cell"></div><div><label>Gabai Email *</label><input id="n-gabai_email"></div></div>
+    <label>Slots Allocated</label><input id="n-slots_allocated" type="number" value="0" style="max-width:160px">`;
+  openModal('Add Shul', body, `<button class="btn btn-primary btn-sm" onclick="createShul()">Create</button>`);
+}
+window.createShul = async () => {
+  const fields = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','slots_allocated'];
+  const body = Object.fromEntries(fields.map(f => [f, qs('#n-'+f)?.value]));
+  try { await api('/shuls', { method: 'POST', body }); toast('Shul created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+function openImportModal() {
+  const body = `<p class="small-muted">Upload a CSV or Excel file using the template. New shuls are matched for duplicates automatically; both accounts are paused if one is found.</p>
+    <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+    <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-contracts"><label style="margin:0">Automatically email contracts to non-duplicate rows</label></div>
+    <div id="import-result" style="margin-top:14px"></div>`;
+  openModal('Mass Upload Shuls', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
+}
+window.runImport = async () => {
+  const file = qs('#import-file').files[0];
+  if (!file) return toast('Choose a file first', true);
+  const fd = new FormData(); fd.append('file', file); fd.append('send_contracts', qs('#import-contracts').checked);
+  try {
+    const r = await api('/shuls/import', { method: 'POST', isForm: true, body: fd });
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+      (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+async function showDuplicates() {
+  try {
+    const { flags } = await api('/shuls/duplicates/open');
+    const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
+        <strong>${esc(f.entity?.name_en)}</strong> (${fmtDate(f.entity?.created_at)}) may duplicate <strong>${esc(f.matched?.name_en)}</strong> (${fmtDate(f.matched?.created_at)})<br>
+        <span class="small-muted">Reason: ${esc(f.reason)}</span>
+        <div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="resolveDup('${f.id}','bypass')">Bypass (not a duplicate)</button> <button class="btn btn-sm btn-primary" onclick="resolveDup('${f.id}','resolve')">Mark Resolved</button></div>
+      </div>`).join('') : '<p class="small-muted">No open duplicate flags.</p>';
+    openModal('Duplicate Shul Flags', body);
+  } catch (err) { toast(err.message, true); }
+}
+window.resolveDup = async (id, action) => { try { await api(`/shuls/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
+
+load();
+</script>
+</body>
+</html>

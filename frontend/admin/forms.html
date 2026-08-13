@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Form Builder — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/forms.html', `
+  <div class="flex-between"><h2>Form Builder</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Form</button></div>
+  <p class="small-muted">Build custom forms and set them public, limited to a group of shuls, or a single shul/applicant.</p>
+  <div id="forms-list"></div>
+`);
+
+let fieldDraft = [];
+
+async function load() {
+  const { forms } = await api('/forms');
+  qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
+      <div class="flex-between">
+        <div><strong>${esc(f.name)}</strong> <span class="small-muted">/${esc(f.slug)}</span><br><span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${f.schema_json.length} field(s)</span></div>
+        <div class="pill-row">
+          ${f.is_active ? badge('active','active') : badge('inactive','rejected')}
+          <a class="btn btn-sm btn-outline" href="${f.type === 'shul_application' ? '/apply.html' : '/form.html?slug=' + esc(f.slug)}" target="_blank">Preview Link</a>
+          <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
+        </div>
+      </div>
+    </div>`).join('') : '<p class="small-muted">No forms yet.</p>';
+}
+window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { method: 'PUT', body: { is_active: activate === 'true' } }); load(); } catch (err) { toast(err.message, true); } };
+
+qs('#btn-new').addEventListener('click', () => {
+  fieldDraft = [{ key: 'first_name', label: 'First Name', type: 'text', required: true }];
+  openModal('New Form', formBody(), `<button class="btn btn-primary btn-sm" onclick="createForm()">Create Form</button>`);
+});
+
+function formBody() {
+  return `
+    <label>Form Name *</label><input id="f-name">
+    <div class="grid-2">
+      <div><label>Type</label><select id="f-type"><option value="shul_application">Shul Application</option><option value="applicant_application">Applicant Application</option></select></div>
+      <div><label>Visibility</label><select id="f-visibility"><option value="public">Public</option><option value="group">Group of Shuls</option><option value="individual">Individual Shul</option></select></div>
+    </div>
+    <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026">
+    <div class="divider"></div>
+    <div class="flex-between"><h4 style="margin:0">Fields</h4><button type="button" class="btn btn-sm btn-outline" onclick="addField()">+ Add Field</button></div>
+    <div id="field-list"></div>
+  `;
+}
+function renderFields() {
+  qs('#field-list').innerHTML = fieldDraft.map((f, i) => `<div class="card" style="margin:8px 0;padding:12px">
+      <div class="grid-2">
+        <div><label style="margin-top:0">Field Key</label><input value="${esc(f.key)}" onchange="fieldDraft[${i}].key=this.value"></div>
+        <div><label style="margin-top:0">Label</label><input value="${esc(f.label)}" onchange="fieldDraft[${i}].label=this.value"></div>
+      </div>
+      <div class="grid-2">
+        <div><label style="margin-top:0">Type</label><select onchange="fieldDraft[${i}].type=this.value">
+          ${['text','email','tel','number','textarea','checkbox','select'].map(t => `<option ${f.type===t?'selected':''}>${t}</option>`).join('')}
+        </select></div>
+        <div><label style="margin-top:0">Required</label><select onchange="fieldDraft[${i}].required=this.value==='1'"><option value="1" ${f.required?'selected':''}>Yes</option><option value="0" ${!f.required?'selected':''}>No</option></select></div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline" style="margin-top:6px" onclick="removeField(${i})">Remove</button>
+    </div>`).join('');
+}
+window.addField = () => { fieldDraft.push({ key: '', label: '', type: 'text', required: false }); renderFields(); };
+window.removeField = (i) => { fieldDraft.splice(i, 1); renderFields(); };
+setTimeout(renderFields, 0);
+
+window.createForm = async () => {
+  const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft };
+  try { await api('/forms', { method: 'POST', body }); toast('Form created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+</body>
+</html>

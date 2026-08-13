@@ -1,0 +1,29 @@
+import xlsx from 'xlsx';
+
+// Parses an uploaded CSV or XLSX buffer into an array of plain row objects
+// keyed by the header row. Used for shul mass-upload, applicant mass-upload,
+// and shul-portal CSV/XLS applicant submission.
+export function parseSpreadsheet(buffer, filename = '') {
+  const wb = xlsx.read(buffer, { type: 'buffer' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
+}
+
+export function buildCsvTemplate(columns) {
+  const header = columns.join(',');
+  const sample = columns.map(c => '').join(',');
+  return header + '\n' + sample + '\n';
+}
+
+export const SHUL_IMPORT_COLUMNS = [
+  'name_en', 'name_he', 'address', 'city', 'state', 'zip',
+  'ruv_first_name', 'ruv_last_name', 'ruv_phone', 'ruv_address', 'ruv_city', 'ruv_state', 'ruv_zip',
+  'gabai_first_name', 'gabai_last_name', 'gabai_cell', 'gabai_email', 'gabai_address', 'gabai_city', 'gabai_state', 'gabai_zip',
+  'slots_allocated',
+];
+
+export const APPLICANT_IMPORT_COLUMNS = [
+  'first_name', 'last_name', 'marital_status', 'home_phone', 'husband_cell', 'wife_cell', 'email',
+  'address', 'city', 'state', 'zip', 'shul_name',
+  'preferred_contact_method', 'preferred_number', 'num_children', 'home_for_yomtov', 'card_amount', 'comments',
+];

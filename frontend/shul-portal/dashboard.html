@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Applicants — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/shul-portal/dashboard.html', `
+  <div class="flex-between"><h2>My Applicants</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button></div>
+  <div id="slots-banner"></div>
+  <div class="toolbar"><input id="f-search" placeholder="Search name…"></div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table><thead><tr><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="7" class="empty-state">Loading…</td></tr></tbody></table>
+  </div>
+`);
+
+async function load() {
+  const params = new URLSearchParams({ search: qs('#f-search').value || '' });
+  try {
+    const { applicants, total } = await api('/applicants?' + params);
+    qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
+        <td><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused?' '+badge('paused','paused'):''}</td>
+        <td>${esc(a.marital_status||'—')}</td><td>${esc(a.email||a.home_phone||'—')}</td><td>${a.num_children??0}</td>
+        <td>${a.home_for_yomtov?'Yes':'No'}</td><td>${badge(a.approval_status,a.approval_status)}</td><td>${a.card_amount!=null?fmtMoney(a.card_amount):'—'}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="empty-state">No applicants submitted yet.</td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+qs('#f-search').addEventListener('input', () => load());
+qs('#btn-new').addEventListener('click', () => {
+  const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
+    <label>Marital Status</label><select id="n-marital_status"><option value="">—</option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
+    <div class="grid-2"><div><label>Home Phone</label><input id="n-home_phone"></div><div><label>Email</label><input id="n-email"></div></div>
+    <div class="grid-2"><div><label>Husband Cell</label><input id="n-husband_cell"></div><div><label>Wife Cell</label><input id="n-wife_cell"></div></div>
+    <div class="grid-2"><div><label>Preferred Contact</label><select id="n-pcm"><option value="">—</option><option>phone</option><option>text</option><option>email</option></select></div>
+    <div><label>Number To Use</label><select id="n-pn"><option value="">—</option><option>home</option><option>husband</option><option>wife</option></select></div></div>
+    <label>Address</label><input id="n-address">
+    <div class="grid-2"><div><label>City</label><input id="n-city"></div><div><label>State</label><input id="n-state"></div></div>
+    <label>Number of Children</label><input id="n-children" type="number" value="0">
+    <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="n-yomtov"><label style="margin:0">Home for Yom Tov</label></div>
+    <label>Comments</label><textarea id="n-comments" rows="2"></textarea>`;
+  openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Submit</button>`);
+});
+window.createApplicant = async () => {
+  const b = { first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, marital_status: qs('#n-marital_status').value,
+    home_phone: qs('#n-home_phone').value, email: qs('#n-email').value, husband_cell: qs('#n-husband_cell').value, wife_cell: qs('#n-wife_cell').value,
+    preferred_contact_method: qs('#n-pcm').value, preferred_number: qs('#n-pn').value, address: qs('#n-address').value, city: qs('#n-city').value, state: qs('#n-state').value,
+    num_children: +qs('#n-children').value, home_for_yomtov: qs('#n-yomtov').checked, comments: qs('#n-comments').value };
+  try { await api('/applicants', { method: 'POST', body: b }); toast('Applicant submitted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+async function openApplicant(id) {
+  try {
+    const { applicant: a } = await api(`/applicants/${id}`);
+    openModal(`${a.first_name} ${a.last_name}`, `
+      <p><strong>Status:</strong> ${badge(a.approval_status,a.approval_status)}</p>
+      <p><strong>Marital Status:</strong> ${esc(a.marital_status||'—')} &nbsp; <strong>Children:</strong> ${a.num_children??0}</p>
+      <p><strong>Contact:</strong> ${esc(a.preferred_contact_method||'—')} (${esc(a.preferred_number||'—')})</p>
+      <p><strong>Home for Yom Tov:</strong> ${a.home_for_yomtov?'Yes':'No'}</p>
+      <p><strong>Card Amount:</strong> ${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>
+      <p class="small-muted">Editable fields are locked once reviewed by the administrator; contact your admin for changes.</p>
+    `);
+  } catch (err) { toast(err.message, true); }
+}
+load();
+</script>
+</body>
+</html>

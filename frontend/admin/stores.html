@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stores — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/stores.html', `
+  <div class="flex-between"><h2>Participating Stores</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Add Store</button></div>
+  <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table><thead><tr><th>Store</th><th>Manager</th><th>Owner</th><th>Setup Status</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+  </div>
+`);
+
+let state = { search:'', status:'' };
+async function load() {
+  const params = new URLSearchParams({ search: state.search, setup_status: state.status });
+  try {
+    const { stores } = await api('/stores?' + params);
+    qs('#tbody').innerHTML = stores.length ? stores.map(s => `<tr>
+        <td><strong>${esc(s.name)}</strong><br><span class="small-muted">${esc(s.address||'')} ${esc(s.city||'')}, ${esc(s.state||'')}</span></td>
+        <td>${esc(s.manager_name||'—')}<br><span class="small-muted">${esc(s.manager_phone||'')}</span></td>
+        <td>${esc(s.owner_name||'—')}<br><span class="small-muted">${esc(s.owner_phone||'')}</span></td>
+        <td>${badge(s.setup_status,s.setup_status)}${s.has_provider_account ? ' <span class="small-muted">(existing account)</span>' : ''}</td>
+        <td><button class="btn btn-sm btn-outline" onclick="openStore('${s.id}')">Manage</button></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="empty-state">No stores yet.</td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; load(); }, 350));
+qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; load(); });
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+qs('#btn-new').addEventListener('click', () => openStoreForm());
+
+async function openStore(id) {
+  try {
+    const { store: s, billing, transactionTotals } = await api(`/stores/${id}`);
+    const body = `
+      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${billing.length})</button></div>
+      <div id="stab-info">
+        <div class="grid-2">
+          <div><label>Store Name</label><input id="e-name" value="${esc(s.name)}"></div>
+          <div><label>Setup Status</label><select id="e-status"><option ${s.setup_status==='pending'?'selected':''}>pending</option><option ${s.setup_status==='in_progress'?'selected':''}>in_progress</option><option ${s.setup_status==='active'?'selected':''}>active</option><option ${s.setup_status==='inactive'?'selected':''}>inactive</option></select></div>
+        </div>
+        <label>Address</label><input id="e-address" value="${esc(s.address||'')}">
+        <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(s.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(s.state||'')}"></div></div>
+        <label>Phone</label><input id="e-phone" value="${esc(s.phone||'')}">
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><label>Manager Name</label><input id="e-manager_name" value="${esc(s.manager_name||'')}"></div>
+          <div><label>Manager Phone</label><input id="e-manager_phone" value="${esc(s.manager_phone||'')}"></div>
+        </div>
+        <label>Manager Email</label><input id="e-manager_email" value="${esc(s.manager_email||'')}">
+        <div class="grid-2">
+          <div><label>Owner Name</label><input id="e-owner_name" value="${esc(s.owner_name||'')}"></div>
+          <div><label>Owner Phone</label><input id="e-owner_phone" value="${esc(s.owner_phone||'')}"></div>
+        </div>
+        <label>Owner Email</label><input id="e-owner_email" value="${esc(s.owner_email||'')}">
+        <label>Comments</label><textarea id="e-comments" rows="3">${esc(s.comments||'')}</textarea>
+        <div class="checkbox-row" style="margin-top:10px"><input type="checkbox" id="e-has_account" ${s.has_provider_account?'checked':''}><label style="margin:0">Already has a disccardpromos account</label></div>
+        <div class="divider"></div>
+        <p class="small-muted">Transactions: ${transactionTotals.count} · Purchases: ${fmtMoney(transactionTotals.total_purchases)} · Refunds: ${fmtMoney(transactionTotals.total_refunds)}</p>
+      </div>
+      <div id="stab-billing" style="display:none">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div><label style="margin-top:0">Period</label><input id="b-period" placeholder="2026-08" style="width:120px"></div>
+          <div><label style="margin-top:0">Amount Owed</label><input id="b-amount" type="number" step="0.01" style="width:120px"></div>
+          <button class="btn btn-sm btn-primary" onclick="addBilling('${id}')">Add Period</button>
+        </div>
+        <div style="margin-top:14px">${billing.length ? billing.map(b => `<div class="card" style="margin-bottom:10px">
+            <div class="flex-between"><strong>${esc(b.period)}</strong>${badge(b.status,b.status)}</div>
+            <p class="small-muted">Owed: ${fmtMoney(b.amount_owed)} · Paid: ${fmtMoney(b.amount_paid)}</p>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-outline" onclick="markPaid('${b.id}', ${b.amount_owed})">Mark Paid</button>
+              <button class="btn btn-sm btn-outline" onclick="markInvoiced('${b.id}')">Mark Invoiced</button>
+            </div>
+          </div>`).join('') : '<p class="small-muted">No billing periods yet.</p>'}</div>
+      </div>`;
+    const footer = `<button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button><button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
+    openModal(s.name, body, footer);
+    qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
+      qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+      ['info','billing'].forEach(t => qs('#stab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+    }));
+  } catch (err) { toast(err.message, true); }
+}
+
+window.saveStore = async (id) => {
+  const fields = ['name','address','city','state','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments'];
+  const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
+  body.setup_status = qs('#e-status').value; body.has_provider_account = qs('#e-has_account').checked;
+  try { await api(`/stores/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+window.inviteStore = async (id) => { try { await api(`/stores/${id}/invite`, { method: 'POST' }); toast('Invite sent'); } catch (err) { toast(err.message, true); } };
+window.addBilling = async (id) => {
+  const period = qs('#b-period').value.trim(), amount_owed = +qs('#b-amount').value || 0;
+  if (!period) return toast('Enter a period', true);
+  try { await api(`/stores/${id}/billing`, { method: 'POST', body: { period, amount_owed } }); closeModal(); openStore(id); } catch (err) { toast(err.message, true); }
+};
+window.markPaid = async (billingId, amount) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { amount_paid: amount, status: 'paid' } }); toast('Marked paid'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.markInvoiced = async (billingId) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { status: 'invoiced' } }); toast('Marked invoiced'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+
+function openStoreForm() {
+  const body = `<label>Store Name *</label><input id="n-name">
+    <label>Address</label><input id="n-address">
+    <div class="grid-2"><div><label>City</label><input id="n-city"></div><div><label>State</label><input id="n-state"></div></div>
+    <label>Phone</label><input id="n-phone">
+    <div class="grid-2"><div><label>Manager Name</label><input id="n-manager_name"></div><div><label>Manager Phone</label><input id="n-manager_phone"></div></div>
+    <label>Manager Email</label><input id="n-manager_email">
+    <div class="grid-2"><div><label>Owner Name</label><input id="n-owner_name"></div><div><label>Owner Phone</label><input id="n-owner_phone"></div></div>
+    <label>Owner Email</label><input id="n-owner_email">`;
+  openModal('Add Store', body, `<button class="btn btn-primary btn-sm" onclick="createStore()">Create</button>`);
+}
+window.createStore = async () => {
+  const fields = ['name','address','city','state','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email'];
+  const body = Object.fromEntries(fields.map(f => [f, qs('#n-'+f).value]));
+  try { await api('/stores', { method: 'POST', body }); toast('Store created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+</body>
+</html>

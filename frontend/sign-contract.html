@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign Contract — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<div class="public-wrap">
+  <div class="public-header">
+    <div class="dot"><span>&#9670;</span></div>
+    <h1 id="title">Sign Your Contract</h1>
+  </div>
+  <div class="card" id="loading">Loading…</div>
+
+  <div class="card" id="contract-section" style="display:none">
+    <h3 id="shul-name"></h3>
+    <iframe id="contract-frame" style="width:100%;height:460px;border:1px solid var(--border);border-radius:8px" src=""></iframe>
+    <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
+    <input id="signer_name" placeholder="Type your full legal name">
+    <label>Title / Role <span class="small-muted">(e.g. Gabai, Board Member)</span></label>
+    <input id="signer_title">
+    <label>Signature <span class="req">*</span></label>
+    <canvas id="sig-pad"></canvas>
+    <div style="margin-top:8px"><button type="button" class="btn btn-outline btn-sm" id="clear-sig">Clear Signature</button></div>
+    <div style="margin-top:20px;text-align:right">
+      <button class="btn btn-primary" id="sign-btn">Sign Contract</button>
+    </div>
+  </div>
+
+  <div class="card" id="done-section" style="display:none;text-align:center">
+    <h3>&#10003; Signed</h3>
+    <p class="small-muted">Thank you — your contract has been signed. An administrator will follow up shortly.</p>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+const token = new URLSearchParams(location.search).get('token');
+let sigPad = null;
+
+(async () => {
+  if (!token) { qs('#loading').textContent = 'Missing signing link.'; return; }
+  try {
+    const { contract, shul, alreadySigned } = await api(`/shuls/contract/${token}`);
+    qs('#loading').style.display = 'none';
+    if (alreadySigned) { qs('#done-section').style.display = 'block'; qs('#done-section').querySelector('p').textContent = 'This contract has already been signed.'; return; }
+    qs('#contract-section').style.display = 'block';
+    qs('#shul-name').textContent = shul.name_en;
+    qs('#contract-frame').src = `/api/shuls/contract/${token}/pdf-preview`;
+    sigPad = initSignaturePad('sig-pad');
+    qs('#clear-sig').onclick = () => sigPad.clear();
+  } catch (err) {
+    qs('#loading').textContent = err.message;
+  }
+})();
+
+qs('#sign-btn')?.addEventListener('click', async () => {
+  const signerName = qs('#signer_name').value.trim();
+  if (!signerName) return toast('Please type your full name', true);
+  if (!sigPad || sigPad.isEmpty()) return toast('Please draw your signature', true);
+  const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
+  try {
+    await api(`/shuls/contract/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, signature_data: sigPad.toDataUrl() } });
+    qs('#contract-section').style.display = 'none';
+    qs('#done-section').style.display = 'block';
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = 'Sign Contract';
+  }
+});
+</script>
+</body>
+</html>

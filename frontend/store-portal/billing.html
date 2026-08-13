@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billing — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/store-portal/billing.html', `
+  <h2>Billing</h2>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table><thead><tr><th>Period</th><th>Amount Owed</th><th>Amount Paid</th><th>Status</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody></table>
+  </div>
+`);
+(async () => {
+  const u = Auth.user();
+  try {
+    const { billing } = await api(`/stores/${u.store_id}/billing`);
+    qs('#tbody').innerHTML = billing.length ? billing.map(b => `<tr><td>${esc(b.period)}</td><td>${fmtMoney(b.amount_owed)}</td><td>${fmtMoney(b.amount_paid)}</td><td>${badge(b.status,b.status)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty-state">No billing history yet.</td></tr>';
+  } catch (err) { toast(err.message, true); }
+})();
+</script>
+</body>
+</html>

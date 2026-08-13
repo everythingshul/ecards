@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Applicants — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/applicants.html', `
+  <div class="flex-between">
+    <h2>Applicants</h2>
+    <div class="pill-row">
+      <button class="btn btn-outline btn-sm" id="btn-template">Download Import Template</button>
+      <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
+      <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
+      <button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button>
+    </div>
+  </div>
+  <div class="toolbar">
+    <input id="f-search" placeholder="Search name, phone, email…">
+    <select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
+    <select id="f-marital"><option value="">Any marital status</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option><option value="divorced">Divorced</option></select>
+    <select id="f-yomtov"><option value="">Home for Yom Tov — any</option><option value="1">Yes</option><option value="0">No</option></select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
+  </div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table id="tbl">
+      <thead><tr>
+        <th style="width:34px"><input type="checkbox" id="chk-all"></th>
+        <th data-sort="last_name">Name</th><th>Shul</th><th>Marital</th><th>Contact</th><th>Children</th>
+        <th>Home Yom Tov</th><th data-sort="approval_status">Status</th><th data-sort="card_amount">Card $</th><th data-sort="created_at">Submitted</th><th></th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="11" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="paginator" id="pager"></div>
+`);
+
+let state = { search:'', status:'', marital_status:'', home_for_yomtov:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
+let selected = new Set();
+
+async function load() {
+  const params = new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([,v]) => v !== '')));
+  try {
+    const { applicants, total } = await api('/applicants?' + params);
+    qs('#tbody').innerHTML = applicants.length ? applicants.map(rowHtml).join('') : '<tr><td colspan="11" class="empty-state">No applicants found.</td></tr>';
+    const pages = Math.max(1, Math.ceil(total / state.pageSize));
+    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
+    qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
+  } catch (err) { toast(err.message, true); }
+}
+function changePage(d) { state.page += d; load(); }
+
+function contactLine(a) {
+  const method = a.preferred_contact_method || '—';
+  const num = a.preferred_number === 'husband' ? a.husband_cell : a.preferred_number === 'wife' ? a.wife_cell : a.home_phone;
+  return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
+}
+
+function rowHtml(a) {
+  return `<tr>
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}" ${a.is_paused ? 'disabled' : ''}></td>
+    <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused ? ' ' + badge('paused','paused') : ''}</td>
+    <td onclick="openApplicant('${a.id}')" style="cursor:pointer">${esc(a.shul_name||'—')}</td>
+    <td>${esc(a.marital_status||'—')}</td>
+    <td>${contactLine(a)}</td>
+    <td>${a.num_children ?? 0}</td>
+    <td>${a.home_for_yomtov ? 'Yes' : 'No'}</td>
+    <td>${badge(a.approval_status, a.approval_status)}</td>
+    <td>${a.card_amount != null ? fmtMoney(a.card_amount) : '—'}</td>
+    <td>${fmtDate(a.created_at)}</td>
+    <td><button class="btn btn-sm btn-outline" onclick="openApplicant('${a.id}')">View</button></td>
+  </tr>`;
+}
+
+function onCheck(e) {
+  const id = e.target.dataset.id;
+  if (e.target.checked) selected.add(id); else selected.delete(id);
+  qs('#btn-mass-approve').textContent = `Approve Selected (${selected.size})`;
+  qs('#btn-mass-approve').disabled = selected.size === 0;
+}
+qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk:not(:disabled)').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
+
+['search','status','marital','yomtov'].forEach(k => {});
+qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
+qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
+qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
+qs('#f-yomtov').addEventListener('change', () => { state.home_for_yomtov = qs('#f-yomtov').value; state.page = 1; load(); });
+qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
+  const key = th.dataset.sort;
+  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
+  state.sort = key; load();
+}));
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+qs('#btn-template').addEventListener('click', () => location.href = '/api/applicants/import/template');
+qs('#btn-new').addEventListener('click', () => openApplicantForm());
+qs('#btn-import').addEventListener('click', () => openImportModal());
+qs('#f-dupes').addEventListener('click', showDuplicates);
+qs('#btn-mass-approve').addEventListener('click', async () => {
+  const amount = prompt('Card amount to set for all selected (leave blank to use each applicant\\'s existing/default amount):', '');
+  try {
+    const body = { ids: Array.from(selected) };
+    if (amount !== null && amount !== '') body.card_amount = +amount;
+    const r = await api('/applicants/mass-approve', { method: 'POST', body });
+    toast(`Approved ${r.approved}, skipped ${r.skipped} (paused)`);
+    selected.clear(); load();
+  } catch (err) { toast(err.message, true); }
+});
+
+async function openApplicant(id) {
+  try {
+    const { applicant: a, notes, cards, flags } = await api(`/applicants/${id}`);
+    const body = `
+      <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button></div>
+      <div id="atab-info">
+        <div class="grid-2">
+          <div><strong>Shul</strong><br>${esc(a.shul_name||'—')}</div>
+          <div><strong>Status</strong><br>${badge(a.approval_status, a.approval_status)} ${a.is_paused ? badge('paused','paused') : ''}</div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><label>Marital Status</label><select id="e-marital"><option ${a.marital_status==='single'?'selected':''}>single</option><option ${a.marital_status==='married'?'selected':''}>married</option><option ${a.marital_status==='widowed'?'selected':''}>widowed</option><option ${a.marital_status==='divorced'?'selected':''}>divorced</option></select></div>
+          <div><label>Children</label><input id="e-children" type="number" value="${a.num_children??0}"></div>
+        </div>
+        <div class="grid-2">
+          <div><label>Home Phone</label><input id="e-home_phone" value="${esc(a.home_phone||'')}"></div>
+          <div><label>Email</label><input id="e-email" value="${esc(a.email||'')}"></div>
+        </div>
+        <div class="grid-2">
+          <div><label>Husband Cell</label><input id="e-husband_cell" value="${esc(a.husband_cell||'')}"></div>
+          <div><label>Wife Cell</label><input id="e-wife_cell" value="${esc(a.wife_cell||'')}"></div>
+        </div>
+        <div class="grid-2">
+          <div><label>Preferred Contact</label><select id="e-pcm"><option value="">—</option><option ${a.preferred_contact_method==='phone'?'selected':''}>phone</option><option ${a.preferred_contact_method==='text'?'selected':''}>text</option><option ${a.preferred_contact_method==='email'?'selected':''}>email</option></select></div>
+          <div><label>Number To Use</label><select id="e-pn"><option value="">—</option><option ${a.preferred_number==='home'?'selected':''}>home</option><option ${a.preferred_number==='husband'?'selected':''}>husband</option><option ${a.preferred_number==='wife'?'selected':''}>wife</option></select></div>
+        </div>
+        <label>Address</label><input id="e-address" value="${esc(a.address||'')}">
+        <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(a.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(a.state||'')}"></div></div>
+        <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-yomtov" ${a.home_for_yomtov?'checked':''}><label style="margin:0">Home for Yom Tov</label></div>
+        <label>Card Amount ($)</label><input id="e-card" type="number" step="0.01" value="${a.card_amount ?? ''}">
+        <label>Comments</label><textarea id="e-comments" rows="3">${esc(a.comments||'')}</textarea>
+        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open</strong> — resolve from Applicants > Duplicates.</div>` : ''}
+      </div>
+      <div id="atab-notes" style="display:none">
+        <div style="display:flex;gap:8px"><input id="new-anote" placeholder="Add an internal note…"><button class="btn btn-sm btn-primary" onclick="addApplicantNote('${id}')">Add</button></div>
+        <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
+      </div>
+      <div id="atab-cards" style="display:none">
+        ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards.html?card=${c.id}">View transactions &rarr;</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
+      </div>`;
+    const footer = `
+      ${a.is_paused ? '' : (a.approval_status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectApplicant('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveApplicant('${id}')">Approve</button>` : '')}
+      <button class="btn btn-primary btn-sm" onclick="saveApplicant('${id}')">Save</button>`;
+    openModal(`${a.first_name} ${a.last_name}`, body, footer);
+    qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
+      qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+      ['info','notes','cards'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+    }));
+  } catch (err) { toast(err.message, true); }
+}
+
+window.saveApplicant = async (id) => {
+  const body = {
+    marital_status: qs('#e-marital').value, num_children: +qs('#e-children').value, home_phone: qs('#e-home_phone').value,
+    email: qs('#e-email').value, husband_cell: qs('#e-husband_cell').value, wife_cell: qs('#e-wife_cell').value,
+    preferred_contact_method: qs('#e-pcm').value, preferred_number: qs('#e-pn').value, address: qs('#e-address').value,
+    city: qs('#e-city').value, state: qs('#e-state').value, home_for_yomtov: qs('#e-yomtov').checked,
+    card_amount: qs('#e-card').value === '' ? null : +qs('#e-card').value, comments: qs('#e-comments').value,
+  };
+  try { await api(`/applicants/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+window.approveApplicant = async (id) => { try { await api(`/applicants/${id}/approve`, { method: 'POST' }); toast('Approved'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.rejectApplicant = async (id) => { if (!confirm('Reject this applicant?')) return; try { await api(`/applicants/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.trim(); if (!note) return; try { await api(`/applicants/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
+window.assignCard = async (id) => { try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
+
+function openApplicantForm() {
+  const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
+    <label>Shul ID *</label><input id="n-shul_id" placeholder="Paste shul ID from Shuls page">
+    <label>Marital Status</label><select id="n-marital_status"><option value="">—</option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
+    <label>Home Phone</label><input id="n-home_phone">
+    <label>Email</label><input id="n-email">`;
+  openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Create</button>`);
+}
+window.createApplicant = async () => {
+  const body = { first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, shul_id: qs('#n-shul_id').value,
+    marital_status: qs('#n-marital_status').value, home_phone: qs('#n-home_phone').value, email: qs('#n-email').value };
+  try { await api('/applicants', { method: 'POST', body }); toast('Applicant created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+function openImportModal() {
+  const body = `<p class="small-muted">Upload a CSV or Excel file using the template. The <code>shul_name</code> column must match an existing shul name exactly.</p>
+    <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+    <div id="import-result" style="margin-top:14px"></div>`;
+  openModal('Mass Upload Applicants', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
+}
+window.runImport = async () => {
+  const file = qs('#import-file').files[0];
+  if (!file) return toast('Choose a file first', true);
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+      (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+async function showDuplicates() {
+  try {
+    const { flags } = await api('/applicants/duplicates/open');
+    const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
+        <strong>${esc(f.entity?.first_name)} ${esc(f.entity?.last_name)}</strong> may duplicate <strong>${esc(f.matched?.first_name)} ${esc(f.matched?.last_name)}</strong><br>
+        <span class="small-muted">Reason: ${esc(f.reason)}</span>
+        <div style="margin-top:10px"><button class="btn btn-sm btn-outline" onclick="resolveDup('${f.id}','bypass')">Bypass</button> <button class="btn btn-sm btn-primary" onclick="resolveDup('${f.id}','resolve')">Mark Resolved</button></div>
+      </div>`).join('') : '<p class="small-muted">No open duplicate flags.</p>';
+    openModal('Duplicate Applicant Flags', body);
+  } catch (err) { toast(err.message, true); }
+}
+window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
+
+load();
+</script>
+</body>
+</html>

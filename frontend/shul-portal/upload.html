@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulk Upload — everythingshul</title>
+<link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/shul-portal/upload.html', `
+  <h2>Bulk Upload Applicants</h2>
+  <div class="card">
+    <p class="small-muted">Download the template, fill it in (CSV or Excel), then upload. You don't need to include a shul column — applicants are automatically assigned to your shul.</p>
+    <button class="btn btn-outline btn-sm" onclick="location.href='/api/applicants/import/template'">Download Template</button>
+    <div class="divider"></div>
+    <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+    <div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button></div>
+    <div id="import-result" style="margin-top:16px"></div>
+  </div>
+`);
+window.runImport = async () => {
+  const file = qs('#import-file').files[0];
+  if (!file) return toast('Choose a file first', true);
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> submitted, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+      (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
+  } catch (err) { toast(err.message, true); }
+};
+</script>
+</body>
+</html>

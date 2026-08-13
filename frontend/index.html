@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>everythingshul e-cards</title>
+<link rel="stylesheet" href="/css/theme.css">
+<style>
+  body { background: var(--brand-bg); color: var(--text-on-dark); }
+  .hero { max-width: 760px; margin: 0 auto; padding: 90px 20px; text-align: center; }
+  .hero .dot { width: 60px; height: 60px; border-radius: 50%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); display:flex; align-items:center; justify-content:center; margin: 0 auto 24px; }
+  .hero .dot span { color: var(--brand-gold); font-size: 26px; }
+  .hero h1 { color: #fdf7ea; font-size: 34px; }
+  .hero p { color: #c9bda3; font-size: 16px; line-height: 1.6; }
+  .cta-row { display:flex; gap: 14px; justify-content:center; margin-top: 30px; flex-wrap: wrap; }
+  .cards-row { display:grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-top:60px; text-align:left; }
+  .mini-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 20px; }
+  .mini-card h3 { color: var(--brand-gold-light); font-size: 15px; }
+  .mini-card p { color: #c9bda3; font-size: 13px; margin: 0; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="dot"><span>&#9670;</span></div>
+    <h1 id="org-name">everythingshul e-cards</h1>
+    <p>Season-based gift card assistance management for shuls, applicants, and participating stores.</p>
+    <div class="cta-row">
+      <a href="/apply.html" class="btn btn-primary">Register Your Shul</a>
+      <a href="/login.html" class="btn btn-outline" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
+    </div>
+    <div class="cards-row">
+      <div class="mini-card"><h3>For Shuls</h3><p>Submit your contract, get approved, and manage applicant submissions each season.</p></div>
+      <div class="mini-card"><h3>For Applicants</h3><p>Approved through your shul, gift cards are mailed, delivered in person, or via your Gabai.</p></div>
+      <div class="mini-card"><h3>For Stores</h3><p>Participating locations manage setup status and billing through their own portal.</p></div>
+    </div>
+  </div>
+  <script src="/js/app.js"></script>
+  <script>
+    api('/orgs/resolve').then(({ org }) => { if (org?.name) document.getElementById('org-name').textContent = org.name; }).catch(()=>{});
+  </script>
+</body>
+</html>
