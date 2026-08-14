@@ -15,6 +15,7 @@ renderShell('/admin/applicants.html', `
     <div class="pill-row">
       <button class="btn btn-outline btn-sm" id="btn-template">Download Import Template</button>
       <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
+      <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
       <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
       <button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button>
     </div>
@@ -96,7 +97,8 @@ qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
 }));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-qs('#btn-template').addEventListener('click', () => location.href = '/api/applicants/import/template');
+qs('#btn-template').addEventListener('click', () => downloadAuthed('/applicants/import/template', 'applicant_import_template.csv'));
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/applicants/export?' + new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([k,v]) => v !== '' && !['sort','dir','page','pageSize'].includes(k)))), 'applicants.csv'));
 qs('#btn-new').addEventListener('click', () => openApplicantForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
 qs('#f-dupes').addEventListener('click', showDuplicates);

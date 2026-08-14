@@ -29,6 +29,27 @@ async function api(path, { method = 'GET', body, isForm = false } = {}) {
   return data;
 }
 
+// Authenticated file download — plain `location.href = '/api/...'` never
+// sends the Authorization header (this app has no cookie session), so every
+// protected download (CSV/XLSX exports, import templates) must go through
+// this instead: fetch with the auth header, then save the blob.
+async function downloadAuthed(path, fallbackFilename) {
+  const headers = {};
+  if (Auth.token()) headers['Authorization'] = `Bearer ${Auth.token()}`;
+  const res = await fetch(API_BASE + path, { headers });
+  if (res.status === 401) { Auth.logout(); return; }
+  if (!res.ok) { let msg = `Download failed (${res.status})`; try { msg = (await res.json()).error || msg; } catch {} toast(msg, true); return; }
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : fallbackFilename;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function toast(msg, isError = false) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }

@@ -15,6 +15,7 @@ renderShell('/admin/shuls.html', `
     <div class="pill-row">
       <button class="btn btn-outline btn-sm" id="btn-template">Download Import Template</button>
       <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
+      <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
       <button class="btn btn-primary btn-sm" id="btn-new">+ Add Shul</button>
     </div>
   </div>
@@ -73,9 +74,10 @@ qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
 }));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-qs('#btn-template').addEventListener('click', () => location.href = '/api/shuls/import/template');
+qs('#btn-template').addEventListener('click', () => downloadAuthed('/shuls/import/template', 'shul_import_template.csv'));
 qs('#btn-new').addEventListener('click', () => openShulForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/shuls/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'shuls.csv'));
 qs('#f-dupes').addEventListener('click', showDuplicates);
 
 async function openShul(id) {

@@ -7,6 +7,7 @@ import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignature } from '../services/pdf.js';
 import { sendMail, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
+import { sendCsv } from '../services/csv.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -133,6 +134,23 @@ router.get('/', (req, res) => {
     applicant_count: db.prepare('SELECT COUNT(*) c FROM applicants WHERE shul_id = ?').get(s.id).c,
   }));
   res.json({ shuls: redact(withCounts, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize });
+});
+
+// Full-detail CSV export — every field, no pagination, respects the same
+// filters as the list view. Must be registered before /:id.
+router.get('/export', requirePermission('shuls', 'can_export'), (req, res) => {
+  const { search, status, season_id } = req.query;
+  let where = 'WHERE org_id = ?';
+  const params = [req.user.org_id];
+  if (status) { where += ' AND status = ?'; params.push(status); }
+  if (season_id) { where += ' AND season_id = ?'; params.push(season_id); }
+  if (search) {
+    where += ` AND (name_en LIKE ? OR name_he LIKE ? OR city LIKE ? OR ruv_last_name LIKE ? OR gabai_last_name LIKE ?)`;
+    const like = `%${search}%`;
+    params.push(like, like, like, like, like);
+  }
+  const rows = db.prepare(`SELECT * FROM shuls ${where} ORDER BY created_at DESC`).all(...params);
+  sendCsv(res, `shuls-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {

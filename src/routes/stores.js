@@ -3,6 +3,7 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMail, templates } from '../services/mail.js';
+import { sendCsv } from '../services/csv.js';
 
 const router = Router();
 
@@ -43,6 +44,20 @@ router.get('/', (req, res) => {
   if (search) { where += ' AND (name LIKE ? OR city LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
   const stores = db.prepare(`SELECT * FROM stores ${where} ORDER BY created_at DESC`).all(...params);
   res.json({ stores: redact(stores, req.permission.hidden_fields) });
+});
+
+// Full-detail CSV export — every field. Must be registered before /:id.
+router.get('/export', requirePermission('stores', 'can_export'), (req, res) => {
+  const { search, setup_status } = req.query;
+  let { where, params } = scopeWhere(req);
+  if (setup_status) { where += ' AND setup_status = ?'; params.push(setup_status); }
+  if (search) { where += ' AND (name LIKE ? OR city LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  const stores = db.prepare(`SELECT * FROM stores ${where} ORDER BY created_at DESC`).all(...params);
+  const withSpend = stores.map(s => {
+    const totals = db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END),0) total_purchases, COALESCE(SUM(CASE WHEN type='refund' THEN amount ELSE 0 END),0) total_refunds FROM card_transactions WHERE store_id = ?`).get(s.id);
+    return { ...s, total_purchases: totals.total_purchases, total_refunds: totals.total_refunds };
+  });
+  sendCsv(res, `stores-${Date.now()}.csv`, redact(withSpend, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {

@@ -3,6 +3,7 @@ import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import * as giftcard from '../services/giftcard.js';
+import { sendCsv } from '../services/csv.js';
 
 const router = Router();
 router.use(auth, requirePermission('cards'));
@@ -24,6 +25,24 @@ router.get('/', (req, res) => {
     FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN shuls s ON s.id=a.shul_id
     ${where} ORDER BY c.created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
   res.json({ cards: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize, mockMode: giftcard.isMockMode(req.user.org_id) });
+});
+
+// Full-detail CSV export — every field, no pagination. Must be registered before /:id.
+router.get('/export', requirePermission('cards', 'can_export'), (req, res) => {
+  const { search, status, season_id } = req.query;
+  let where = 'WHERE c.org_id = ?';
+  const params = [req.user.org_id];
+  if (status) { where += ' AND c.status = ?'; params.push(status); }
+  if (season_id) { where += ' AND c.season_id = ?'; params.push(season_id); }
+  if (search) {
+    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR c.card_number_masked LIKE ?)`;
+    const like = `%${search}%`;
+    params.push(like, like, like);
+  }
+  const rows = db.prepare(`SELECT c.*, a.first_name, a.last_name, a.email, s.name_en as shul_name
+    FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN shuls s ON s.id=a.shul_id
+    ${where} ORDER BY c.created_at DESC`).all(...params);
+  sendCsv(res, `cards-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {
@@ -93,6 +112,19 @@ router.get('/:id/transactions', (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   res.json({ transactions: db.prepare('SELECT * FROM card_transactions WHERE card_id = ? ORDER BY occurred_at DESC').all(card.id) });
+});
+
+// Full-detail CSV export of every transaction across the org.
+router.get('/transactions/export', requirePermission('cards', 'can_export'), (req, res) => {
+  const { type, store_id } = req.query;
+  let where = 'WHERE c.org_id = ?';
+  const params = [req.user.org_id];
+  if (type) { where += ' AND t.type = ?'; params.push(type); }
+  if (store_id) { where += ' AND t.store_id = ?'; params.push(store_id); }
+  const rows = db.prepare(`SELECT t.*, a.first_name, a.last_name, c.card_number_masked, s.name as resolved_store_name
+    FROM card_transactions t JOIN cards c ON c.id=t.card_id LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN stores s ON s.id=t.store_id
+    ${where} ORDER BY t.occurred_at DESC`).all(...params);
+  sendCsv(res, `transactions-${Date.now()}.csv`, rows);
 });
 
 // All transactions across the org — "see all transactions they make in stores,

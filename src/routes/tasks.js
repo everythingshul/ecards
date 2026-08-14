@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
+import { sendCsv } from '../services/csv.js';
 
 const router = Router();
 router.use(auth, requireAdmin); // internal team feature — staff/org_admin/super_admin only
@@ -27,6 +28,19 @@ router.get('/', (req, res) => {
   // Attach a display label for the linked entity, if any.
   const withEntity = rows.map(t => ({ ...t, entity_label: entityLabel(t.entity_type, t.entity_id) }));
   res.json({ tasks: withEntity, total, page: +page, pageSize: +pageSize });
+});
+
+// Full-detail CSV export. Must be registered before /:id.
+router.get('/export', (req, res) => {
+  const { assigned_to, status, overdue } = req.query;
+  let where = 'WHERE t.org_id = ?';
+  const params = [req.user.org_id];
+  if (assigned_to) { where += ' AND t.assigned_to = ?'; params.push(assigned_to === 'me' ? req.user.id : assigned_to); }
+  if (status) { where += ' AND t.status = ?'; params.push(status); }
+  if (overdue === 'true') { where += ` AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date < date('now')`; }
+  const rows = db.prepare(`SELECT t.*, au.first_name as assignee_first_name, au.last_name as assignee_last_name
+    FROM tasks t LEFT JOIN users au ON au.id = t.assigned_to ${where} ORDER BY t.created_at DESC`).all(...params);
+  sendCsv(res, `tasks-${Date.now()}.csv`, rows.map(t => ({ ...t, entity_label: entityLabel(t.entity_type, t.entity_id) })));
 });
 
 router.get('/:id', (req, res) => {

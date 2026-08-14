@@ -6,6 +6,7 @@ import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { sendMail, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
+import { sendCsv } from '../services/csv.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -48,6 +49,25 @@ router.get('/', (req, res) => {
   const offset = (Math.max(1, +page) - 1) * +pageSize;
   const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
   res.json({ applicants: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize });
+});
+
+// Full-detail CSV export — every field, no pagination, respects the same
+// filters as the list view. Must be registered before /:id.
+router.get('/export', requirePermission('applicants', 'can_export'), (req, res) => {
+  const { search, status, shul_id, season_id, home_for_yomtov, marital_status } = req.query;
+  let { where, params } = scopeWhere(req);
+  if (status) { where += ' AND a.approval_status = ?'; params.push(status); }
+  if (shul_id) { where += ' AND a.shul_id = ?'; params.push(shul_id); }
+  if (season_id) { where += ' AND a.season_id = ?'; params.push(season_id); }
+  if (marital_status) { where += ' AND a.marital_status = ?'; params.push(marital_status); }
+  if (home_for_yomtov !== undefined && home_for_yomtov !== '') { where += ' AND a.home_for_yomtov = ?'; params.push(home_for_yomtov === 'true' || home_for_yomtov === '1' ? 1 : 0); }
+  if (search) {
+    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR a.email LIKE ? OR a.home_phone LIKE ? OR a.husband_cell LIKE ? OR a.wife_cell LIKE ?)`;
+    const like = `%${search}%`;
+    params.push(like, like, like, like, like, like);
+  }
+  const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY a.created_at DESC`).all(...params);
+  sendCsv(res, `applicants-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {
