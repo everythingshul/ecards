@@ -130,7 +130,8 @@ function closeModal() { document.getElementById('ec-modal')?.remove(); }
 // Google Places autocomplete helper — degrades gracefully if no API key configured.
 async function attachPlacesAutocomplete(inputId, fields) {
   const input = document.getElementById(inputId);
-  if (!input || !window.google?.maps?.places) return;
+  if (!input) return;
+  if (!window.google?.maps?.places) { console.warn(`[places] Skipping autocomplete for #${inputId} — Google Places was not loaded (see earlier [places] warning for why).`); return; }
   const ac = new google.maps.places.Autocomplete(input, { types: ['address'] });
   ac.addListener('place_changed', () => {
     const place = ac.getPlace();
@@ -152,14 +153,29 @@ async function loadGoogleMaps() {
   if (window.google?.maps) return;
   try {
     const { googleMapsApiKey } = await api('/config');
-    if (!googleMapsApiKey) return; // no key configured yet — address autofill silently disabled
+    if (!googleMapsApiKey) {
+      // Silent by design for end users (the form stays fully usable without
+      // autofill), but this is the #1 thing to check when someone reports
+      // "address autocomplete isn't working": GOOGLE_MAPS_API_KEY is not set
+      // as an env var on the server.
+      console.warn('[places] Address autocomplete disabled: GOOGLE_MAPS_API_KEY is not set on the server.');
+      return;
+    }
+    // Surfaces Google's own runtime errors (bad key, Maps JavaScript API /
+    // Places API not enabled, billing not enabled, referrer restrictions
+    // blocking this domain) instead of failing silently.
+    window.gm_authFailure = () => console.error('[places] Google Maps authentication failed — check that the API key is valid, unrestricted for this domain, and that the Maps JavaScript API + Places API are enabled with billing active in Google Cloud Console.');
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=places`;
-      s.onload = resolve; s.onerror = reject;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Google Maps script failed to load (network error or invalid key)'));
       document.head.appendChild(s);
     });
-  } catch { /* address autofill unavailable — forms remain fully usable manually */ }
+    if (!window.google?.maps?.places) console.error('[places] Google Maps script loaded but google.maps.places is unavailable — the Places API may not be enabled for this key.');
+  } catch (e) {
+    console.error('[places] Address autocomplete unavailable:', e.message, '— forms remain fully usable manually.');
+  }
 }
 
 // Quick "+ Add Task" flow usable from any detail modal (shul, applicant, ...).
