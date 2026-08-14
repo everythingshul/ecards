@@ -4,6 +4,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import * as giftcard from '../services/giftcard.js';
 import { sendCsv } from '../services/csv.js';
+import { syncOneCard, syncAllCards } from '../services/cardSync.js';
 
 const router = Router();
 router.use(auth, requirePermission('cards'));
@@ -98,14 +99,16 @@ router.post('/:id/deactivate', requireAdmin, async (req, res) => {
 router.post('/:id/sync', requireAdmin, async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
-  const txns = await giftcard.listTransactions(req.user.org_id, { providerCardId: card.provider_card_id, since: card.last_synced_at });
-  const insert = db.prepare(`INSERT OR IGNORE INTO card_transactions (id, card_id, provider_txn_id, type, amount, balance_after, store_name, occurred_at, raw_payload)
-    VALUES (?,?,?,?,?,?,?,?,?)`);
-  for (const t of txns) {
-    insert.run(uuid(), card.id, t.id || t.transaction_id, t.type || (t.amount < 0 ? 'purchase' : 'refund'), t.amount, t.balance_after ?? null, t.store_name || t.merchant || '', t.occurred_at || t.date, JSON.stringify(t));
-  }
-  db.prepare(`UPDATE cards SET last_synced_at = datetime('now') WHERE id = ?`).run(card.id);
-  res.json({ synced: txns.length, mockMode: giftcard.isMockMode(req.user.org_id) });
+  const synced = await syncOneCard(req.user.org_id, card);
+  res.json({ synced, mockMode: giftcard.isMockMode(req.user.org_id) });
+});
+
+// Sweep every assigned/activated card at once — also runs automatically on a
+// background interval (see index.js) so store spend stays live without
+// anyone needing to click in.
+router.post('/sync-all', requireAdmin, async (req, res) => {
+  const result = await syncAllCards(req.user.org_id);
+  res.json({ ...result, mockMode: giftcard.isMockMode(req.user.org_id) });
 });
 
 router.get('/:id/transactions', (req, res) => {

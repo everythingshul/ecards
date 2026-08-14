@@ -10,7 +10,8 @@
 <script>
 Auth.requireAuth();
 renderShell('/admin/cards.html', `
-  <div class="flex-between"><h2>Cards & Transactions</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-export-cards">Export Cards CSV</button><button class="btn btn-outline btn-sm" id="btn-export-txns">Export Transactions CSV</button></div></div>
+  <div class="flex-between"><h2>Cards & Transactions</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-sync-all">Sync All Now</button><button class="btn btn-outline btn-sm" id="btn-export-cards">Export Cards CSV</button><button class="btn btn-outline btn-sm" id="btn-export-txns">Export Transactions CSV</button></div></div>
+  <p class="small-muted">Cards auto-sync with disccardpromos every 15 minutes in the background — use Sync All Now for an immediate refresh.</p>
   <div id="mock-banner"></div>
   <div class="tabs"><button class="active" id="tab-cards-btn">Cards</button><button id="tab-txns-btn">All Transactions</button></div>
   <div id="panel-cards">
@@ -36,6 +37,12 @@ let txnPage = 1;
 qs('#tab-cards-btn').addEventListener('click', () => { qs('#tab-cards-btn').classList.add('active'); qs('#tab-txns-btn').classList.remove('active'); qs('#panel-cards').style.display='block'; qs('#panel-txns').style.display='none'; });
 qs('#tab-txns-btn').addEventListener('click', () => { qs('#tab-txns-btn').classList.add('active'); qs('#tab-cards-btn').classList.remove('active'); qs('#panel-cards').style.display='none'; qs('#panel-txns').style.display='block'; loadTxns(); });
 qs('#btn-export-cards').addEventListener('click', () => downloadAuthed('/cards/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'cards.csv'));
+qs('#btn-sync-all').addEventListener('click', async () => {
+  const btn = qs('#btn-sync-all'); btn.disabled = true; btn.textContent = 'Syncing…';
+  try { const r = await api('/cards/sync-all', { method: 'POST' }); toast(`Checked ${r.cardsChecked} card(s), synced ${r.transactionsSynced} new transaction(s)`); loadCards(); }
+  catch (err) { toast(err.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Sync All Now'; }
+});
 qs('#btn-export-txns').addEventListener('click', () => downloadAuthed('/cards/transactions/export', 'transactions.csv'));
 
 async function loadCards() {

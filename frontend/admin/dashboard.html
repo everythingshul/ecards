@@ -16,6 +16,11 @@ renderShell('/admin/dashboard.html', `
     <div class="flex-between"><h3 style="margin:0">Open Duplicate Flags</h3><a href="/admin/shuls.html?dup=1" class="btn btn-sm btn-outline">Review</a></div>
     <p class="small-muted" id="dup-text"></p>
   </div>
+  <div class="card" id="store-spend-panel" style="display:none;margin-bottom:16px">
+    <div class="flex-between"><h3 style="margin:0">Live Store Spend</h3><a href="/admin/stores.html" class="btn btn-sm btn-outline">View All Stores</a></div>
+    <p class="small-muted" style="margin-top:4px">Total spent across all participating stores: <strong id="total-store-spend"></strong></p>
+    <div id="top-stores" style="margin-top:10px"></div>
+  </div>
   <div class="card">
     <div class="flex-between"><h3 style="margin:0">My Open Tasks</h3><a href="/admin/tasks.html" class="btn btn-sm btn-outline">View All Tasks</a></div>
     <div id="my-tasks" style="margin-top:10px"></div>
@@ -39,6 +44,13 @@ renderShell('/admin/dashboard.html', `
     if (stats.duplicates?.open > 0) {
       qs('#dup-panel').style.display = 'block';
       qs('#dup-text').textContent = `${stats.duplicates.open} record(s) are flagged as possible duplicates and paused pending review.`;
+    }
+    if (stats.topStores) {
+      qs('#store-spend-panel').style.display = 'block';
+      qs('#total-store-spend').textContent = fmtMoney(stats.totalStoreSpend);
+      qs('#top-stores').innerHTML = stats.topStores.length ? stats.topStores.map(s => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span>${esc(s.name)}</span><strong>${fmtMoney(s.total_purchases)}</strong>
+        </div>`).join('') : '<p class="small-muted">No store transactions synced yet.</p>';
     }
   } catch (err) { toast(err.message, true); }
 

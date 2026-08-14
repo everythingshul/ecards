@@ -39,6 +39,14 @@ router.get('/stats', (req, res) => {
   stats.duplicates = {
     open: db.prepare(`SELECT COUNT(*) c FROM duplicate_flags WHERE org_id = ? AND status = 'open'`).get(orgId).c,
   };
+  const storePerm = getPermission(req.user, 'stores');
+  if (storePerm.can_view) {
+    stats.topStores = db.prepare(`SELECT s.id, s.name, COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END),0) total_purchases
+      FROM stores s LEFT JOIN card_transactions t ON t.store_id = s.id
+      WHERE s.org_id = ? GROUP BY s.id ORDER BY total_purchases DESC LIMIT 5`).all(orgId).filter(s => s.total_purchases > 0);
+    stats.totalStoreSpend = db.prepare(`SELECT COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END),0) total
+      FROM card_transactions t JOIN stores s ON s.id = t.store_id WHERE s.org_id = ?`).get(orgId).total;
+  }
   res.json({ stats });
 });
 

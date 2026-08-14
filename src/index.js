@@ -5,6 +5,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { initMail } from './services/mail.js';
 import { sendDueTaskReminders } from './services/reminders.js';
+import { syncAllCards } from './services/cardSync.js';
+import { DEFAULT_ORG_ID } from './db.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -82,3 +84,11 @@ app.listen(PORT, () => console.log(`[ecards] listening on :${PORT}`));
 const REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 setInterval(() => { sendDueTaskReminders().catch(e => console.error('[reminders] check failed', e.message)); }, REMINDER_INTERVAL_MS);
 setTimeout(() => { sendDueTaskReminders().catch(e => console.error('[reminders] check failed', e.message)); }, 15 * 1000);
+
+// Automatic disccardpromos sync — pulls transactions for every active card so
+// store spend, balances, and the transaction ledger stay live without an
+// admin manually clicking "Sync Now" on each card. No-ops instantly while in
+// mock mode (no credentials configured yet).
+const CARD_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+setInterval(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, CARD_SYNC_INTERVAL_MS);
+setTimeout(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, 20 * 1000);

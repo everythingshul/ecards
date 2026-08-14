@@ -43,7 +43,13 @@ router.get('/', (req, res) => {
   if (setup_status) { where += ' AND setup_status = ?'; params.push(setup_status); }
   if (search) { where += ' AND (name LIKE ? OR city LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
   const stores = db.prepare(`SELECT * FROM stores ${where} ORDER BY created_at DESC`).all(...params);
-  res.json({ stores: redact(stores, req.permission.hidden_fields) });
+  // Live spend per store — computed fresh on every request from the synced
+  // transaction ledger, not cached, so it's always current as of the last sync.
+  const spendStmt = db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END),0) total_purchases,
+    COALESCE(SUM(CASE WHEN type='refund' THEN amount ELSE 0 END),0) total_refunds, COUNT(*) txn_count
+    FROM card_transactions WHERE store_id = ?`);
+  const withSpend = stores.map(s => ({ ...s, ...spendStmt.get(s.id) }));
+  res.json({ stores: redact(withSpend, req.permission.hidden_fields) });
 });
 
 // Full-detail CSV export — every field. Must be registered before /:id.
