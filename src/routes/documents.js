@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { generateGenericDocumentPdf, stampSignature } from '../services/pdf.js';
+import { generateGenericDocumentPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
 import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
@@ -138,6 +138,7 @@ router.post('/sign/:token/sign', async (req, res) => {
   const signedPath = await stampSignature({
     unsignedPath: document.pdf_path, shulId: `${document.entity_type}-${document.entity_id}`,
     signatureDataUrl: signature_data, signerName: signer_name, signedAt, ip: req.ip,
+    box: getSignatureBox(document.org_id, document.entity_type),
   });
   db.prepare(`UPDATE documents SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=? WHERE id=?`)
     .run(signature_data, signer_name, signer_title || '', signedAt, req.ip, signedPath, document.id);

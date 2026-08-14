@@ -400,3 +400,80 @@ function initSignaturePad(canvasId) {
     toDataUrl: () => canvas.toDataURL('image/png'),
   };
 }
+
+// Draggable/resizable signature-box editor (Settings > Documents). kind is
+// 'shul' | 'applicant' | 'store'. Renders a page-proportioned mockup, not
+// the live PDF content, since that's reliable across browsers and works
+// the same whether the underlying doc is our generated Letter-size PDF or
+// an admin-uploaded PDF of any size — the box is saved as fractions (0-1)
+// of the page's actual width/height, top-left origin, and stampSignature()
+// (services/pdf.js) converts to PDF points at sign time.
+let sigBoxState = null;
+window.openSignatureBoxEditor = async (kind, title) => {
+  let data;
+  try { data = await api(`/settings/signature-box/${kind}`); } catch (err) { return toast(err.message, true); }
+  const pageSize = data.pageSize;
+  const box = data.box || { x: 0.09, y: 0.62, width: 0.42, height: 0.22 };
+  const mockW = 320;
+  const mockH = Math.round(mockW * pageSize.height / pageSize.width);
+  const bodyHtml = `
+    <p class="small-muted">Drag the box to position where the signature is stamped on the last page, and drag its corner handle to resize it. This preview is scaled to your page's proportions (not the live document content), so it works reliably for any page size.</p>
+    <div id="sigbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)">
+      <div id="sigbox-box" style="position:absolute;background:rgba(201,167,106,.35);border:2px solid var(--brand-gold-dark);cursor:move;box-sizing:border-box">
+        <div id="sigbox-handle" style="position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:var(--brand-gold-dark);cursor:nwse-resize"></div>
+      </div>
+    </div>
+    <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt</p>
+  `;
+  openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveSignatureBox('${kind}')">Save Placement</button>`);
+
+  const boxEl = qs('#sigbox-box'), handleEl = qs('#sigbox-handle');
+  function render() {
+    boxEl.style.left = (box.x * mockW) + 'px';
+    boxEl.style.top = (box.y * mockH) + 'px';
+    boxEl.style.width = (box.width * mockW) + 'px';
+    boxEl.style.height = (box.height * mockH) + 'px';
+  }
+  render();
+
+  let dragMode = null, startPx = { x: 0, y: 0 }, startBox = null;
+  function onDown(mode) {
+    return (e) => {
+      e.preventDefault(); e.stopPropagation();
+      dragMode = mode;
+      startPx = { x: e.clientX, y: e.clientY };
+      startBox = { ...box };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    };
+  }
+  function onMove(e) {
+    if (!dragMode) return;
+    const dx = (e.clientX - startPx.x) / mockW, dy = (e.clientY - startPx.y) / mockH;
+    if (dragMode === 'move') {
+      box.x = Math.min(1 - box.width, Math.max(0, startBox.x + dx));
+      box.y = Math.min(1 - box.height, Math.max(0, startBox.y + dy));
+    } else {
+      box.width = Math.min(1 - box.x, Math.max(0.12, startBox.width + dx));
+      box.height = Math.min(1 - box.y, Math.max(0.06, startBox.height + dy));
+    }
+    render();
+  }
+  function onUp() {
+    dragMode = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  }
+  boxEl.addEventListener('pointerdown', onDown('move'));
+  handleEl.addEventListener('pointerdown', onDown('resize'));
+  sigBoxState = { kind, get: () => box };
+};
+window.saveSignatureBox = async (kind) => {
+  const box = sigBoxState?.kind === kind ? sigBoxState.get() : null;
+  if (!box) return;
+  try {
+    await api(`/settings/signature-box/${kind}`, { method: 'PUT', body: box });
+    toast('Signature placement saved');
+    closeModal();
+  } catch (err) { toast(err.message, true); }
+};

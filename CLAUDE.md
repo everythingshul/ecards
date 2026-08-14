@@ -160,9 +160,25 @@ Settings > Contract Template supports two modes:
    text.
 
 Either way, `stampSignature()` in `pdf.js` adds the signature (drawn PNG or
-typed name) + signer/date/IP to the bottom of the **last page**, positioned
-relative to that page's actual dimensions (works correctly for both the
-generated Letter-size doc and an arbitrary uploaded PDF).
+typed name) + signer/date/IP to the **last page**, inside an admin-configured
+box (see below) — falling back to a hardcoded "~16% up from the bottom-left"
+placement if the box was never configured, so existing orgs see no change
+until they opt in.
+
+### Signature placement editor
+Settings > Documents has an "Edit Signature Placement" button per document
+kind (shul/applicant/store) opening a drag/resize box editor
+(`openSignatureBoxEditor()` in app.js). It renders a page-proportioned mockup
+(NOT the live PDF content — deliberately, since overlaying on a native
+multi-page PDF `<iframe>` is unreliable across browsers/zoom levels; the
+mockup's aspect ratio always matches the real page via
+`GET /api/settings/signature-box/:kind`'s `pageSize`, read from the actual
+template PDF with pdf-lib, or 612x792 for the generated default). The box is
+stored as `{x, y, width, height}` fractions (0-1) of the page, top-left
+origin, in `settings` under key `signature_box_<kind>` —
+`GET/PUT /api/settings/signature-box/:kind`. `stampSignature()` converts to
+PDF points/bottom-left origin and lays out the line/image-or-typed-name/meta
+text proportionally within that box.
 
 ## Generic documents (applicants + stores)
 Same idea as the shul contract above, generalized to any applicant or store

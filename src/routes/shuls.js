@@ -4,7 +4,7 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
-import { generateContractPdf, stampSignature } from '../services/pdf.js';
+import { generateContractPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
 import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
@@ -96,7 +96,7 @@ router.post('/contract/:token/sign', async (req, res) => {
   const { signature_data, signer_name, signer_title } = req.body || {};
   if (!signer_name || !signature_data) return res.status(400).json({ error: 'Signature and signer name are required' });
   const signedAt = new Date().toISOString();
-  const signedPath = await stampSignature({ unsignedPath: contract.pdf_path, shulId: contract.shul_id, signatureDataUrl: signature_data, signerName: signer_name, signedAt, ip: req.ip });
+  const signedPath = await stampSignature({ unsignedPath: contract.pdf_path, shulId: contract.shul_id, signatureDataUrl: signature_data, signerName: signer_name, signedAt, ip: req.ip, box: getSignatureBox(DEFAULT_ORG_ID, 'shul') });
   db.prepare(`UPDATE contracts SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=? WHERE id=?`)
     .run(signature_data, signer_name, signer_title || '', signedAt, req.ip, signedPath, contract.id);
   db.prepare(`UPDATE shuls SET status='contract_signed', updated_at=datetime('now') WHERE id=?`).run(contract.shul_id);

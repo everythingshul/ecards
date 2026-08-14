@@ -1,11 +1,21 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { join } from 'path';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { db } from '../db.js';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 export const CUSTOM_TEMPLATE_PATH = join(DATA_DIR, 'contracts', 'org-template.pdf');
 
 export function hasCustomTemplate() { return existsSync(CUSTOM_TEMPLATE_PATH); }
+
+// The admin-configured signature placement for a document kind ('shul' |
+// 'applicant' | 'store'), set via Settings > Documents' drag/resize editor
+// (routes/settings.js). Returns null if never configured, in which case
+// stampSignature() below falls back to its original hardcoded placement.
+export function getSignatureBox(orgId, kind) {
+  const row = db.prepare('SELECT value FROM settings WHERE org_id = ? AND key = ?').get(orgId, `signature_box_${kind}`);
+  return row ? JSON.parse(row.value) : null;
+}
 
 // Shared simple word-wrapping PDF body builder, used by both the shul
 // contract and the generic applicant/store document generator below.
@@ -118,12 +128,17 @@ export async function generateGenericDocumentPdf({ entityType, entityId, title, 
 }
 
 // Stamps a signature (base64 PNG or typed name) + metadata onto the last page
-// of the unsigned PDF. Positioned relative to the actual page size so this
-// works correctly whether the PDF is our generated Letter-size doc or an
-// admin-uploaded PDF of any dimensions. `shulId` is really just "output file
-// id" — callers for applicant/store documents pass a composite string like
+// of the unsigned PDF. `shulId` is really just "output file id" — callers
+// for applicant/store documents pass a composite string like
 // `applicant-<id>` here; the function itself has no shul-specific logic.
-export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, signerName, signedAt, ip }) {
+//
+// `box` is the admin-configured signature placement from Settings >
+// Documents ({x, y, width, height}, all fractions 0-1 of the page's actual
+// size, TOP-LEFT origin — matches the drag/resize editor in the admin UI).
+// Falls back to the original hardcoded "~16% up from the bottom-left"
+// placement when no box has been configured yet for this document kind, so
+// existing orgs see no change until they opt in.
+export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, signerName, signedAt, ip, box }) {
   const bytes = readFileSync(unsignedPath);
   const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
@@ -132,24 +147,43 @@ export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, s
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  const margin = Math.max(32, pw * 0.09);
-  const sigY = Math.max(60, ph * 0.16); // signature block ~16% up from the bottom of the last page
-  const lineWidth = Math.min(260, pw - margin * 2);
+  let boxX, boxBottom, boxW, boxH;
+  if (box && [box.x, box.y, box.width, box.height].every(v => typeof v === 'number' && v >= 0 && v <= 1)) {
+    boxX = box.x * pw;
+    boxW = Math.max(60, box.width * pw);
+    boxH = Math.max(40, box.height * ph);
+    boxBottom = ph - box.y * ph - boxH; // convert top-left-origin fraction to PDF's bottom-left points
+  } else {
+    const margin = Math.max(32, pw * 0.09);
+    boxX = margin;
+    boxW = Math.min(260, pw - margin * 2);
+    boxH = Math.max(100, ph * 0.22);
+    boxBottom = Math.max(60, ph * 0.16);
+  }
+  boxBottom = Math.max(10, boxBottom);
 
-  page.drawLine({ start: { x: margin, y: sigY + 40 }, end: { x: margin + lineWidth, y: sigY + 40 }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
+  const boxTop = boxBottom + boxH;
+  const lineY = boxTop - boxH * 0.06;
+  page.drawLine({ start: { x: boxX, y: lineY }, end: { x: boxX + boxW, y: lineY }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
 
+  const sigAreaH = boxH * 0.48;
   if (signatureDataUrl && signatureDataUrl.startsWith('data:image/png;base64,')) {
     const pngBytes = Buffer.from(signatureDataUrl.split(',')[1], 'base64');
     const png = await doc.embedPng(pngBytes);
-    const dims = png.scale(0.35);
-    page.drawImage(png, { x: margin, y: sigY + 42, width: Math.min(dims.width, lineWidth), height: Math.min(dims.height, 70) });
+    const scale = Math.min(boxW / png.width, sigAreaH / png.height, 1);
+    const dims = png.scale(scale);
+    page.drawImage(png, { x: boxX, y: lineY - 4 - dims.height, width: dims.width, height: dims.height });
   } else {
-    page.drawText(signerName || '', { x: margin + 4, y: sigY + 50, size: 20, font: bold, color: rgb(0.15, 0.11, 0.09) });
+    page.drawText(signerName || '', { x: boxX + 4, y: lineY - sigAreaH * 0.65, size: Math.min(20, sigAreaH * 0.55), font: bold, color: rgb(0.15, 0.11, 0.09) });
   }
 
-  page.drawText(`Signed by: ${signerName || ''}`, { x: margin, y: sigY + 20, size: 10, font });
-  page.drawText(`Date: ${signedAt}`, { x: margin, y: sigY + 5, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
-  page.drawText(`IP: ${ip || 'n/a'}`, { x: margin, y: sigY - 10, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
+  const lineGap = Math.max(9, boxH * 0.13);
+  let textY = boxBottom + boxH * 0.4;
+  page.drawText(`Signed by: ${signerName || ''}`, { x: boxX, y: textY, size: 10, font });
+  textY = Math.max(boxBottom, textY - lineGap);
+  page.drawText(`Date: ${signedAt}`, { x: boxX, y: textY, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
+  textY = Math.max(boxBottom - 4, textY - lineGap * 0.85);
+  page.drawText(`IP: ${ip || 'n/a'}`, { x: boxX, y: textY, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
 
   const outBytes = await doc.save();
   const outPath = join(DATA_DIR, 'contracts', `${shulId}-signed.pdf`);

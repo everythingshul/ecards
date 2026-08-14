@@ -74,7 +74,10 @@ renderShell('/admin/settings.html', `
       </div>
       <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
       <textarea id="contract-text" rows="8"></textarea>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveContractText()">Save Text</button>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="saveContractText()">Save Text</button>
+        <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('shul','Shul Contract Signature Placement')">Edit Signature Placement</button>
+      </div>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Applicant Agreement</h3>
@@ -86,7 +89,10 @@ renderShell('/admin/settings.html', `
       </div>
       <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
       <textarea id="doc-text-applicant" rows="8"></textarea>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDocText('applicant')">Save Text</button>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="saveDocText('applicant')">Save Text</button>
+        <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('applicant','Applicant Agreement Signature Placement')">Edit Signature Placement</button>
+      </div>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Store Agreement</h3>
@@ -98,7 +104,10 @@ renderShell('/admin/settings.html', `
       </div>
       <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
       <textarea id="doc-text-store" rows="8"></textarea>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDocText('store')">Save Text</button>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="saveDocText('store')">Save Text</button>
+        <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('store','Store Agreement Signature Placement')">Edit Signature Placement</button>
+      </div>
     </div>
   </div>
 `);

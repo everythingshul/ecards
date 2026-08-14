@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { unlinkSync, writeFileSync } from 'fs';
+import { unlinkSync, writeFileSync, readFileSync } from 'fs';
+import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate } from '../services/pdf.js';
@@ -80,6 +81,45 @@ router.delete('/document-pdf/:entityType', requireAdmin, (req, res) => {
   if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
   try { unlinkSync(docTemplatePath(entityType)); } catch { /* already gone */ }
   res.json({ ok: true, hasCustomTemplate: false });
+});
+
+// Signature placement editor (Settings > Documents > drag/resize box) —
+// 'kind' is 'shul' | 'applicant' | 'store'. Coordinates are stored as
+// fractions (0-1) of the page's actual width/height, top-left origin,
+// matching the drag UI; stampSignature() in services/pdf.js converts to PDF
+// points/bottom-left-origin at sign time.
+const SIG_TEMPLATE_PATH = { shul: () => (hasCustomTemplate() ? CUSTOM_TEMPLATE_PATH : null), applicant: () => (hasCustomDocTemplate('applicant') ? docTemplatePath('applicant') : null), store: () => (hasCustomDocTemplate('store') ? docTemplatePath('store') : null) };
+
+async function templatePageSize(kind) {
+  const path = SIG_TEMPLATE_PATH[kind]?.();
+  if (path) {
+    try {
+      const doc = await PDFDocument.load(readFileSync(path));
+      const pages = doc.getPages();
+      const { width, height } = pages[pages.length - 1].getSize();
+      return { width, height };
+    } catch { /* fall through to the generated-doc default below */ }
+  }
+  return { width: 612, height: 792 }; // our generated Letter-size default (services/pdf.js buildSimplePdf)
+}
+
+router.get('/signature-box/:kind', async (req, res) => {
+  const kind = req.params.kind;
+  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  const row = db.prepare('SELECT value FROM settings WHERE org_id = ? AND key = ?').get(req.user.org_id, `signature_box_${kind}`);
+  const pageSize = await templatePageSize(kind);
+  res.json({ box: row ? JSON.parse(row.value) : null, pageSize });
+});
+
+router.put('/signature-box/:kind', requireAdmin, (req, res) => {
+  const kind = req.params.kind;
+  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  const { x, y, width, height } = req.body || {};
+  if ([x, y, width, height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
+  const value = JSON.stringify({ x, y, width, height });
+  db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
+    ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `signature_box_${kind}`, value);
+  res.json({ ok: true, box: { x, y, width, height } });
 });
 
 export default router;
