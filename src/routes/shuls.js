@@ -158,7 +158,7 @@ router.get('/:id', (req, res) => {
   if (!shul) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'shul') { if (shul.id !== req.user.shul_id) return res.status(403).json({ error: 'Not your shul' }); }
   else { checkScope(req, res, shul.id); if (res.headersSent) return; }
-  const notes = db.prepare('SELECT n.*, u.first_name, u.last_name FROM shul_notes n LEFT JOIN users u ON u.id = n.user_id WHERE shul_id = ? ORDER BY n.created_at DESC').all(shul.id);
+  const notes = db.prepare('SELECT n.*, u.first_name, u.last_name FROM shul_notes n LEFT JOIN users u ON u.id = n.user_id WHERE n.shul_id = ? ORDER BY n.created_at DESC').all(shul.id);
   const contract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
   const applicants = db.prepare('SELECT id, first_name, last_name, approval_status FROM applicants WHERE shul_id = ?').all(shul.id);
   const flags = db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='shul' AND (entity_id = ? OR matched_entity_id = ?) AND status='open'`).all(shul.id, shul.id);
