@@ -133,6 +133,20 @@ must be set as an environment variable on the deploy platform (Render), never
 committed to the repo. This sandbox's network policy blocks outbound requests
 to `api.brevo.com`, so it could not be live-verified from here.
 
+## Email Center (`/admin/emails.html`)
+`sendMailChecked()` (`services/mail.js`) is the single choke point every
+email in the app passes through (system-automatic and admin-composed alike),
+so it's also where every send gets logged to the `emails_sent` table
+(status `sent`/`failed`/`dry_run`, error message, optional
+`related_entity_type`/`related_entity_id`/`sent_by`) — that's what backs the
+Email Center's "Sent Emails" tab (`GET/GET :id/GET export /api/emails*`,
+`requireAdmin`-gated like Tasks). The "Templates" tab is plain CRUD
+(`email_templates` table, `{{variable}}` placeholders) via
+`/api/emails/templates*`, and "Compose Email" (`POST /api/emails/send`)
+substitutes `{{variable}}` from a `variables` object at send time — the
+admin-composed "Email Builder" the user asked for, distinct from the
+system's automatic emails.
+
 ## Downloads / exports — always use `downloadAuthed()`
 This app has no cookie session, only a Bearer token in `localStorage`. A
 plain `location.href = '/api/...'` navigation sends **no** Authorization

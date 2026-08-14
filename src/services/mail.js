@@ -1,4 +1,4 @@
-import { db, DEFAULT_ORG_ID } from '../db.js';
+import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 
 // ---------------------------------------------------------------------------
 // Email — Brevo (https://api.brevo.com) transactional email API.
@@ -92,14 +92,26 @@ export async function sendMail(orgId, to, subject, bodyHtml) {
 // wrapper it looks identical to a real send in the API response: nothing
 // gets emailed, but no error surfaces anywhere, and the recipient just
 // reports "I never got the email" with no clue why.
-export async function sendMailChecked(orgId, to, subject, bodyHtml) {
+//
+// Also the single choke point every email in the app passes through, so
+// it's where every send gets logged to emails_sent for the Email Center's
+// "view sent emails" list — `meta` is optional and lets callers attach
+// which record this email was about (Email Center's own compose flow uses
+// it; automatic system emails don't bother).
+export async function sendMailChecked(orgId, to, subject, bodyHtml, meta = {}) {
+  let status = 'sent', emailError = null;
   try {
     const result = await sendMail(orgId, to, subject, bodyHtml);
-    if (result?.dryRun) return { emailError: 'Email provider not configured (BREVO_API_KEY missing). No email was actually sent.' };
-    return { emailError: null };
+    if (result?.dryRun) { status = 'dry_run'; emailError = 'Email provider not configured (BREVO_API_KEY missing). No email was actually sent.'; }
   } catch (e) {
-    return { emailError: e.message };
+    status = 'failed'; emailError = e.message;
   }
+  try {
+    db.prepare(`INSERT INTO emails_sent (id, org_id, to_email, subject, body_html, status, error_message, related_entity_type, related_entity_id, sent_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(uuid(), orgId || DEFAULT_ORG_ID, to, subject, bodyHtml, status, emailError, meta.relatedEntityType || null, meta.relatedEntityId || null, meta.sentBy || null);
+  } catch (e) { console.error('[mail] failed to log sent email:', e.message); }
+  return { emailError };
 }
 
 export const templates = {

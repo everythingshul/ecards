@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email Center · Kipas Hair BP Platform</title>
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/portal-theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/emails.html', `
+  <div class="flex-between"><h2>Email Center</h2><button class="btn btn-primary btn-sm" id="btn-compose">Compose Email</button></div>
+  <div class="tabs" id="etabs">
+    <button class="active" data-t="sent">Sent Emails</button>
+    <button data-t="templates">Templates</button>
+  </div>
+
+  <div id="panel-sent">
+    <div class="toolbar">
+      <input id="f-search" placeholder="Search recipient or subject…">
+      <select id="f-status"><option value="">All statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="dry_run">Dry Run (no provider)</option></select>
+      <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table><thead><tr><th>To</th><th>Subject</th><th>Status</th><th>Sent</th><th></th></tr></thead>
+      <tbody id="tbody-sent"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+    </div>
+    <div class="paginator" id="pager-sent"></div>
+  </div>
+
+  <div id="panel-templates" style="display:none">
+    <div class="flex-between"><p class="small-muted">Reusable subject/body templates. Use <code>{{variable}}</code> placeholders in the body; when composing, swap them in manually or reference them in your own send flows.</p><button class="btn btn-outline btn-sm" id="btn-new-template">+ New Template</button></div>
+    <div id="templates-list"><p class="small-muted">Loading…</p></div>
+  </div>
+`);
+
+qsa('#etabs button').forEach(b => b.addEventListener('click', () => {
+  qsa('#etabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+  ['sent','templates'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  if (b.dataset.t === 'templates') loadTemplates();
+}));
+
+let state = { search: '', status: '', page: 1, pageSize: 25 };
+async function loadSent() {
+  const params = new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([,v]) => v !== '')));
+  try {
+    const { emails, total } = await api('/emails?' + params);
+    qs('#tbody-sent').innerHTML = emails.length ? emails.map(rowHtml).join('') : '<tr><td colspan="5" class="empty-state">No emails sent yet.</td></tr>';
+    const pages = Math.max(1, Math.ceil(total / state.pageSize));
+    qs('#pager-sent').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
+  } catch (err) { toast(err.message, true); }
+}
+function changePage(d) { state.page += d; loadSent(); }
+function rowHtml(e) {
+  const statusCls = e.status === 'sent' ? 'active' : (e.status === 'failed' ? 'rejected' : 'pending');
+  const statusLabel = e.status === 'dry_run' ? 'dry run' : e.status;
+  return `<tr>
+    <td>${esc(e.to_email)}</td>
+    <td>${esc(e.subject || '')}</td>
+    <td>${badge(statusLabel, statusCls)}</td>
+    <td>${fmtDateTime(e.created_at)}</td>
+    <td><button class="btn btn-sm btn-outline" onclick="viewEmail('${e.id}')">View</button></td>
+  </tr>`;
+}
+qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; loadSent(); }, 350));
+qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; loadSent(); });
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/emails/export', 'sent-emails.csv'));
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+window.viewEmail = async (id) => {
+  try {
+    const { email: e } = await api(`/emails/${id}`);
+    const body = `
+      <p><strong>To:</strong> ${esc(e.to_email)}</p>
+      <p><strong>Subject:</strong> ${esc(e.subject || '')}</p>
+      <p><strong>Status:</strong> ${badge(e.status === 'dry_run' ? 'dry run' : e.status, e.status === 'sent' ? 'active' : (e.status === 'failed' ? 'rejected' : 'pending'))}</p>
+      ${e.error_message ? `<p style="color:var(--danger)"><strong>Error:</strong> ${esc(e.error_message)}</p>` : ''}
+      <p><strong>Sent:</strong> ${fmtDateTime(e.created_at)}</p>
+      <div class="divider"></div>
+      <iframe style="width:100%;height:360px;border:1px solid var(--border);border-radius:8px;background:#fff" srcdoc="${esc(e.body_html || '')}"></iframe>
+    `;
+    openModal('Email', body);
+  } catch (err) { toast(err.message, true); }
+};
+
+let templatesCache = [];
+async function loadTemplates() {
+  try {
+    const { templates } = await api('/emails/templates/all');
+    templatesCache = templates;
+    qs('#templates-list').innerHTML = templates.length ? templates.map(t => `<div class="card" style="margin-bottom:10px">
+        <div class="flex-between"><strong>${esc(t.name)}</strong>${t.category ? `<span class="small-muted">${esc(t.category)}</span>` : ''}</div>
+        <p class="small-muted">${esc(t.subject)}</p>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-sm btn-outline" onclick="editTemplate('${t.id}')">Edit</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTemplate('${t.id}')">Delete</button>
+        </div>
+      </div>`).join('') : '<p class="small-muted">No templates yet.</p>';
+  } catch (err) { toast(err.message, true); }
+}
+function templateFormBody(t = {}) {
+  return `
+    <label>Name <span class="req">*</span></label><input id="tp-name" value="${esc(t.name||'')}">
+    <label>Category <span class="small-muted">(optional)</span></label><input id="tp-category" value="${esc(t.category||'')}">
+    <label>Subject <span class="req">*</span></label><input id="tp-subject" value="${esc(t.subject||'')}">
+    <label>Body (HTML) <span class="req">*</span> <span class="small-muted">(use {{variable}} placeholders as needed)</span></label>
+    <textarea id="tp-body" rows="10">${esc(t.body_html||'')}</textarea>
+  `;
+}
+qs('#btn-new-template').addEventListener('click', () => {
+  openModal('New Template', templateFormBody(), `<button class="btn btn-primary btn-sm" onclick="createTemplate()">Create</button>`);
+});
+window.createTemplate = async () => {
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: qs('#tp-body').value };
+  if (!body.name || !body.subject || !body.body_html) return toast('Name, subject, and body are required', true);
+  try { await api('/emails/templates', { method: 'POST', body }); toast('Template created'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+window.editTemplate = (id) => {
+  const t = templatesCache.find(x => x.id === id);
+  if (!t) return;
+  openModal('Edit Template', templateFormBody(t), `<button class="btn btn-danger btn-sm" onclick="deleteTemplate('${id}')">Delete</button><button class="btn btn-primary btn-sm" onclick="saveTemplate('${id}')">Save</button>`);
+};
+window.saveTemplate = async (id) => {
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: qs('#tp-body').value };
+  try { await api(`/emails/templates/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+window.deleteTemplate = async (id) => {
+  if (!confirm('Delete this template?')) return;
+  try { await api(`/emails/templates/${id}`, { method: 'DELETE' }); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+
+qs('#btn-compose').addEventListener('click', async () => {
+  if (!templatesCache.length) { try { ({ templates: templatesCache } = await api('/emails/templates/all')); } catch { /* compose still works without templates */ } }
+  const options = `<option value="">Start from scratch</option>` + templatesCache.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  const body = `
+    <label>Use Template</label><select id="cp-template">${options}</select>
+    <label>To <span class="req">*</span></label><input id="cp-to" type="email" placeholder="recipient@example.com">
+    <label>Subject <span class="req">*</span></label><input id="cp-subject">
+    <label>Body (HTML) <span class="req">*</span></label><textarea id="cp-body" rows="10"></textarea>
+  `;
+  openModal('Compose Email', body, `<button class="btn btn-primary btn-sm" onclick="sendComposedEmail()">Send</button>`);
+  qs('#cp-template').addEventListener('change', () => {
+    const t = templatesCache.find(x => x.id === qs('#cp-template').value);
+    qs('#cp-subject').value = t ? t.subject : '';
+    qs('#cp-body').value = t ? t.body_html : '';
+  });
+});
+window.sendComposedEmail = async () => {
+  const to = qs('#cp-to').value.trim(), subject = qs('#cp-subject').value.trim(), body_html = qs('#cp-body').value;
+  if (!to || !subject || !body_html) return toast('To, subject, and body are required', true);
+  try {
+    const r = await api('/emails/send', { method: 'POST', body: { to, subject, body_html } });
+    toast(r.emailError ? `Could not send: ${r.emailError}` : 'Email sent', !!r.emailError);
+    closeModal(); loadSent();
+  } catch (err) { toast(err.message, true); }
+};
+
+loadSent();
+</script>
+</body>
+</html>

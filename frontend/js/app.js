@@ -75,6 +75,7 @@ const NAV_ITEMS = [
   { href: '/admin/stores.html', label: 'Stores', icon: '&#9670;', resource: 'stores' },
   { href: '/admin/tasks.html', label: 'Tasks', icon: '&#9670;', resource: 'tasks' },
   { href: '/admin/forms.html', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
+  { href: '/admin/emails.html', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
 ];

@@ -166,6 +166,41 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_entity ON documents(entity_type, entity_id);
 
+-- ===================== Email Center =====================
+-- Every email this platform sends (system notifications and admin-composed
+-- ones alike) is logged here so admins have somewhere to actually see what
+-- went out, whether it really sent, and why it didn't when it failed.
+CREATE TABLE IF NOT EXISTS emails_sent (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  to_email TEXT NOT NULL,
+  subject TEXT,
+  body_html TEXT,
+  status TEXT NOT NULL,          -- sent | failed | dry_run
+  error_message TEXT,
+  related_entity_type TEXT,      -- shul | applicant | store | task | user | null (admin-composed)
+  related_entity_id TEXT,
+  sent_by TEXT REFERENCES users(id), -- null for automatic system emails
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_emails_sent_org ON emails_sent(org_id, created_at);
+
+-- Reusable subject/body templates for the admin-composed "Email Builder"
+-- (Email Center > Templates). Body supports {{variable}} placeholders,
+-- substituted at send time.
+CREATE TABLE IF NOT EXISTS email_templates (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  category TEXT,
+  subject TEXT NOT NULL,
+  body_html TEXT NOT NULL,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_email_templates_org ON email_templates(org_id);
+
 -- ===================== Applicants =====================
 CREATE TABLE IF NOT EXISTS applicants (
   id TEXT PRIMARY KEY,
