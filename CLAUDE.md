@@ -204,12 +204,46 @@ call). Admin > Stores shows source, onboarding progress, and **live spend**
 transactions on every request — not cached). Dashboard has a "Live Store
 Spend" panel with total spend + top-5 breakdown.
 
+## Address autocomplete (Google Places)
+`attachPlacesAutocomplete(inputId, fields)` in app.js is a from-scratch
+fetch-and-render dropdown built on the new Places API's
+`google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions()` +
+`PlacePrediction.toPlace().fetchFields()` — deliberately *not* Google's
+`PlaceAutocompleteElement` custom element or the legacy
+`google.maps.places.Autocomplete` widget. Two reasons:
+1. The legacy widget needs the legacy **"Places API"** enabled in Google
+   Cloud Console in addition to "Places API (New)" — a separate toggle
+   that's easy to miss, and the actual cause the one time this broke in
+   production (`LegacyApiNotActivatedMapError` in the console).
+2. `PlaceAutocompleteElement` replaces the `<input>` with a custom element,
+   which would need form-association handling to keep working with the
+   plain `new FormData(form)` collection this app uses everywhere. Building
+   the dropdown by hand keeps every existing `<input>` a normal form field.
+
+Implementation notes: the input gets dynamically wrapped in its own
+`position: relative` div at attach-time (existing markup doesn't
+consistently wrap inputs, so anchoring the dropdown to some ancestor like
+the whole `<form>` would misplace it) · debounced 250ms · a monotonic
+request-id guards against a slow earlier keystroke's response overwriting a
+newer one · a session token is created per typing session and rotated after
+each completed selection, per Google's billing-optimization guidance.
+Verified against the real API surface by fetching and grepping the actual
+`maps/api/js` bundle server-side (`curl`) since this sandbox's Chromium
+can't complete a live connection to `maps.googleapis.com` (`curl` can) — so
+if Google changes this API's shape again, that's the fastest way to check
+before guessing from docs.
+
 ## Required external setup to go fully live
 1. **Brevo** — `BREVO_API_KEY` (provided by the user, needs to be set in the
    deploy environment) + a verified sender identity in the Brevo dashboard.
-2. **Google Maps** — `GOOGLE_MAPS_API_KEY` (restrict to your domain; Places +
-   Maps JavaScript API enabled). Without it, address autofill is skipped —
-   forms remain fully usable with manual entry.
+2. **Google Maps** — `GOOGLE_MAPS_API_KEY` (restrict to your domain; **"Places
+   API (New)"** must be enabled — not the legacy "Places API"; billing must
+   be active on the project or every request fails). Without a working key,
+   address autofill is skipped — forms remain fully usable with manual
+   entry, and `loadGoogleMaps()`/`attachPlacesAutocomplete()` in app.js log
+   a `[places]` console warning/error explaining exactly why (missing key,
+   script load failure, Google auth rejection) — check the browser console
+   first if autocomplete "isn't working".
 3. **disccardpromos.com** — `DISCCARDPROMOS_API_BASE` / `DISCCARDPROMOS_API_KEY`.
 4. **DNS** — point `ecards.everythingshul.com` at the Render service.
 5. Change the seeded super admin password immediately (`SEED_ADMIN_EMAIL` /

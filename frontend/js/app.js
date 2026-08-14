@@ -127,26 +127,89 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 function closeModal() { document.getElementById('ec-modal')?.remove(); }
 
-// Google Places autocomplete helper — degrades gracefully if no API key configured.
+// Google Places address autocomplete — built on the new Places API's
+// AutocompleteSuggestion/Place classes (google.maps.places.Autocomplete, the
+// old widget, needs the legacy "Places API" enabled in addition to "Places
+// API (New)"; this path only needs the latter). Implemented as a plain
+// fetch-and-render dropdown rather than Google's PlaceAutocompleteElement
+// custom element so the existing <input> stays a normal form field (name
+// attribute, FormData collection, styling) instead of being replaced by a
+// web component. Degrades gracefully — the input remains fully usable for
+// manual entry if Places isn't available.
 async function attachPlacesAutocomplete(inputId, fields) {
   const input = document.getElementById(inputId);
   if (!input) return;
-  if (!window.google?.maps?.places) { console.warn(`[places] Skipping autocomplete for #${inputId} — Google Places was not loaded (see earlier [places] warning for why).`); return; }
-  const ac = new google.maps.places.Autocomplete(input, { types: ['address'] });
-  ac.addListener('place_changed', () => {
-    const place = ac.getPlace();
-    if (!place.address_components) return;
-    const get = (type) => place.address_components.find(c => c.types.includes(type))?.long_name || '';
-    const getShort = (type) => place.address_components.find(c => c.types.includes(type))?.short_name || '';
-    const streetNum = get('street_number'), route = get('route');
-    if (fields.address) document.getElementById(fields.address).value = [streetNum, route].filter(Boolean).join(' ') || input.value;
-    if (fields.city) document.getElementById(fields.city).value = get('locality') || get('sublocality') || get('postal_town');
-    if (fields.state) document.getElementById(fields.state).value = getShort('administrative_area_level_1');
-    if (fields.zip) document.getElementById(fields.zip).value = get('postal_code');
-    if (fields.placeId) document.getElementById(fields.placeId).value = place.place_id || '';
-    if (fields.lat) document.getElementById(fields.lat).value = place.geometry?.location?.lat() ?? '';
-    if (fields.lng) document.getElementById(fields.lng).value = place.geometry?.location?.lng() ?? '';
+  if (!window.google?.maps?.places?.AutocompleteSuggestion) { console.warn(`[places] Skipping autocomplete for #${inputId} — Google Places was not loaded (see earlier [places] warning for why).`); return; }
+  const { AutocompleteSuggestion, AutocompleteSessionToken } = google.maps.places;
+  let sessionToken = new AutocompleteSessionToken();
+  let dropdown = null, debounceTimer = null, requestId = 0;
+
+  // Wrap the input in a dedicated, tightly-fitting positioning context so
+  // the dropdown always anchors directly under it — existing markup doesn't
+  // consistently wrap inputs in their own div, so relying on some ancestor
+  // element (e.g. the whole <form>) would misplace the dropdown.
+  const wrap = document.createElement('div');
+  wrap.style.position = 'relative';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  function closeDropdown() { dropdown?.remove(); dropdown = null; }
+
+  function renderDropdown(suggestions) {
+    closeDropdown();
+    if (!suggestions.length) return;
+    dropdown = document.createElement('div');
+    dropdown.className = 'places-dropdown';
+    for (const s of suggestions) {
+      const pred = s.placePrediction;
+      if (!pred) continue;
+      const item = document.createElement('div');
+      item.className = 'places-dropdown-item';
+      item.textContent = pred.text?.text || '';
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); selectPrediction(pred); });
+      dropdown.appendChild(item);
+    }
+    wrap.appendChild(dropdown);
+  }
+
+  async function selectPrediction(pred) {
+    closeDropdown();
+    input.value = pred.text?.text || input.value;
+    try {
+      const place = pred.toPlace();
+      await place.fetchFields({ fields: ['addressComponents', 'location', 'id'] });
+      const comps = place.addressComponents || [];
+      const get = (type) => comps.find(c => c.types.includes(type))?.longText || '';
+      const getShort = (type) => comps.find(c => c.types.includes(type))?.shortText || '';
+      const streetNum = get('street_number'), route = get('route');
+      if (fields.address) document.getElementById(fields.address).value = [streetNum, route].filter(Boolean).join(' ') || input.value;
+      if (fields.city) document.getElementById(fields.city).value = get('locality') || get('sublocality') || get('postal_town');
+      if (fields.state) document.getElementById(fields.state).value = getShort('administrative_area_level_1');
+      if (fields.zip) document.getElementById(fields.zip).value = get('postal_code');
+      if (fields.placeId) document.getElementById(fields.placeId).value = place.id || '';
+      if (fields.lat) document.getElementById(fields.lat).value = place.location?.lat() ?? '';
+      if (fields.lng) document.getElementById(fields.lng).value = place.location?.lng() ?? '';
+    } catch (e) {
+      console.error('[places] Could not fetch place details:', e.message);
+    }
+    sessionToken = new AutocompleteSessionToken(); // billing session ends at a completed selection
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const query = input.value.trim();
+    if (!query) { closeDropdown(); return; }
+    debounceTimer = setTimeout(async () => {
+      const thisRequest = ++requestId;
+      try {
+        const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: query, sessionToken });
+        if (thisRequest !== requestId) return; // a newer keystroke already superseded this request
+        renderDropdown(suggestions || []);
+      } catch (e) { console.error('[places] suggestion fetch failed:', e.message); }
+    }, 250);
   });
+  input.addEventListener('blur', () => setTimeout(closeDropdown, 150));
+  input.setAttribute('autocomplete', 'off');
 }
 
 async function loadGoogleMaps() {
@@ -161,10 +224,10 @@ async function loadGoogleMaps() {
       console.warn('[places] Address autocomplete disabled: GOOGLE_MAPS_API_KEY is not set on the server.');
       return;
     }
-    // Surfaces Google's own runtime errors (bad key, Maps JavaScript API /
-    // Places API not enabled, billing not enabled, referrer restrictions
-    // blocking this domain) instead of failing silently.
-    window.gm_authFailure = () => console.error('[places] Google Maps authentication failed — check that the API key is valid, unrestricted for this domain, and that the Maps JavaScript API + Places API are enabled with billing active in Google Cloud Console.');
+    // Surfaces Google's own runtime errors (bad key, required APIs not
+    // enabled, billing not enabled, referrer restrictions blocking this
+    // domain) instead of failing silently.
+    window.gm_authFailure = () => console.error('[places] Google Maps authentication failed — check that the API key is valid, unrestricted for this domain, and that "Places API (New)" is enabled with billing active in Google Cloud Console.');
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=places`;
