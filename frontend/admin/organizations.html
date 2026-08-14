@@ -12,7 +12,7 @@ Auth.requireAuth();
 if (Auth.user()?.role !== 'super_admin') { location.href = '/admin/dashboard.html'; }
 renderShell('/admin/organizations.html', `
   <div class="flex-between"><h2>Organizations</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Organization</button></div>
-  <p class="small-muted">Each organization can run its own branding, domain, and email sending account. everythingshul.com is used as the default sender for any org that hasn't configured its own. Gift cards use a single shared disccardpromos.com integration for the whole platform (see Admin > Cards).</p>
+  <p class="small-muted">Each organization can run its own branding, domain, email sending account, and disccardpromos.com gift card account. everythingshul.com / the platform defaults are used for any org that hasn't configured its own.</p>
   <div id="org-list"></div>
 `);
 
@@ -28,10 +28,10 @@ async function load() {
 
 async function openOrg(id) {
   try {
-    const [{ organizations }, { settings: es }] = await Promise.all([api('/orgs'), api(`/orgs/${id}/email-settings`)]);
+    const [{ organizations }, { settings: es }, { settings: gs }] = await Promise.all([api('/orgs'), api(`/orgs/${id}/email-settings`), api(`/orgs/${id}/giftcard-settings`)]);
     const o = organizations.find(x => x.id === id);
     const body = `
-      <div class="tabs" id="otabs"><button class="active" data-t="info">Org Info</button><button data-t="email">Email Settings</button></div>
+      <div class="tabs" id="otabs"><button class="active" data-t="info">Org Info</button><button data-t="email">Email Settings</button><button data-t="giftcard">Gift Cards</button></div>
       <div id="otab-info">
         <label>Name</label><input id="e-name" value="${esc(o.name)}">
         <div class="grid-2">
@@ -59,11 +59,21 @@ async function openOrg(id) {
           <button class="btn btn-sm btn-primary" onclick="saveEmail('${id}')">Save Email Settings</button>
           ${!es.using_platform_default ? `<button class="btn btn-sm btn-outline" onclick="clearEmail('${id}')">Revert to Platform Default</button>` : ''}
         </div>
+      </div>
+      <div id="otab-giftcard" style="display:none">
+        <p class="small-muted">${gs.using_platform_default ? 'Using the <strong>platform default</strong> disccardpromos.com account (or mock mode if none is configured at all).' : '<strong>This org has its own disccardpromos.com account configured.</strong>'} Every org runs its own merchant account/API key.</p>
+        <label>disccardpromos.com API Base URL</label><input id="gc-api_base" value="${esc(gs.api_base)}" placeholder="https://api.disccardpromos.com/v1">
+        <label>API Key ${gs.has_api_key ? '<span class="small-muted">(already set — leave blank to keep it)</span>' : ''}</label>
+        <input id="gc-api_key" type="password" placeholder="${gs.has_api_key ? '••••••••••••' : 'API key'}">
+        <div style="margin-top:16px;display:flex;gap:8px">
+          <button class="btn btn-sm btn-primary" onclick="saveGiftcard('${id}')">Save Gift Card Settings</button>
+          ${!gs.using_platform_default ? `<button class="btn btn-sm btn-outline" onclick="clearGiftcard('${id}')">Revert to Platform Default</button>` : ''}
+        </div>
       </div>`;
     openModal(o.name, body);
     qsa('#otabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#otabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','email'].forEach(t => qs('#otab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','email','giftcard'].forEach(t => qs('#otab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
   } catch (err) { toast(err.message, true); }
 }
@@ -80,6 +90,14 @@ window.saveEmail = async (id) => {
 window.clearEmail = async (id) => {
   if (!confirm('Revert this org to the platform default sending account?')) return;
   try { await api(`/orgs/${id}/email-settings`, { method: 'PUT', body: { clear: true } }); toast('Reverted to platform default'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+window.saveGiftcard = async (id) => {
+  const body = { api_base: qs('#gc-api_base').value, api_key: qs('#gc-api_key').value || undefined };
+  try { await api(`/orgs/${id}/giftcard-settings`, { method: 'PUT', body }); toast('Gift card settings saved'); closeModal(); } catch (err) { toast(err.message, true); }
+};
+window.clearGiftcard = async (id) => {
+  if (!confirm('Revert this org to the platform default disccardpromos.com account?')) return;
+  try { await api(`/orgs/${id}/giftcard-settings`, { method: 'PUT', body: { clear: true } }); toast('Reverted to platform default'); closeModal(); } catch (err) { toast(err.message, true); }
 };
 
 qs('#btn-new').addEventListener('click', () => {

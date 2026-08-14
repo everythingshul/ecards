@@ -5,16 +5,18 @@ Season-based gift card assistance management: shuls register + e-sign a contract
 admin approves and allocates applicant slots, shuls submit applicants, admin
 approves applicants and issues gift cards via disccardpromos.com, and
 participating stores apply/onboard and get a self-service portal with billing.
-Multi-org from one account — each org can run its own branding and (email
-only) its own sending account. Deploy target: `ecards.everythingshul.com`.
+Multi-org from one account — each org can run its own branding, and its own
+email (Brevo) AND gift card (disccardpromos.com) accounts. Deploy target:
+`ecards.everythingshul.com`.
 
 ## Stack (mirrors the existing "Mamudem" product's conventions in this org)
 - **Backend:** Node.js + Express (ES modules), SQLite via `better-sqlite3`
 - **Frontend:** Vanilla HTML/CSS/JS, no framework/build step
 - **PDF contracts:** `pdf-lib` (generated + signature-stamped in-process)
 - **Email:** Brevo transactional API (platform default + optional per-org account)
-- **Gift cards:** disccardpromos.com — one shared integration for the whole
-  platform (NOT per-org; see below)
+- **Gift cards:** disccardpromos.com is the only vendor, but every org has its
+  own merchant account/API key (platform default + optional per-org override —
+  same pattern as email; see below)
 - **Spreadsheet import:** `xlsx` (reads both .csv and .xlsx)
 - **Auth:** JWT, bcrypt password hashing
 
@@ -29,7 +31,7 @@ src/
   services/
     mail.js                — Brevo send + branded templates, per-org sender resolution
     pdf.js                  — Contract PDF generation + e-signature stamping
-    giftcard.js              — disccardpromos.com adapter (single platform-wide integration, MOCK MODE until keys set)
+    giftcard.js              — disccardpromos.com adapter, per-org account resolution (MOCK MODE until keys set)
     duplicates.js             — Duplicate detection + account pause/unpause
     importer.js                — CSV/XLSX parsing + template generation
   routes/
@@ -77,23 +79,33 @@ frontend/
 - **Audit trail**: `audit_log` records create/update/approve/esign/etc with
   before/after JSON; nothing is ever hard-deleted (deactivate/reject flags only).
 
-## Gift cards — disccardpromos.com, ONE integration for the whole platform
-`src/services/giftcard.js` is the only file that talks to disccardpromos.com,
-and it is **not** per-org configurable — every organization on the platform
-uses the same disccardpromos account/API. This is intentional (unlike email —
-see below). Set `DISCCARDPROMOS_API_BASE` / `DISCCARDPROMOS_API_KEY` to go
-live; until both are set it runs in **MOCK MODE** (simulated card ids,
-activation, empty transaction feed) so the rest of the product — UI, ledger,
-balances, refunds — is fully usable today. The admin Cards page shows a banner
-whenever mock mode is active.
+## Gift cards — disccardpromos.com, per-org accounts
+`src/services/giftcard.js` is the only file that talks to disccardpromos.com —
+**one vendor for the whole platform, but every organization runs its own
+merchant account/API key** (different orgs, different disccardpromos
+accounts). Every exported function (`assignCard`, `activateCard`,
+`deactivateCard`, `getCardStatus`, `listTransactions`, `listAllTransactions`,
+`isMockMode`) takes `orgId` as its first argument and resolves that org's
+credentials from `org_giftcard_settings` first, falling back to the
+platform-wide `DISCCARDPROMOS_API_BASE`/`DISCCARDPROMOS_API_KEY` env vars, and
+to **MOCK MODE** (simulated card ids, activation, empty transaction feed) if
+neither exists — so the rest of the product is fully usable per-org today
+regardless of whether that org has real credentials yet. Configured by a
+super_admin under Admin > Organizations > Gift Cards. The admin Cards page
+shows a banner whenever mock mode is active for the logged-in org.
+
+This is intentionally the SAME per-org pattern as email (below) — every org
+gets independent credentials for both integrations, unlike an earlier version
+of this build which made gift cards platform-wide only. Don't collapse this
+back to a single global account without checking first.
 
 Their docs host (docs.disccardpromos.com) blocked automated fetching from the
 build environment, so the exact endpoint paths/payloads in `giftcard.js` are a
 best-guess placeholder pending confirmation with their team — once confirmed,
 only that one file's request/response mapping changes; nothing else in the
-app (routes/cards.js, the UI) needs to.
+app (routes/cards.js, the UI, the per-org resolution) needs to.
 
-## Email — Brevo, per-org sending accounts (this IS per-org, unlike gift cards)
+## Email — Brevo, per-org sending accounts
 `src/services/mail.js` sends via the Brevo transactional API
 (`https://api.brevo.com/v3/smtp/email`). The platform default sends from
 `everythingshul.com` (`BREVO_API_KEY` / `EMAIL_DEFAULT_SENDER` /
@@ -136,8 +148,9 @@ progress; a dashboard banner nags an incomplete store until they finish.
 2. **Google Maps** — `GOOGLE_MAPS_API_KEY` (restrict to your domain in Google
    Cloud Console; Places API + Maps JavaScript API enabled). Without it, address
    fields fall back to plain manual text entry — nothing breaks.
-3. **disccardpromos.com** — `DISCCARDPROMOS_API_BASE` / `DISCCARDPROMOS_API_KEY`,
-   single platform-wide account (see above).
+3. **disccardpromos.com** — `DISCCARDPROMOS_API_BASE` / `DISCCARDPROMOS_API_KEY`
+   as the platform-wide fallback; individual orgs set their own account in
+   Admin > Organizations > Gift Cards (see above).
 4. **DNS** — point `ecards.everythingshul.com` (and any per-org custom domain)
    at the Render service; `organizations.custom_domain` / `.subdomain` resolve
    branding per-host via `/api/orgs/resolve`.
@@ -161,9 +174,11 @@ progress; a dashboard banner nags an incomplete store until they finish.
   `contracts` table and `sign-contract.html` page.
 - **Permissions are enforced server-side**, not just hidden in the UI — every
   protected route runs through `requirePermission()` and `redact()`.
-- **Email is per-org pluggable; gift cards are deliberately NOT** — this was a
-  direct decision, not an oversight. Don't reintroduce a per-org gift card
-  provider registry without checking first.
+- **Both email and gift cards are per-org configurable, with a platform-wide
+  fallback and mock/dry-run mode below that** — same resolution pattern in
+  both `mail.js` and `giftcard.js`. Gift cards stick to disccardpromos.com as
+  the only vendor (no multi-vendor registry — that was tried and explicitly
+  reverted); email has no vendor lock-in beyond Brevo either, by choice.
 
 ## Not yet built / explicitly out of scope this pass
 - Real disccardpromos.com endpoint confirmation (mock mode — see above).
