@@ -233,18 +233,43 @@ Spend" panel with total spend + top-5 breakdown.
   us twice (Applicants, Cards pages). Run the frontend syntax audit below
   after editing any `<script>` block before considering the change done.
 
+## Brand assets & two-palette theming
+Real logo files are checked in at `frontend/img/`: `org-logo.png` (the
+organization's shield logo — espresso/gold, used verbatim; `org-logo-full.png`
+is the original high-res source) and `everythingshul-logo.png` (the
+everythingshul wordmark — navy/cyan). Favicons (`favicon-32.png`,
+`favicon-192.png`, `apple-touch-icon.png`) were generated from the shield.
+
+The site intentionally runs **two color palettes** sharing one set of CSS
+variables (`theme.css`):
+- **Public marketing pages** (homepage, apply/apply-store, sign-*, login,
+  form) use the default espresso-brown/antique-gold palette in `theme.css`,
+  sampled from the org shield logo.
+- **The logged-in portal** (`admin/*`, `shul-portal/*`, `store-portal/*`)
+  additionally loads `css/portal-theme.css` after `theme.css`, which
+  redefines the same variable names (`--brand-bg`, `--brand-gold*`,
+  `--sidebar-*`, etc.) with navy/cyan values sampled from the everythingshul
+  wordmark. Every shared component (buttons, sidebar, tabs, tables) is
+  written against those variables, so the override is a drop-in recolor —
+  no component CSS is duplicated. If you add a new hardcoded color anywhere
+  in `theme.css`, it silently won't theme in the portal; add it as a
+  variable instead (see `--sidebar-link`/`--sidebar-active-1/2` for the
+  pattern this bit us with once already).
+
+`renderPublicFooter()` (app.js) and the email footer (`mail.js`) both use
+`<img src=".../img/everythingshul-logo.png">` for the "Powered by" mark —
+the email version needs `APP_URL` set to build an absolute URL, and falls
+back to plain text if it isn't.
+
 ## Not yet built / explicitly out of scope this pass
 - Real disccardpromos.com endpoint confirmation (mock mode — see above).
-- Logo file upload UI (organizations.logo_url exists; no upload endpoint yet;
-  the actual org + everythingshul logo image files have not been obtained —
-  attempts to fetch them from user-provided URLs were blocked by this
-  sandbox's network policy, need the user to attach the files directly).
+- Logo file upload UI (organizations.logo_url exists; no upload endpoint —
+  the org/everythingshul logos are checked into `frontend/img/` as static
+  files instead, since this is a single-org platform).
 - A dedicated audit-log viewer UI (data is fully captured in `audit_log`, just
   no page renders it yet).
 - CSV template for "XCLS" specifically — `xlsx` reads both `.xlsx` and `.csv`;
   treated as a likely typo for XLS/XLSX.
-- Homepage/full visual redesign with real logo assets — blocked on the logo
-  files (see above).
 
 ## Deployment
 1. `npm install`

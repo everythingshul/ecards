@@ -19,6 +19,10 @@
   --radius: 10px;
   --shadow: 0 4px 18px rgba(36, 26, 21, 0.10);
   --sidebar-w: 250px;
+  --sidebar-link: #d8c9ac;
+  --sidebar-active-1: rgba(201,167,106,.25);
+  --sidebar-active-2: rgba(169,119,63,.25);
+  --sidebar-muted: #b8a688;
 }
 
 * { box-sizing: border-box; }
@@ -72,7 +76,7 @@ table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th { text-align: left; padding: 10px 12px; background: var(--brand-panel-2); color: var(--text-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
 th:hover { color: var(--brand-gold-dark); }
 td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-tr:hover td { background: #fbf8f1; }
+tr:hover td { background: var(--brand-panel-2); }
 
 /* App shell */
 .app-shell { display: flex; min-height: 100vh; }
@@ -81,10 +85,10 @@ tr:hover td { background: #fbf8f1; }
 .sidebar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand-gold); }
 .sidebar .brand-name { font-family: Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--brand-gold-light); }
 .sidebar nav { flex: 1; padding: 14px 10px; overflow-y: auto; }
-.sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; color: #d8c9ac; text-decoration: none; font-size: 13.5px; margin-bottom: 2px; }
+.sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13.5px; margin-bottom: 2px; }
 .sidebar nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
-.sidebar nav a.active { background: linear-gradient(135deg, rgba(201,167,106,.25), rgba(169,119,63,.25)); color: var(--brand-gold-light); font-weight: 600; }
-.sidebar .user-box { padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12.5px; color: #b8a688; }
+.sidebar nav a.active { background: linear-gradient(135deg, var(--sidebar-active-1), var(--sidebar-active-2)); color: var(--brand-gold-light); font-weight: 600; }
+.sidebar .user-box { padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12.5px; color: var(--sidebar-muted); }
 .sidebar .user-box button { margin-top: 6px; background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; }
 
 .main { flex: 1; min-width: 0; }
@@ -142,3 +146,9 @@ tr:hover td { background: #fbf8f1; }
 .site-footer-inner a { color: var(--brand-gold-dark); text-decoration: none; font-weight: 700; }
 .site-footer-inner a:hover { text-decoration: underline; }
 .site-footer-mark { color: var(--brand-gold-dark); margin-left: 3px; }
+.site-footer-inner img { height: 18px; width: auto; vertical-align: middle; margin-left: 5px; position: relative; top: -1px; }
+
+/* Real logo image, used in place of the old CSS circle/diamond placeholder
+   wherever a brand mark is centered above a form (public headers, login-style
+   pages). Height-constrained so the shield's tall aspect ratio stays sane. */
+.brand-mark { display: block; margin: 0 auto 16px; height: 58px; width: auto; }

@@ -98,7 +98,7 @@ function renderShell(activeHref, contentHtml) {
   document.body.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
-        <div class="brand"><div class="dot"></div><div class="brand-name">everythingshul<br><span style="font-size:11px;color:#b8a688;">e-cards admin</span></div></div>
+        <div class="brand"><img src="/img/org-logo.png" alt="Organization logo" style="height:36px;width:auto"><div class="brand-name">everythingshul<br><span style="font-size:11px;color:var(--sidebar-muted);">e-cards admin</span></div></div>
         <nav>${navHtml}</nav>
         <div class="user-box">${esc(user?.first_name || '')} ${esc(user?.last_name || '')}<br><span style="text-transform:capitalize">${esc((role || '').replace('_', ' '))}</span><br><button onclick="Auth.logout()">Sign out</button></div>
       </aside>
@@ -287,7 +287,7 @@ window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 function renderPublicFooter() {
   const el = document.createElement('footer');
   el.className = 'site-footer';
-  el.innerHTML = `<div class="site-footer-inner">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener">everythingshul<span class="site-footer-mark">&#9670;</span></a></div>`;
+  el.innerHTML = `<div class="site-footer-inner">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener"><img src="/img/everythingshul-logo.png" alt="everythingshul.com"></a></div>`;
   document.body.appendChild(el);
 }
 

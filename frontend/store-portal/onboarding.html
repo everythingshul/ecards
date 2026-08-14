@@ -4,6 +4,9 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Store Setup — everythingshul</title>
 <link rel="stylesheet" href="/css/theme.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/portal-theme.css">
 <style>.step-dots{display:flex;gap:8px;justify-content:center;margin-bottom:24px}.step-dots span{width:10px;height:10px;border-radius:50%;background:var(--border)}.step-dots span.active{background:var(--brand-gold-dark)}.step-dots span.done{background:var(--success)}</style>
 </head>
 <body>
@@ -12,7 +15,7 @@
 Auth.requireAuth();
 document.body.innerHTML = `
   <div class="public-wrap">
-    <div class="public-header"><div class="dot"><span>&#9670;</span></div><h1>Complete Your Store Setup</h1></div>
+    <div class="public-header"><img class="brand-mark" src="/img/org-logo.png" alt="Organization logo"><h1>Complete Your Store Setup</h1></div>
     <div class="step-dots" id="dots"><span></span><span></span><span></span></div>
     <div class="card" id="wrap">Loading…</div>
   </div>`;
