@@ -76,6 +76,7 @@ const NAV_ITEMS = [
   { href: '/admin/tasks.html', label: 'Tasks', icon: '&#9670;', resource: 'tasks' },
   { href: '/admin/forms.html', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
   { href: '/admin/emails.html', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
+  { href: '/admin/sms.html', label: 'SMS Center', icon: '&#9670;', resource: 'sms' },
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
 ];

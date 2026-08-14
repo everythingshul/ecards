@@ -64,6 +64,7 @@ async function openUser(id) {
         <div><label>First Name</label><input id="e-first_name" value="${esc(u.first_name||'')}"></div>
         <div><label>Last Name</label><input id="e-last_name" value="${esc(u.last_name||'')}"></div>
       </div>
+      <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="e-phone" value="${esc(u.phone||'')}">
       <label>Role</label>
       <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Staff (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option><option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option></select>
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
@@ -84,18 +85,19 @@ window.saveUser = async (id) => {
     scope: el.querySelector('.p-scope').value,
     hidden_fields: Array.from(el.querySelectorAll('.p-hide:checked')).map(c => c.value),
   }));
-  const body = { first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value, role: qs('#e-role').value, is_active: qs('#e-active').checked, permissions };
+  const body = { first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value, phone: qs('#e-phone').value, role: qs('#e-role').value, is_active: qs('#e-active').checked, permissions };
   try { await api(`/users/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.deactivateUser = async (id) => { if (!confirm('Deactivate this user?')) return; try { await api(`/users/${id}`, { method: 'DELETE' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 
 qs('#btn-new').addEventListener('click', () => {
   const body = `<label>Email *</label><input id="n-email" type="email"><label>First Name *</label><input id="n-first_name"><label>Last Name</label><input id="n-last_name">
+    <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="n-phone">
     <label>Role</label><select id="n-role"><option value="staff">Staff (limited)</option><option value="org_admin">Org Admin (full)</option></select>`;
   openModal('Invite User', body, `<button class="btn btn-primary btn-sm" onclick="createUser()">Send Invite</button>`);
 });
 window.createUser = async () => {
-  const body = { email: qs('#n-email').value, first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, role: qs('#n-role').value };
+  const body = { email: qs('#n-email').value, first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, phone: qs('#n-phone').value, role: qs('#n-role').value };
   try { const r = await api('/users', { method: 'POST', body }); toast(r.emailError ? `User created, but invite email failed: ${r.emailError}` : 'Invite sent', !!r.emailError); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 

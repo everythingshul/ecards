@@ -36,3 +36,9 @@ services:
         sync: false
       - key: DISCCARDPROMOS_API_KEY
         sync: false
+      - key: SMS_API_BASE
+        sync: false
+      - key: SMS_API_KEY
+        sync: false
+      - key: SMS_FROM_NUMBER
+        sync: false

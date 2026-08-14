@@ -201,6 +201,38 @@ CREATE TABLE IF NOT EXISTS email_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_email_templates_org ON email_templates(org_id);
 
+-- ===================== SMS Center =====================
+-- Every SMS this platform sends or receives, provider-agnostic — see
+-- services/sms.js (mirrors the disccardpromos mock-mode pattern: runs in
+-- mock mode, logging only, until SMS_API_BASE/SMS_API_KEY are set).
+CREATE TABLE IF NOT EXISTS sms_messages (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  direction TEXT NOT NULL,       -- outbound | inbound
+  phone TEXT NOT NULL,
+  body TEXT,
+  status TEXT NOT NULL,          -- sent | failed | mock | received
+  error_message TEXT,
+  related_entity_type TEXT,
+  related_entity_id TEXT,
+  sent_by TEXT REFERENCES users(id), -- null for inbound or automatic sends
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_org ON sms_messages(org_id, created_at);
+
+-- Reusable SMS body templates, same idea as email_templates.
+CREATE TABLE IF NOT EXISTS sms_templates (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  category TEXT,
+  body TEXT NOT NULL,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sms_templates_org ON sms_templates(org_id);
+
 -- ===================== Applicants =====================
 CREATE TABLE IF NOT EXISTS applicants (
   id TEXT PRIMARY KEY,

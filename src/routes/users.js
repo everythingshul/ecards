@@ -10,12 +10,12 @@ const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms
 router.use(auth, requireRole('super_admin', 'org_admin'));
 
 router.get('/', (req, res) => {
-  const users = db.prepare(`SELECT id, email, first_name, last_name, role, is_active, is_paused, last_login_at, created_at FROM users WHERE org_id = ? ORDER BY created_at DESC`).all(req.user.org_id);
+  const users = db.prepare(`SELECT id, email, first_name, last_name, phone, role, is_active, is_paused, last_login_at, created_at FROM users WHERE org_id = ? ORDER BY created_at DESC`).all(req.user.org_id);
   res.json({ users });
 });
 
 router.get('/:id', (req, res) => {
-  const user = db.prepare('SELECT id, email, first_name, last_name, role, is_active, is_paused FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  const user = db.prepare('SELECT id, email, first_name, last_name, phone, role, is_active, is_paused FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
   const perms = db.prepare('SELECT * FROM permissions WHERE user_id = ?').all(user.id).map(p => ({ ...p, hidden_fields: JSON.parse(p.hidden_fields || '[]') }));
   const assignments = db.prepare('SELECT * FROM user_assignments WHERE user_id = ?').all(user.id);
@@ -24,14 +24,14 @@ router.get('/:id', (req, res) => {
 
 // Invite a new internal user with a role + optional per-resource permission overrides.
 router.post('/', async (req, res) => {
-  const { email, first_name, last_name, role = 'staff', permissions = [] } = req.body || {};
+  const { email, first_name, last_name, phone, role = 'staff', permissions = [] } = req.body || {};
   if (!email || !first_name) return res.status(400).json({ error: 'Email and first name are required' });
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'A user with this email already exists' });
   const id = uuid();
   const token = uuid();
   const expires = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
-  db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, role, invite_token, invite_expires, is_active)
-    VALUES (?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', role, token, expires);
+  db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, phone, role, invite_token, invite_expires, is_active)
+    VALUES (?,?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', phone || '', role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
   const { emailError } = await sendMailChecked(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
@@ -42,9 +42,9 @@ router.post('/', async (req, res) => {
 router.put('/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
-  const { first_name, last_name, role, is_active, permissions, assignments } = req.body || {};
-  db.prepare(`UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?`)
-    .run(first_name, last_name, role, is_active === undefined ? undefined : (is_active ? 1 : 0), user.id);
+  const { first_name, last_name, phone, role, is_active, permissions, assignments } = req.body || {};
+  db.prepare(`UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), phone = COALESCE(?, phone), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?`)
+    .run(first_name, last_name, phone, role, is_active === undefined ? undefined : (is_active ? 1 : 0), user.id);
   if (Array.isArray(permissions)) {
     for (const p of permissions) upsertPermission(user.id, p);
   }

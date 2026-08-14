@@ -23,6 +23,7 @@ import taskRoutes from './routes/tasks.js';
 import systemExportRoutes from './routes/systemExport.js';
 import documentRoutes from './routes/documents.js';
 import emailRoutes from './routes/emails.js';
+import smsRoutes from './routes/sms.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -60,6 +61,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/system-export', systemExportRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/emails', emailRoutes);
+app.use('/api/sms', smsRoutes);
 
 // Signed/generated PDFs and uploaded logos.
 app.use('/uploads/contracts', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'contracts')));

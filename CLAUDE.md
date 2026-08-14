@@ -147,6 +147,45 @@ substitutes `{{variable}}` from a `variables` object at send time — the
 admin-composed "Email Builder" the user asked for, distinct from the
 system's automatic emails.
 
+## SMS Center (`/admin/sms.html`)
+Same shape as Email Center but for SMS, and provider-agnostic since no
+provider has been picked yet. `sendSmsChecked()` (`services/sms.js`) is the
+single choke point every outbound SMS passes through, logging every attempt
+to the `sms_messages` table (`direction` outbound/inbound, `status`
+sent/failed/mock/received, error message, optional
+`related_entity_type`/`related_entity_id`/`sent_by`).
+
+`isSmsMockMode()` returns true whenever `SMS_API_BASE` or `SMS_API_KEY` is
+unset — in mock mode every send is logged with `status: 'mock'` and a
+console line instead of making a real HTTP call, mirroring the
+Brevo-dry-run and disccardpromos-mock patterns elsewhere in the app. Once a
+provider is chosen, set `SMS_API_BASE`, `SMS_API_KEY`, and `SMS_FROM_NUMBER`
+as Render environment variables (never committed) and `sendSmsChecked()`
+POSTs `{ to, from, body }` to `${SMS_API_BASE}/messages` with a Bearer
+token — adjust that one call site if the chosen provider's API shape
+differs.
+
+The "Templates" tab is plain CRUD (`sms_templates` table, `{{variable}}`
+placeholders) via `/api/sms/templates*`. "Send Message"
+(`POST /api/sms/send`) accepts either `to` (single phone number, with
+`{{variable}}` substitution from a `variables` object) or `group` — one of
+`shuls`/`stores`/`applicants`/`staff`, broadcasting the same message
+unsubstituted to every phone number on file for that group. There's no
+separate phonebook: group recipients are resolved from each entity's
+existing phone fields (shuls' `gabai_cell`; stores'
+`COALESCE(manager_phone, owner_phone)`; applicants'
+`COALESCE(husband_cell, wife_cell, home_phone)`; staff's `users.phone`,
+which previously existed as a dead column and is now wired into the
+Users & Permissions invite/edit UI). Entities with no phone on file are
+silently skipped.
+
+"Inbox" reads inbound messages, logged via the public (unauthenticated)
+`POST /api/sms/webhook/inbound` — point the provider's inbound-message
+webhook there once one is configured. It accepts a few common field-name
+variants (`from`/`From`/`sender`/`msisdn`, `body`/`Body`/`text`/`message`)
+since the real provider's payload shape isn't known yet, and always
+responds `200` so providers don't retry.
+
 ## Downloads / exports — always use `downloadAuthed()`
 This app has no cookie session, only a Bearer token in `localStorage`. A
 plain `location.href = '/api/...'` navigation sends **no** Authorization

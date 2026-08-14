@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMS Center · Kipas Hair BP Platform</title>
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/portal-theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderShell('/admin/sms.html', `
+  <div class="flex-between"><h2>SMS Center</h2><button class="btn btn-primary btn-sm" id="btn-compose">Send Message</button></div>
+  <div id="mock-banner"></div>
+  <div class="tabs" id="stabs">
+    <button class="active" data-t="sent">Sent Messages</button>
+    <button data-t="inbox">Inbox</button>
+    <button data-t="templates">Templates</button>
+  </div>
+
+  <div id="panel-sent">
+    <div class="toolbar">
+      <input id="f-search" placeholder="Search phone or message…">
+      <select id="f-status"><option value="">All statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="mock">Mock (no provider)</option></select>
+      <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table><thead><tr><th>Phone</th><th>Message</th><th>Status</th><th>Sent</th></tr></thead>
+      <tbody id="tbody-sent"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody></table>
+    </div>
+    <div class="paginator" id="pager-sent"></div>
+  </div>
+
+  <div id="panel-inbox" style="display:none">
+    <p class="small-muted">Incoming messages, received via the provider's inbound webhook once one is configured (<code>POST /api/sms/webhook/inbound</code>).</p>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table><thead><tr><th>From</th><th>Message</th><th>Received</th></tr></thead>
+      <tbody id="tbody-inbox"><tr><td colspan="3" class="empty-state">Loading…</td></tr></tbody></table>
+    </div>
+    <div class="paginator" id="pager-inbox"></div>
+  </div>
+
+  <div id="panel-templates" style="display:none">
+    <div class="flex-between"><p class="small-muted">Reusable SMS templates. Use <code>{{variable}}</code> placeholders in the message.</p><button class="btn btn-outline btn-sm" id="btn-new-template">+ New Template</button></div>
+    <div id="templates-list"><p class="small-muted">Loading…</p></div>
+  </div>
+`);
+
+qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
+  qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
+  ['sent','inbox','templates'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  if (b.dataset.t === 'templates') loadTemplates();
+  if (b.dataset.t === 'inbox') loadInbox();
+}));
+
+api('/sms/config').then(({ mockMode }) => {
+  if (mockMode) qs('#mock-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px"><strong>Mock mode:</strong> SMS_API_BASE / SMS_API_KEY are not configured yet, so messages are logged here but not actually sent. Set those env vars to go live.</div>`;
+}).catch(() => {});
+
+let state = { search: '', status: '', page: 1, pageSize: 25 };
+async function loadSent() {
+  const params = new URLSearchParams(Object.fromEntries(Object.entries({ ...state, direction: 'outbound' }).filter(([,v]) => v !== '')));
+  try {
+    const { messages, total } = await api('/sms?' + params);
+    qs('#tbody-sent').innerHTML = messages.length ? messages.map(sentRowHtml).join('') : '<tr><td colspan="4" class="empty-state">No messages sent yet.</td></tr>';
+    const pages = Math.max(1, Math.ceil(total / state.pageSize));
+    qs('#pager-sent').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
+  } catch (err) { toast(err.message, true); }
+}
+function changePage(d) { state.page += d; loadSent(); }
+function sentRowHtml(m) {
+  const statusCls = m.status === 'sent' ? 'active' : (m.status === 'failed' ? 'rejected' : 'pending');
+  const statusLabel = m.status === 'mock' ? 'mock' : m.status;
+  return `<tr><td>${esc(m.phone)}</td><td>${esc(m.body || '')}</td><td>${badge(statusLabel, statusCls)}</td><td>${fmtDateTime(m.created_at)}</td></tr>`;
+}
+qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; loadSent(); }, 350));
+qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; loadSent(); });
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/sms/export', 'sms-messages.csv'));
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+let inboxState = { page: 1, pageSize: 25 };
+async function loadInbox() {
+  const params = new URLSearchParams({ direction: 'inbound', page: inboxState.page, pageSize: inboxState.pageSize });
+  try {
+    const { messages, total } = await api('/sms?' + params);
+    qs('#tbody-inbox').innerHTML = messages.length ? messages.map(m => `<tr><td>${esc(m.phone)}</td><td>${esc(m.body || '')}</td><td>${fmtDateTime(m.created_at)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty-state">No incoming messages yet.</td></tr>';
+    const pages = Math.max(1, Math.ceil(total / inboxState.pageSize));
+    qs('#pager-inbox').innerHTML = `<button class="btn btn-sm btn-outline" ${inboxState.page<=1?'disabled':''} onclick="changeInboxPage(-1)">Prev</button> Page ${inboxState.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${inboxState.page>=pages?'disabled':''} onclick="changeInboxPage(1)">Next</button>`;
+  } catch (err) { toast(err.message, true); }
+}
+function changeInboxPage(d) { inboxState.page += d; loadInbox(); }
+
+let templatesCache = [];
+async function loadTemplates() {
+  try {
+    const { templates } = await api('/sms/templates/all');
+    templatesCache = templates;
+    qs('#templates-list').innerHTML = templates.length ? templates.map(t => `<div class="card" style="margin-bottom:10px">
+        <div class="flex-between"><strong>${esc(t.name)}</strong>${t.category ? `<span class="small-muted">${esc(t.category)}</span>` : ''}</div>
+        <p class="small-muted">${esc(t.body)}</p>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-sm btn-outline" onclick="editTemplate('${t.id}')">Edit</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTemplate('${t.id}')">Delete</button>
+        </div>
+      </div>`).join('') : '<p class="small-muted">No templates yet.</p>';
+  } catch (err) { toast(err.message, true); }
+}
+function templateFormBody(t = {}) {
+  return `
+    <label>Name <span class="req">*</span></label><input id="tp-name" value="${esc(t.name||'')}">
+    <label>Category <span class="small-muted">(optional)</span></label><input id="tp-category" value="${esc(t.category||'')}">
+    <label>Message <span class="req">*</span> <span class="small-muted">(use {{variable}} placeholders as needed)</span></label>
+    <textarea id="tp-body" rows="5">${esc(t.body||'')}</textarea>
+  `;
+}
+qs('#btn-new-template').addEventListener('click', () => {
+  openModal('New Template', templateFormBody(), `<button class="btn btn-primary btn-sm" onclick="createTemplate()">Create</button>`);
+});
+window.createTemplate = async () => {
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), body: qs('#tp-body').value };
+  if (!body.name || !body.body) return toast('Name and message are required', true);
+  try { await api('/sms/templates', { method: 'POST', body }); toast('Template created'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+window.editTemplate = (id) => {
+  const t = templatesCache.find(x => x.id === id);
+  if (!t) return;
+  openModal('Edit Template', templateFormBody(t), `<button class="btn btn-danger btn-sm" onclick="deleteTemplate('${id}')">Delete</button><button class="btn btn-primary btn-sm" onclick="saveTemplate('${id}')">Save</button>`);
+};
+window.saveTemplate = async (id) => {
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), body: qs('#tp-body').value };
+  try { await api(`/sms/templates/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+window.deleteTemplate = async (id) => {
+  if (!confirm('Delete this template?')) return;
+  try { await api(`/sms/templates/${id}`, { method: 'DELETE' }); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
+};
+
+qs('#btn-compose').addEventListener('click', async () => {
+  if (!templatesCache.length) { try { ({ templates: templatesCache } = await api('/sms/templates/all')); } catch { /* compose still works without templates */ } }
+  const tmplOptions = `<option value="">Start from scratch</option>` + templatesCache.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  const body = `
+    <label>Send To</label>
+    <select id="cp-mode">
+      <option value="single">A specific phone number</option>
+      <option value="shuls">Group: All Shuls (Gabai cell)</option>
+      <option value="stores">Group: All Stores (manager/owner phone)</option>
+      <option value="applicants">Group: All Applicants</option>
+      <option value="staff">Group: All Staff (with phone on file)</option>
+    </select>
+    <div id="cp-single-wrap"><label>Phone Number <span class="req">*</span></label><input id="cp-to" placeholder="+15555550123"></div>
+    <label>Use Template</label><select id="cp-template">${tmplOptions}</select>
+    <label>Message <span class="req">*</span></label><textarea id="cp-body" rows="5"></textarea>
+  `;
+  openModal('Send SMS', body, `<button class="btn btn-primary btn-sm" onclick="sendComposedSms()">Send</button>`);
+  qs('#cp-mode').addEventListener('change', () => { qs('#cp-single-wrap').style.display = qs('#cp-mode').value === 'single' ? 'block' : 'none'; });
+  qs('#cp-template').addEventListener('change', () => {
+    const t = templatesCache.find(x => x.id === qs('#cp-template').value);
+    qs('#cp-body').value = t ? t.body : '';
+  });
+});
+window.sendComposedSms = async () => {
+  const mode = qs('#cp-mode').value;
+  const messageBody = qs('#cp-body').value;
+  if (!messageBody) return toast('Message is required', true);
+  const payload = { body: messageBody };
+  if (mode === 'single') {
+    const to = qs('#cp-to').value.trim();
+    if (!to) return toast('Enter a phone number', true);
+    payload.to = to;
+  } else {
+    payload.group = mode;
+  }
+  try {
+    const r = await api('/sms/send', { method: 'POST', body: payload });
+    if (mode === 'single') toast(r.emailError ? `Could not send: ${r.emailError}` : 'Message sent', !!r.emailError);
+    else toast(`Sent to ${r.sent} of ${r.total} recipient(s)${r.failed ? `, ${r.failed} failed` : ''}`, !!r.failed && r.sent === 0);
+    closeModal(); loadSent();
+  } catch (err) { toast(err.message, true); }
+};
+
+loadSent();
+</script>
+</body>
+</html>
