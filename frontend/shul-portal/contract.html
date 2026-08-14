@@ -22,7 +22,7 @@ renderShell('/shul-portal/contract.html', `
     const { shul, contract } = await api(`/shuls/${u.shul_id}`);
     if (!contract) { qs('#wrap').innerHTML = '<p class="small-muted">No contract on file yet.</p>'; return; }
     qs('#wrap').innerHTML = `<p><strong>Status:</strong> ${badge(contract.status, contract.status)}</p>
-      ${contract.signed_at ? `<p>Signed by ${esc(contract.signer_name)} on ${fmtDateTime(contract.signed_at)}</p><a class="btn btn-outline btn-sm" href="/api/shuls/${u.shul_id}/contract/pdf" target="_blank">View Signed PDF</a>` : '<p class="small-muted">Awaiting signature.</p>'}`;
+      ${contract.signed_at ? `<p>Signed by ${esc(contract.signer_name)} on ${fmtDateTime(contract.signed_at)}</p><button class="btn btn-outline btn-sm" onclick="viewAuthed('/shuls/${u.shul_id}/contract/pdf')">View Signed PDF</button>` : '<p class="small-muted">Awaiting signature.</p>'}`;
   } catch (err) { qs('#wrap').innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
 })();
 </script>
