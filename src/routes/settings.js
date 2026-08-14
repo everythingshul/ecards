@@ -3,7 +3,7 @@ import multer from 'multer';
 import { unlinkSync, writeFileSync } from 'fs';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate } from '../services/pdf.js';
+import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate } from '../services/pdf.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -56,6 +56,29 @@ router.post('/contract-pdf', requireAdmin, upload.single('file'), (req, res) => 
 
 router.delete('/contract-pdf', requireAdmin, (req, res) => {
   try { unlinkSync(CUSTOM_TEMPLATE_PATH); } catch { /* already gone */ }
+  res.json({ ok: true, hasCustomTemplate: false });
+});
+
+// Custom document PDFs for applicants and stores — same idea as the shul
+// contract above, generalized. entityType is 'applicant' or 'store'.
+router.get('/document-pdf/:entityType', (req, res) => {
+  if (!['applicant', 'store'].includes(req.params.entityType)) return res.status(400).json({ error: 'Invalid entity type' });
+  res.json({ hasCustomTemplate: hasCustomDocTemplate(req.params.entityType) });
+});
+
+router.post('/document-pdf/:entityType', requireAdmin, upload.single('file'), (req, res) => {
+  const entityType = req.params.entityType;
+  if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'File must be a PDF' });
+  writeFileSync(docTemplatePath(entityType), req.file.buffer);
+  res.json({ ok: true, hasCustomTemplate: true });
+});
+
+router.delete('/document-pdf/:entityType', requireAdmin, (req, res) => {
+  const entityType = req.params.entityType;
+  if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
+  try { unlinkSync(docTemplatePath(entityType)); } catch { /* already gone */ }
   res.json({ ok: true, hasCustomTemplate: false });
 });
 

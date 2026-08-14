@@ -15,7 +15,7 @@ renderShell('/admin/settings.html', `
     <button class="active" data-t="org">Organization</button>
     <button data-t="seasons">Seasons</button>
     <button data-t="fields">Required Fields</button>
-    <button data-t="contract">Contract Template</button>
+    <button data-t="documents">Documents</button>
   </div>
 
   <div id="panel-org">
@@ -59,29 +59,50 @@ renderShell('/admin/settings.html', `
     </div>
   </div>
 
-  <div id="panel-contract" style="display:none">
+  <div id="panel-documents" style="display:none">
+    <p class="small-muted">Each of these can either use your own uploaded PDF as-is, or a simple generated document built from the text below. Whichever is used, the signer's signature is stamped onto the bottom of the last page automatically when they sign.</p>
     <div class="card">
-      <h3>Upload Your Own Contract PDF</h3>
+      <h3>Shul Contract</h3>
       <p class="small-muted" id="pdf-status">Checking…</p>
-      <p class="small-muted">Upload your own signed-off contract document to use as-is instead of the generated one below. When a shul signs, their signature is stamped onto the bottom of the last page automatically — no other setup needed.</p>
       <input type="file" id="contract-pdf-file" accept="application/pdf">
       <div style="margin-top:12px;display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" onclick="uploadContractPdf()">Upload PDF</button>
         <button class="btn btn-sm btn-outline" id="btn-remove-pdf" style="display:none" onclick="removeContractPdf()">Remove & Use Generated Template</button>
       </div>
+      <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
+      <textarea id="contract-text" rows="8"></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveContractText()">Save Text</button>
     </div>
     <div class="card" style="margin-top:16px">
-      <h3>Contract Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></h3>
-      <p class="small-muted">This text is inserted into the generated contract PDF body, below the shul/Rav/Gabai details.</p>
-      <textarea id="contract-text" rows="10"></textarea>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveContractText()">Save</button>
+      <h3>Applicant Agreement</h3>
+      <p class="small-muted" id="doc-pdf-status-applicant">Checking…</p>
+      <input type="file" id="doc-pdf-file-applicant" accept="application/pdf">
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="uploadDocPdf('applicant')">Upload PDF</button>
+        <button class="btn btn-sm btn-outline" id="btn-remove-doc-pdf-applicant" style="display:none" onclick="removeDocPdf('applicant')">Remove & Use Generated Template</button>
+      </div>
+      <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
+      <textarea id="doc-text-applicant" rows="8"></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDocText('applicant')">Save Text</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Store Agreement</h3>
+      <p class="small-muted" id="doc-pdf-status-store">Checking…</p>
+      <input type="file" id="doc-pdf-file-store" accept="application/pdf">
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="uploadDocPdf('store')">Upload PDF</button>
+        <button class="btn btn-sm btn-outline" id="btn-remove-doc-pdf-store" style="display:none" onclick="removeDocPdf('store')">Remove & Use Generated Template</button>
+      </div>
+      <label style="margin-top:16px">Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></label>
+      <textarea id="doc-text-store" rows="8"></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDocText('store')">Save Text</button>
     </div>
   </div>
 `);
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','fields','contract'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  ['org','seasons','fields','documents'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
 }));
 
 async function loadOrg() {
@@ -172,7 +193,33 @@ window.removeContractPdf = async () => {
   try { await api('/settings/contract-pdf', { method: 'DELETE' }); toast('Removed'); loadContractPdfStatus(); } catch (err) { toast(err.message, true); }
 };
 
+async function loadDocPdfStatus(entityType) {
+  const { hasCustomTemplate } = await api(`/settings/document-pdf/${entityType}`);
+  qs(`#doc-pdf-status-${entityType}`).innerHTML = hasCustomTemplate
+    ? '<strong style="color:var(--success)">A custom PDF is currently in use.</strong>'
+    : 'No custom PDF uploaded — using the generated text template below.';
+  qs(`#btn-remove-doc-pdf-${entityType}`).style.display = hasCustomTemplate ? 'inline-flex' : 'none';
+}
+window.uploadDocPdf = async (entityType) => {
+  const file = qs(`#doc-pdf-file-${entityType}`).files[0];
+  if (!file) return toast('Choose a PDF file first', true);
+  const fd = new FormData(); fd.append('file', file);
+  try { await api(`/settings/document-pdf/${entityType}`, { method: 'POST', isForm: true, body: fd }); toast('PDF uploaded'); loadDocPdfStatus(entityType); } catch (err) { toast(err.message, true); }
+};
+window.removeDocPdf = async (entityType) => {
+  if (!confirm('Remove the custom PDF and go back to the generated text template?')) return;
+  try { await api(`/settings/document-pdf/${entityType}`, { method: 'DELETE' }); toast('Removed'); loadDocPdfStatus(entityType); } catch (err) { toast(err.message, true); }
+};
+async function loadDocText(entityType) {
+  const { settings } = await api('/settings');
+  qs(`#doc-text-${entityType}`).value = settings[`document_template_text_${entityType}`] || '';
+}
+window.saveDocText = async (entityType) => {
+  try { await api('/settings', { method: 'PUT', body: { [`document_template_text_${entityType}`]: qs(`#doc-text-${entityType}`).value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
 loadOrg(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>
 </html>

@@ -117,7 +117,7 @@ async function openApplicant(id) {
   try {
     const { applicant: a, notes, cards, flags } = await api(`/applicants/${id}`);
     const body = `
-      <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button></div>
+      <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button></div>
       <div id="atab-info">
         <div class="grid-2">
           <div><strong>Shul</strong><br>${esc(a.shul_name||'—')}</div>
@@ -153,6 +153,9 @@ async function openApplicant(id) {
       </div>
       <div id="atab-cards" style="display:none">
         ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards.html?card=${c.id}">View transactions &rarr;</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
+      </div>
+      <div id="atab-documents" style="display:none">
+        <div id="atab-documents-list"><p class="small-muted">Loading…</p></div>
       </div>`;
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('applicant','${id}','${esc(a.first_name+' '+a.last_name).replace(/'/g,"\\'")}')">+ Add Task</button>
@@ -161,8 +164,9 @@ async function openApplicant(id) {
     openModal(`${a.first_name} ${a.last_name}`, body, footer);
     qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','notes','cards'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','notes','cards','documents'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
+    loadDocumentsTab('applicant', id, 'atab-documents-list', a.email || '');
   } catch (err) { toast(err.message, true); }
 }
 

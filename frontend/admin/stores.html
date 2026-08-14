@@ -46,7 +46,7 @@ async function openStore(id) {
   try {
     const { store: s, billing, transactionTotals } = await api(`/stores/${id}`);
     const body = `
-      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${billing.length})</button></div>
+      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${billing.length})</button><button data-t="documents">Documents</button></div>
       <div id="stab-info">
         <div class="grid-2">
           <div><label>Store Name</label><input id="e-name" value="${esc(s.name)}"></div>
@@ -86,13 +86,17 @@ async function openStore(id) {
               <button class="btn btn-sm btn-outline" onclick="markInvoiced('${b.id}')">Mark Invoiced</button>
             </div>
           </div>`).join('') : '<p class="small-muted">No billing periods yet.</p>'}</div>
+      </div>
+      <div id="stab-documents" style="display:none">
+        <div id="stab-documents-list"><p class="small-muted">Loading…</p></div>
       </div>`;
     const footer = `<button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button><button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
     openModal(s.name, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','billing'].forEach(t => qs('#stab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','billing','documents'].forEach(t => qs('#stab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
+    loadDocumentsTab('store', id, 'stab-documents-list', s.owner_email || s.manager_email || '');
   } catch (err) { toast(err.message, true); }
 }
 

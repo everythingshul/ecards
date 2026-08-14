@@ -207,6 +207,80 @@ async function storeLandingUrl(user) {
   } catch { return '/store-portal/dashboard.html'; }
 }
 
+// Authenticated PDF view (opens in a new tab instead of forcing a download) —
+// same auth-header requirement as downloadAuthed above.
+async function viewAuthed(path) {
+  const headers = {};
+  if (Auth.token()) headers['Authorization'] = `Bearer ${Auth.token()}`;
+  const res = await fetch(API_BASE + path, { headers });
+  if (res.status === 401) { Auth.logout(); return; }
+  if (!res.ok) { toast('Could not load PDF', true); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// Generic per-entity Documents tab (applicants & stores) — list existing
+// documents, generate new ones, and send a signing link either to the
+// record's own email on file or to any other recipient (so a specific
+// document can be routed to a specific person). The signee always gets an
+// emailed link; see routes/documents.js.
+async function loadDocumentsTab(entityType, entityId, containerId, defaultEmail) {
+  const container = qs('#' + containerId);
+  container.innerHTML = '<p class="small-muted">Loading…</p>';
+  const safeEmail = esc(defaultEmail || '').replace(/'/g, "\\'");
+  try {
+    const { documents } = await api(`/documents?entity_type=${entityType}&entity_id=${entityId}`);
+    container.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+        <div style="flex:1;min-width:160px"><label style="margin-top:0">New Document Title</label><input id="doc-title-${entityType}-${entityId}" placeholder="e.g. Agreement"></div>
+        <button class="btn btn-sm btn-primary" onclick="generateDocument('${entityType}','${entityId}','${containerId}','${safeEmail}')">Generate New Document</button>
+      </div>
+      ${documents.length ? documents.map(d => documentRowHtml(d, entityType, entityId, containerId, defaultEmail)).join('') : '<p class="small-muted">No documents yet.</p>'}
+    `;
+  } catch (err) { container.innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
+}
+function documentRowHtml(d, entityType, entityId, containerId, defaultEmail) {
+  const inputId = `doc-email-${d.id}`;
+  const safeEmail = esc(defaultEmail || '').replace(/'/g, "\\'");
+  const canAct = d.status !== 'signed' && d.status !== 'void';
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="flex-between"><strong>${esc(d.title || 'Agreement')}</strong>${badge(d.status, d.status)}</div>
+    <p class="small-muted">Created ${fmtDateTime(d.created_at)}${d.sent_at ? ' · Sent ' + fmtDateTime(d.sent_at) : ''}${d.signed_at ? ' · Signed ' + fmtDateTime(d.signed_at) + ' by ' + esc(d.signer_name || '') : ''}</p>
+    ${canAct ? `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+      <div style="flex:1;min-width:180px"><label style="margin-top:0">Send To</label><input id="${inputId}" value="${esc(defaultEmail || '')}" placeholder="email address"></div>
+      <button class="btn btn-sm btn-primary" onclick="sendDocument('${d.id}','${inputId}','${entityType}','${entityId}','${containerId}','${safeEmail}')">${d.status === 'sent' ? 'Resend' : 'Send'}</button>
+    </div>` : ''}
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn btn-sm btn-outline" onclick="viewDocumentPdf('${d.id}')">View PDF</button>
+      ${canAct ? `<button class="btn btn-sm btn-outline" onclick="voidDocument('${d.id}','${entityType}','${entityId}','${containerId}','${safeEmail}')">Void</button>` : ''}
+    </div>
+  </div>`;
+}
+window.generateDocument = async (entityType, entityId, containerId, defaultEmail) => {
+  const titleInput = qs(`#doc-title-${entityType}-${entityId}`);
+  const title = titleInput ? titleInput.value.trim() : '';
+  try {
+    await api('/documents/generate', { method: 'POST', body: { entity_type: entityType, entity_id: entityId, title } });
+    toast('Document generated');
+    loadDocumentsTab(entityType, entityId, containerId, defaultEmail);
+  } catch (err) { toast(err.message, true); }
+};
+window.sendDocument = async (docId, inputId, entityType, entityId, containerId, defaultEmail) => {
+  const email = qs('#' + inputId).value.trim();
+  try {
+    const r = await api(`/documents/${docId}/send`, { method: 'POST', body: email ? { email } : {} });
+    toast(r.emailError ? `Link created, but email failed: ${r.emailError}` : `Sent to ${email || 'their email on file'}`, !!r.emailError);
+    loadDocumentsTab(entityType, entityId, containerId, defaultEmail);
+  } catch (err) { toast(err.message, true); }
+};
+window.voidDocument = async (docId, entityType, entityId, containerId, defaultEmail) => {
+  if (!confirm('Void this document?')) return;
+  try { await api(`/documents/${docId}/void`, { method: 'POST' }); toast('Voided'); loadDocumentsTab(entityType, entityId, containerId, defaultEmail); } catch (err) { toast(err.message, true); }
+};
+window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
+
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.
 function initSignaturePad(canvasId) {
   const canvas = document.getElementById(canvasId);

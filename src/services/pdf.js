@@ -7,21 +7,9 @@ export const CUSTOM_TEMPLATE_PATH = join(DATA_DIR, 'contracts', 'org-template.pd
 
 export function hasCustomTemplate() { return existsSync(CUSTOM_TEMPLATE_PATH); }
 
-// Contract source is either (a) an admin-uploaded PDF (Settings > Contract
-// Template > Upload PDF) used as-is, or (b) a simple generated PDF built
-// from the shul/season details + a plain-text clause (Settings > Contract
-// Template > Template Text). Either way the result is a per-shul "unsigned"
-// PDF that stampSignature() below adds a signature to.
-export async function generateContractPdf({ shul, season, templateText, orgName }) {
-  const path = join(DATA_DIR, 'contracts', `${shul.id}-unsigned.pdf`);
-
-  if (hasCustomTemplate()) {
-    // Uploaded PDF used verbatim as the contract body — the signature is
-    // stamped onto its last page at sign time (see stampSignature).
-    writeFileSync(path, readFileSync(CUSTOM_TEMPLATE_PATH));
-    return path;
-  }
-
+// Shared simple word-wrapping PDF body builder, used by both the shul
+// contract and the generic applicant/store document generator below.
+async function buildSimplePdf({ heading, subheading, fieldLines, bodyText }) {
   const doc = await PDFDocument.create();
   let page = doc.addPage([612, 792]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -47,19 +35,84 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
     y -= 6;
   };
 
-  drawText(orgName, { size: 18, useFont: bold, gap: 22 });
-  drawText(`Participation Agreement — ${season?.name || ''}`, { size: 13, useFont: bold, gap: 18 });
+  drawText(heading, { size: 18, useFont: bold, gap: 22 });
+  drawText(subheading, { size: 13, useFont: bold, gap: 18 });
   y -= 8;
-  drawText(`Shul: ${shul.name_en}${shul.name_he ? ' / ' + shul.name_he : ''}`, { size: 11 });
-  drawText(`Address: ${[shul.address, shul.city, shul.state, shul.zip].filter(Boolean).join(', ')}`, { size: 11 });
-  drawText(`Rav: ${shul.ruv_first_name || ''} ${shul.ruv_last_name || ''}  |  Phone: ${shul.ruv_phone || ''}`, { size: 11 });
-  drawText(`Gabai: ${shul.gabai_first_name || ''} ${shul.gabai_last_name || ''}  |  Cell: ${shul.gabai_cell || ''}  |  Email: ${shul.gabai_email || ''}`, { size: 11 });
+  for (const line of fieldLines) drawText(line, { size: 11 });
   y -= 10;
+  drawText(bodyText, { size: 10.5, gap: 15 });
 
-  const body = templateText || `By signing below, the undersigned, on behalf of the above shul, agrees to participate in the gift card assistance program for the current season, to submit applicant information accurately and in good faith, and to abide by the program's terms as communicated by the administering organization. The organization reserves the right to allocate a limited number of slots per season and to approve or decline individual applicants at its discretion.`;
-  drawText(body, { size: 10.5, gap: 15 });
+  return doc.save();
+}
 
-  const bytes = await doc.save();
+// Contract source is either (a) an admin-uploaded PDF (Settings > Documents >
+// Shul Contract > Upload PDF) used as-is, or (b) a simple generated PDF built
+// from the shul/season details + a plain-text clause. Either way the result
+// is a per-shul "unsigned" PDF that stampSignature() below adds a signature to.
+export async function generateContractPdf({ shul, season, templateText, orgName }) {
+  const path = join(DATA_DIR, 'contracts', `${shul.id}-unsigned.pdf`);
+
+  if (hasCustomTemplate()) {
+    writeFileSync(path, readFileSync(CUSTOM_TEMPLATE_PATH));
+    return path;
+  }
+
+  const bytes = await buildSimplePdf({
+    heading: orgName,
+    subheading: `Participation Agreement — ${season?.name || ''}`,
+    fieldLines: [
+      `Shul: ${shul.name_en}${shul.name_he ? ' / ' + shul.name_he : ''}`,
+      `Address: ${[shul.address, shul.city, shul.state, shul.zip].filter(Boolean).join(', ')}`,
+      `Rav: ${shul.ruv_first_name || ''} ${shul.ruv_last_name || ''}  |  Phone: ${shul.ruv_phone || ''}`,
+      `Gabai: ${shul.gabai_first_name || ''} ${shul.gabai_last_name || ''}  |  Cell: ${shul.gabai_cell || ''}  |  Email: ${shul.gabai_email || ''}`,
+    ],
+    bodyText: templateText || `By signing below, the undersigned, on behalf of the above shul, agrees to participate in the gift card assistance program for the current season, to submit applicant information accurately and in good faith, and to abide by the program's terms as communicated by the administering organization. The organization reserves the right to allocate a limited number of slots per season and to approve or decline individual applicants at its discretion.`,
+  });
+  writeFileSync(path, bytes);
+  return path;
+}
+
+// ---------------------------------------------------------------------------
+// Generic documents (applicants + stores) — same idea as the shul contract
+// above, generalized: each entity type gets its own optional uploaded PDF
+// template, editable clause text, and default title/body when neither is set.
+// ---------------------------------------------------------------------------
+const DOC_TEMPLATE_PATHS = {
+  applicant: join(DATA_DIR, 'contracts', 'org-template-applicant.pdf'),
+  store: join(DATA_DIR, 'contracts', 'org-template-store.pdf'),
+};
+const DOC_DEFAULTS = {
+  applicant: {
+    subheading: 'Applicant Agreement',
+    body: `By signing below, the undersigned applicant acknowledges receipt of a gift card issued through this program, agrees to use it in accordance with its intended purpose, and understands that misuse may result in deactivation and disqualification from future participation.`,
+  },
+  store: {
+    subheading: 'Store Participation Agreement',
+    body: `By signing below, the undersigned, on behalf of the above store, agrees to participate as an approved redemption location for gift cards issued through this program, to honor the card's stated balance at time of purchase, and to submit transaction and billing information accurately to the administering organization.`,
+  },
+};
+
+export function docTemplatePath(entityType) { return DOC_TEMPLATE_PATHS[entityType]; }
+export function hasCustomDocTemplate(entityType) { return DOC_TEMPLATE_PATHS[entityType] ? existsSync(DOC_TEMPLATE_PATHS[entityType]) : false; }
+
+// entityType: 'applicant' | 'store'. fieldLines: array of plain summary lines
+// (name/address/contact) drawn near the top of the generated fallback PDF.
+export async function generateGenericDocumentPdf({ entityType, entityId, title, fieldLines, templateText, orgName }) {
+  const path = join(DATA_DIR, 'contracts', `${entityType}-${entityId}-unsigned.pdf`);
+  const templatePath = DOC_TEMPLATE_PATHS[entityType];
+
+  if (templatePath && existsSync(templatePath)) {
+    writeFileSync(path, readFileSync(templatePath));
+    return path;
+  }
+
+  const defaults = DOC_DEFAULTS[entityType] || { subheading: title || 'Agreement', body: '' };
+  const bytes = await buildSimplePdf({
+    heading: orgName,
+    subheading: title || defaults.subheading,
+    fieldLines,
+    bodyText: templateText || defaults.body,
+  });
   writeFileSync(path, bytes);
   return path;
 }
@@ -67,7 +120,9 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
 // Stamps a signature (base64 PNG or typed name) + metadata onto the last page
 // of the unsigned PDF. Positioned relative to the actual page size so this
 // works correctly whether the PDF is our generated Letter-size doc or an
-// admin-uploaded PDF of any dimensions.
+// admin-uploaded PDF of any dimensions. `shulId` is really just "output file
+// id" — callers for applicant/store documents pass a composite string like
+// `applicant-<id>` here; the function itself has no shul-specific logic.
 export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, signerName, signedAt, ip }) {
   const bytes = readFileSync(unsignedPath);
   const doc = await PDFDocument.load(bytes);

@@ -140,6 +140,32 @@ CREATE TABLE IF NOT EXISTS contracts (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Generic e-signable documents for applicants and stores (shuls keep using
+-- the 'contracts' table above -- that flow is older, well-tested, and left
+-- alone; this table is the same idea generalized to the other two entity
+-- types so "customize docs for applicants/shuls/stores" covers all three).
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  entity_type TEXT NOT NULL,   -- applicant | store
+  entity_id TEXT NOT NULL,
+  title TEXT DEFAULT 'Agreement',
+  pdf_path TEXT,
+  signed_pdf_path TEXT,
+  signature_data TEXT,
+  signer_name TEXT,
+  signer_title TEXT,
+  signed_at TEXT,
+  ip_address TEXT,
+  status TEXT DEFAULT 'pending', -- pending | sent | signed | void
+  sign_token TEXT UNIQUE,
+  sign_token_expires TEXT,
+  sent_at TEXT,
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_documents_entity ON documents(entity_type, entity_id);
+
 -- ===================== Applicants =====================
 CREATE TABLE IF NOT EXISTS applicants (
   id TEXT PRIMARY KEY,

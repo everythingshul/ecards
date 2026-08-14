@@ -164,6 +164,32 @@ typed name) + signer/date/IP to the bottom of the **last page**, positioned
 relative to that page's actual dimensions (works correctly for both the
 generated Letter-size doc and an arbitrary uploaded PDF).
 
+## Generic documents (applicants + stores)
+Same idea as the shul contract above, generalized to any applicant or store
+via a parallel `documents` table/route (`src/routes/documents.js`) — the
+shul `contracts` table/flow was left untouched to avoid regressions.
+
+- **Settings > Documents** has three sections: Shul Contract (existing),
+  Applicant Agreement, Store Agreement. Each independently supports an
+  uploaded PDF (`POST/DELETE /api/settings/document-pdf/:entityType`,
+  `entityType` is `applicant` or `store`, stored at
+  `DATA_DIR/contracts/org-template-<entityType>.pdf`) or generated template
+  text (`document_template_text_applicant` / `document_template_text_store`
+  keys via the generic `PUT /api/settings`).
+- Admin flow, from the applicant/store detail modal's **Documents** tab:
+  `POST /api/documents/generate` (builds the unsigned PDF + a `pending` row)
+  → `POST /api/documents/:id/send` (emails a signing link; `email` in the
+  body overrides the default so a specific document can go to a specific
+  person, not just the record's own email on file — the "Send To" field on
+  each row) → the recipient always gets an emailed link
+  (`sign-document.html?token=...`) regardless of who they are.
+- Public signing: `GET /api/documents/sign/:token`,
+  `GET /api/documents/sign/:token/pdf-preview`,
+  `POST /api/documents/sign/:token/sign` — mirrors the shul
+  `contract/:token*` endpoints, stamped via the same `stampSignature()`.
+- `GET /api/documents/:id/pdf` (admin) serves the signed PDF once available,
+  else the unsigned one.
+
 ## Store onboarding
 Mirrors the shul flow: `apply-store.html` is a public application form
 (`POST /api/stores/apply`, no auth) creating a `pending` store with
@@ -215,8 +241,6 @@ Spend" panel with total spend + top-5 breakdown.
   sandbox's network policy, need the user to attach the files directly).
 - A dedicated audit-log viewer UI (data is fully captured in `audit_log`, just
   no page renders it yet).
-- Store e-signature/contract (stores currently just check an "I agree" box in
-  the onboarding wizard — no PDF, unlike the shul contract flow).
 - CSV template for "XCLS" specifically — `xlsx` reads both `.xlsx` and `.csv`;
   treated as a likely typo for XLS/XLSX.
 - Homepage/full visual redesign with real logo assets — blocked on the logo
