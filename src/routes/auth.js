@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, uuid } from '../db.js';
 import { auth, signToken } from '../middleware/auth.js';
-import { sendMail } from '../services/mail.js';
+import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
 
@@ -50,8 +50,8 @@ router.post('/forgot-password', async (req, res) => {
     const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
     const resetUrl = `${process.env.APP_URL || ''}/reset-password.html?token=${token}`;
-    try { await sendMail(user.org_id, user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`); }
-    catch (e) { console.error('[mail] password reset email failed:', e.message); }
+    const { emailError } = await sendMailChecked(user.org_id, user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`);
+    if (emailError) console.error('[mail] password reset email failed:', emailError);
   }
   res.json({ ok: true });
 });

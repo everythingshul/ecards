@@ -5,7 +5,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignature } from '../services/pdf.js';
-import { sendMail, templates } from '../services/mail.js';
+import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 
@@ -218,11 +218,31 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     .run(slots, user.id, shul.id);
   const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${user.invite_token}`;
   const tmpl = templates.accountApproved(shul.name_en, loginUrl, slots);
-  let emailError = null;
-  try { await sendMail(req.user.org_id, user.email, tmpl.subject, tmpl.body); }
-  catch (e) { console.error('[mail] shul approval email failed:', e.message); emailError = e.message; }
+  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
+  if (emailError) console.error('[mail] shul approval email failed:', emailError);
   logAudit(req.user.org_id, req.user.id, 'approve', 'shul', shul.id, shul, { slots_allocated: slots }, req.ip);
   res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id), emailError });
+});
+
+// Re-send the "you're approved, set up your account" email — for when the
+// first send silently failed (e.g. no email provider configured at the
+// time) and there's no "unapprove" action to redo the approve step with.
+// Refreshes the invite token/expiry in case the original one already expired.
+router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  if (shul.status !== 'approved' || !shul.portal_user_id) return res.status(400).json({ error: 'This shul has not been approved yet' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(shul.portal_user_id);
+  if (!user) return res.status(404).json({ error: 'Portal account not found' });
+  if (user.is_active) return res.status(400).json({ error: 'This shul has already set up their account and signed in — nothing to resend' });
+  const token = uuid();
+  const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+  db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
+  const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
+  const tmpl = templates.accountApproved(shul.name_en, loginUrl, shul.slots_allocated);
+  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
+  if (emailError) console.error('[mail] shul welcome resend failed:', emailError);
+  res.json({ ok: true, emailError });
 });
 
 router.post('/:id/reject', requireAdmin, (req, res) => {
@@ -250,9 +270,8 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
   const to = req.body.email || shul.gabai_email;
   const tmpl = templates.contractReady(shul.name_en, signUrl);
-  let emailError = null;
-  try { await sendMail(req.user.org_id, to, tmpl.subject, tmpl.body); }
-  catch (e) { console.error('[mail] contract email failed:', e.message); emailError = e.message; }
+  const { emailError } = await sendMailChecked(req.user.org_id, to, tmpl.subject, tmpl.body);
+  if (emailError) console.error('[mail] contract email failed:', emailError);
   logAudit(req.user.org_id, req.user.id, 'send_contract', 'shul', shul.id, null, { to }, req.ip);
   res.json({ ok: true, contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError });
 });
@@ -349,8 +368,8 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         db.prepare(`UPDATE shuls SET status='contract_sent' WHERE id=?`).run(shul.id);
         const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
         const tmpl = templates.contractReady(shul.name_en, signUrl);
-        try { await sendMail(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body); }
-        catch (e) { console.error('[mail] mass-upload contract email failed for', shul.gabai_email, e.message); errors.push({ row: i + 2, error: `Shul created but contract email failed: ${e.message}` }); }
+        const { emailError } = await sendMailChecked(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body);
+        if (emailError) { console.error('[mail] mass-upload contract email failed for', shul.gabai_email, emailError); errors.push({ row: i + 2, error: `Shul created but contract email failed: ${emailError}` }); }
       }
     } catch (e) {
       errors.push({ row: i + 2, error: e.message });

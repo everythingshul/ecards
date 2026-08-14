@@ -119,7 +119,7 @@ async function openShul(id) {
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('shul','${id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">+ Add Task</button>
       ${shul.is_paused ? `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',false)">Unpause</button>` : `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',true)">Pause</button>`}
-      ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : ''}
+      ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : `<button class="btn btn-outline btn-sm" onclick="resendWelcome('${id}')">Resend Welcome Email</button>`}
       <button class="btn btn-primary btn-sm" onclick="saveShul('${id}')">Save</button>`;
     openModal(shul.name_en, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
@@ -146,6 +146,12 @@ window.approveShul = async (id) => {
   } catch (err) { toast(err.message, true); }
 };
 window.rejectShul = async (id) => { if (!confirm('Reject this shul application?')) return; try { await api(`/shuls/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.resendWelcome = async (id) => {
+  try {
+    const r = await api(`/shuls/${id}/resend-welcome`, { method: 'POST' });
+    toast(r.emailError ? `Could not send: ${r.emailError}` : 'Welcome email re-sent', !!r.emailError);
+  } catch (err) { toast(err.message, true); }
+};
 window.pauseToggle = async (id, pause) => { try { await api(`/shuls/${id}/${pause?'pause':'unpause'}`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.sendContract = async (id) => {
   try { const r = await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast(r.emailError ? `Contract generated, but email failed: ${r.emailError}` : 'Contract emailed', !!r.emailError); closeModal(); openShul(id); } catch (err) { toast(err.message, true); }

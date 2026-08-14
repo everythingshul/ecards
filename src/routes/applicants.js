@@ -4,7 +4,7 @@ import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
-import { sendMail, templates } from '../services/mail.js';
+import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 
@@ -130,8 +130,8 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   let emailError = null;
   if (applicant.email) {
     const tmpl = templates.applicantApproved(`${applicant.first_name} ${applicant.last_name}`);
-    try { await sendMail(req.user.org_id, applicant.email, tmpl.subject, tmpl.body); }
-    catch (e) { console.error('[mail] applicant approval email failed:', e.message); emailError = e.message; }
+    ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body));
+    if (emailError) console.error('[mail] applicant approval email failed:', emailError);
   }
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError });
 });

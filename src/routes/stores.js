@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
-import { sendMail, templates } from '../services/mail.js';
+import { sendMailChecked, templates } from '../services/mail.js';
 import { sendCsv } from '../services/csv.js';
 
 const router = Router();
@@ -119,9 +119,8 @@ router.post('/:id/invite', requireAdmin, async (req, res) => {
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
   const portalUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
   const tmpl = templates.storeSetup(store.name, portalUrl);
-  let emailError = null;
-  try { await sendMail(req.user.org_id, email, tmpl.subject, tmpl.body); }
-  catch (e) { console.error('[mail] store invite email failed:', e.message); emailError = e.message; }
+  const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body);
+  if (emailError) console.error('[mail] store invite email failed:', emailError);
   res.json({ ok: true, emailError });
 });
 

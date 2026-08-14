@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { generateGenericDocumentPdf, stampSignature } from '../services/pdf.js';
-import { sendMail } from '../services/mail.js';
+import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
 
@@ -86,9 +86,8 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   const body = `<p>Shalom,</p><p>Please review and sign the following document: <strong>${document.title || 'Agreement'}</strong>.</p>
     <p style="text-align:center;margin:28px 0;"><a href="${signUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review & Sign</a></p>
     <p>If the button doesn't work, copy this link: ${signUrl}</p>`;
-  let emailError = null;
-  try { await sendMail(req.user.org_id, to, subject, body); }
-  catch (e) { console.error('[mail] document send failed:', e.message); emailError = e.message; }
+  const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body);
+  if (emailError) console.error('[mail] document send failed:', emailError);
 
   res.json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id), emailError });
 });

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
-import { sendMail } from '../services/mail.js';
+import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
 const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms', 'users', 'settings'];
@@ -34,9 +34,8 @@ router.post('/', async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
-  let emailError = null;
-  try { await sendMail(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`); }
-  catch (e) { console.error('[mail] user invite email failed:', e.message); emailError = e.message; }
+  const { emailError } = await sendMailChecked(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
+  if (emailError) console.error('[mail] user invite email failed:', emailError);
   res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id), emailError });
 });
 

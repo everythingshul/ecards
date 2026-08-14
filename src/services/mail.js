@@ -85,6 +85,23 @@ export async function sendMail(orgId, to, subject, bodyHtml) {
   return res.json();
 }
 
+// Wraps sendMail() so every call site gets a single, consistent emailError
+// string to show/return — including the "no provider configured" case.
+// That case matters because dry-run mode (no BREVO_API_KEY) resolves
+// successfully with { dryRun: true } rather than throwing, so without this
+// wrapper it looks identical to a real send in the API response: nothing
+// gets emailed, but no error surfaces anywhere, and the recipient just
+// reports "I never got the email" with no clue why.
+export async function sendMailChecked(orgId, to, subject, bodyHtml) {
+  try {
+    const result = await sendMail(orgId, to, subject, bodyHtml);
+    if (result?.dryRun) return { emailError: 'Email provider not configured (BREVO_API_KEY missing) — no email was actually sent.' };
+    return { emailError: null };
+  } catch (e) {
+    return { emailError: e.message };
+  }
+}
+
 export const templates = {
   contractReady: (shulName, signUrl) => ({
     subject: `Contract ready to sign — ${shulName}`,
