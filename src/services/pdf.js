@@ -59,7 +59,7 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
 
   const bytes = await buildSimplePdf({
     heading: orgName,
-    subheading: `Participation Agreement — ${season?.name || ''}`,
+    subheading: `Participation Agreement ${season?.name || ''}`.trim(),
     fieldLines: [
       `Shul: ${shul.name_en}${shul.name_he ? ' / ' + shul.name_he : ''}`,
       `Address: ${[shul.address, shul.city, shul.state, shul.zip].filter(Boolean).join(', ')}`,

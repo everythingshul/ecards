@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shuls — everythingshul</title>
+<title>Shuls · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -49,7 +49,7 @@ async function load() {
     if (!shuls.length) { qs('#tbody').innerHTML = '<tr><td colspan="9" class="empty-state">No shuls found.</td></tr>'; }
     else qs('#tbody').innerHTML = shuls.map(rowHtml).join('');
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
-    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
+    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; load(); }
@@ -103,7 +103,7 @@ async function openShul(id) {
         </div>
         <div class="divider"></div>
         <label>Slots Allocated</label><input id="edit-slots" type="number" value="${shul.slots_allocated ?? 0}" style="max-width:140px">
-        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open</strong> — resolve from the Shuls > Duplicates review.</div>` : ''}
+        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from the Shuls > Duplicates review.</div>` : ''}
       </div>
       <div id="tab-notes" style="display:none">
         <div style="display:flex;gap:8px"><input id="new-note" placeholder="Add an internal note…"><button class="btn btn-sm btn-primary" onclick="addShulNote('${id}')">Add</button></div>
@@ -141,7 +141,7 @@ window.approveShul = async (id) => {
   if (slots === null) return;
   try {
     const r = await api(`/shuls/${id}/approve`, { method: 'POST', body: { slots_allocated: +slots } });
-    toast(r.emailError ? `Shul approved, but the account setup email failed to send: ${r.emailError}` : 'Shul approved — account setup email sent', !!r.emailError);
+    toast(r.emailError ? `Shul approved, but the account setup email failed to send: ${r.emailError}` : 'Shul approved. Account setup email sent.', !!r.emailError);
     closeModal(); load();
   } catch (err) { toast(err.message, true); }
 };
@@ -229,7 +229,7 @@ window.compareDup = (flagId) => {
   const f = dupFlagsCache.find(x => x.id === flagId);
   if (!f) return;
   const body = `<p class="small-muted">Reason flagged: ${esc(f.reason)}</p>` + renderCompareTable(SHUL_COMPARE_FIELDS, f.entity, f.matched);
-  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">&larr; Back to List</button>
+  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">Back to List</button>
     <button class="btn btn-outline btn-sm" onclick="resolveDup('${flagId}','bypass')">Bypass</button>
     <button class="btn btn-primary btn-sm" onclick="resolveDup('${flagId}','resolve')">Mark Resolved</button>`;
   openModal('Compare Records', body, footer);

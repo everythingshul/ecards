@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign Document — everythingshul</title>
+<title>Sign Document · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -33,7 +33,7 @@
 
   <div class="card" id="done-section" style="display:none;text-align:center">
     <h3>&#10003; Signed</h3>
-    <p class="small-muted" id="done-message">Thank you — this document has been signed.</p>
+    <p class="small-muted" id="done-message">Thank you. This document has been signed.</p>
   </div>
 </div>
 <script src="/js/app.js"></script>
@@ -49,7 +49,7 @@ let sigPad = null;
     qs('#loading').style.display = 'none';
     if (alreadySigned) { qs('#done-section').style.display = 'block'; return; }
     qs('#doc-section').style.display = 'block';
-    qs('#doc-title').textContent = `${doc.title || 'Agreement'} — ${entityName || ''}`;
+    qs('#doc-title').textContent = entityName ? `${doc.title || 'Agreement'} for ${entityName}` : (doc.title || 'Agreement');
     qs('#doc-frame').src = `/api/documents/sign/${token}/pdf-preview`;
     sigPad = initSignaturePad('sig-pad');
     qs('#clear-sig').onclick = () => sigPad.clear();

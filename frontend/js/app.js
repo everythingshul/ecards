@@ -61,8 +61,8 @@ function toast(msg, isError = false) {
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtMoney(n) { return '$' + (Number(n) || 0).toFixed(2); }
-function fmtDate(d) { if (!d) return '—'; return new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
-function fmtDateTime(d) { if (!d) return '—'; return new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+function fmtDate(d) { if (!d) return ''; return new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+function fmtDateTime(d) { if (!d) return ''; return new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
 function badge(text, cls) { return `<span class="badge badge-${esc(cls || text)}">${esc((text || '').replace(/_/g, ' '))}</span>`; }
 function qs(sel) { return document.querySelector(sel); }
 function qsa(sel) { return Array.from(document.querySelectorAll(sel)); }
@@ -94,13 +94,20 @@ function renderShell(activeHref, contentHtml) {
   let items = NAV_ITEMS;
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
-  const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}">${i.icon ? `<span>${i.icon}</span>` : ''}${esc(i.label)}</a>`).join('');
+  const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}" title="${esc(i.label)}">${i.icon ? `<span class="nav-icon">${i.icon}</span>` : ''}<span class="nav-label">${esc(i.label)}</span></a>`).join('');
+  const collapsed = localStorage.getItem('sidebarCollapsed') === '1';
   document.body.innerHTML = `
     <div class="app-shell">
-      <aside class="sidebar" id="sidebar">
-        <div class="brand"><img src="/img/org-logo.png" alt="Organization logo" style="height:36px;width:auto"><div class="brand-name">everythingshul<br><span style="font-size:11px;color:var(--sidebar-muted);">e-cards admin</span></div></div>
+      <aside class="sidebar${collapsed ? ' collapsed' : ''}" id="sidebar">
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <div class="brand"><img src="/img/org-logo.png" alt="Organization logo" style="height:36px;width:auto"><div class="brand-name">Kipas Hair BP<br><span style="font-size:11px;color:var(--sidebar-muted);">Platform</span></div></div>
         <nav>${navHtml}</nav>
-        <div class="user-box">${esc(user?.first_name || '')} ${esc(user?.last_name || '')}<br><span style="text-transform:capitalize">${esc((role || '').replace('_', ' '))}</span><br><button onclick="Auth.logout()">Sign out</button></div>
+        <div class="user-box">
+          <div class="user-box-detail">${esc(user?.first_name || '')} ${esc(user?.last_name || '')}<br><span style="text-transform:capitalize">${esc((role || '').replace('_', ' '))}</span></div>
+          <button onclick="Auth.logout()">Sign out</button>
+        </div>
       </aside>
       <div class="main">
         <div class="topbar">
@@ -111,6 +118,10 @@ function renderShell(activeHref, contentHtml) {
         <div class="content" id="content">${contentHtml}</div>
       </div>
     </div>`;
+  qs('#sidebar-collapse-btn').addEventListener('click', () => {
+    const isCollapsed = qs('#sidebar').classList.toggle('collapsed');
+    localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+  });
 }
 
 function openModal(title, bodyHtml, footerHtml = '') {
@@ -269,7 +280,7 @@ function renderCompareTable(fields, a, b) {
     const av = a?.[key], bv = b?.[key];
     const differs = String(av ?? '') !== String(bv ?? '');
     const cellStyle = differs ? 'background:#f9efe0' : '';
-    return `<tr><td class="small-muted" style="white-space:nowrap">${esc(label)}</td><td style="${cellStyle}">${esc(av ?? '—')}</td><td style="${cellStyle}">${esc(bv ?? '—')}</td></tr>`;
+    return `<tr><td class="small-muted" style="white-space:nowrap">${esc(label)}</td><td style="${cellStyle}">${esc(av ?? '')}</td><td style="${cellStyle}">${esc(bv ?? '')}</td></tr>`;
   }).join('');
   return `<div style="overflow-x:auto"><table>
     <thead><tr><th></th><th>Record A <span class="small-muted">(${fmtDate(a?.created_at)})</span></th><th>Record B <span class="small-muted">(${fmtDate(b?.created_at)})</span></th></tr></thead>

@@ -19,6 +19,7 @@
   --radius: 10px;
   --shadow: 0 4px 18px rgba(36, 26, 21, 0.10);
   --sidebar-w: 250px;
+  --sidebar-w-collapsed: 68px;
   --sidebar-link: #d8c9ac;
   --sidebar-active-1: rgba(201,167,106,.25);
   --sidebar-active-2: rgba(169,119,63,.25);
@@ -40,12 +41,12 @@ h1, h2, h3, h4 { color: var(--text-dark); font-family: Georgia, 'Times New Roman
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;
+  padding: 10px 20px; border-radius: 0; border: none; cursor: pointer;
   font-size: 14px; font-weight: 600; text-decoration: none; transition: transform .08s, opacity .15s;
 }
 .btn:active { transform: scale(0.98); }
-.btn-primary { background: linear-gradient(135deg, var(--brand-gold-light), var(--brand-gold-dark)); color: var(--text-dark); }
-.btn-primary:hover { opacity: .92; }
+.btn-primary { background: var(--brand-gold); color: var(--text-dark); }
+.btn-primary:hover { opacity: .88; }
 .btn-dark { background: var(--brand-bg); color: var(--brand-gold-light); }
 .btn-outline { background: transparent; border: 1.5px solid var(--brand-gold-dark); color: var(--brand-gold-dark); }
 .btn-danger { background: var(--danger); color: #fff; }
@@ -80,16 +81,29 @@ tr:hover td { background: var(--brand-panel-2); }
 
 /* App shell */
 .app-shell { display: flex; min-height: 100vh; }
-.sidebar { width: var(--sidebar-w); flex-shrink: 0; background: var(--brand-bg); color: var(--text-on-dark); display: flex; flex-direction: column; }
-.sidebar .brand { padding: 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.sidebar { position: relative; width: var(--sidebar-w); flex-shrink: 0; background: var(--brand-bg); color: var(--text-on-dark); display: flex; flex-direction: column; transition: width .16s ease; }
+.sidebar .brand { padding: 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.08); overflow: hidden; }
 .sidebar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand-gold); }
-.sidebar .brand-name { font-family: Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--brand-gold-light); }
-.sidebar nav { flex: 1; padding: 14px 10px; overflow-y: auto; }
-.sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13.5px; margin-bottom: 2px; }
+.sidebar .brand-name { font-family: Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--brand-gold-light); white-space: nowrap; }
+.sidebar nav { flex: 1; padding: 14px 10px; overflow-y: auto; overflow-x: hidden; }
+.sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13.5px; margin-bottom: 2px; white-space: nowrap; }
 .sidebar nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
-.sidebar nav a.active { background: linear-gradient(135deg, var(--sidebar-active-1), var(--sidebar-active-2)); color: var(--brand-gold-light); font-weight: 600; }
-.sidebar .user-box { padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12.5px; color: var(--sidebar-muted); }
-.sidebar .user-box button { margin-top: 6px; background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; }
+.sidebar nav a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }
+.sidebar .user-box { padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12.5px; color: var(--sidebar-muted); overflow: hidden; }
+.sidebar .user-box-detail { white-space: nowrap; }
+.sidebar .user-box button { margin-top: 6px; background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; white-space: nowrap; }
+
+.sidebar-collapse-btn { position: absolute; top: 22px; right: -13px; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-panel); border: 1px solid var(--border); color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow); z-index: 5; padding: 0; }
+.sidebar-collapse-btn:hover { color: var(--brand-gold-dark); }
+.sidebar-collapse-btn svg { transition: transform .16s ease; }
+.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
+.sidebar.collapsed .brand { justify-content: center; padding: 20px 0; }
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .user-box-detail { display: none; }
+.sidebar.collapsed nav a { justify-content: center; padding: 10px 0; }
+.sidebar.collapsed .user-box { text-align: center; padding: 14px 6px; }
+.sidebar.collapsed .sidebar-collapse-btn svg { transform: rotate(180deg); }
 
 .main { flex: 1; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; background: #fff; border-bottom: 1px solid var(--border); }
@@ -129,7 +143,7 @@ tr:hover td { background: var(--brand-panel-2); }
 .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--brand-gold-dark); font-weight: 700; margin: 26px 0 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 .section-title:first-of-type { border-top: none; padding-top: 0; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-@media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } .sidebar { position: fixed; z-index: 50; height: 100vh; transform: translateX(-100%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } .app-shell { flex-direction: column; } }
+@media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } .sidebar { position: fixed; z-index: 50; height: 100vh; transform: translateX(-100%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } .sidebar.collapsed { width: var(--sidebar-w); } .sidebar.collapsed .brand-name, .sidebar.collapsed .nav-label, .sidebar.collapsed .user-box-detail { display: block; } .sidebar.collapsed nav a { justify-content: flex-start; padding: 10px 14px; } .sidebar-collapse-btn { display: none; } .app-shell { flex-direction: column; } #hamburger { display: inline-flex !important; } }
 
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .small-muted { font-size: 12px; color: var(--text-muted); }

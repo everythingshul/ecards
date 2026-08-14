@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tasks — everythingshul</title>
+<title>Tasks · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -29,7 +29,7 @@ let usersCache = [];
 async function loadUsers() { const { users } = await api('/users'); usersCache = users.filter(u => u.is_active); }
 
 function fmtDueBadge(dueDate, status) {
-  if (!dueDate) return '<span class="small-muted">—</span>';
+  if (!dueDate) return '<span class="small-muted">No due date</span>';
   const today = new Date().toISOString().slice(0, 10);
   const label = fmtDate(dueDate);
   if (status === 'done') return `<span class="small-muted">${label}</span>`;
@@ -48,7 +48,7 @@ async function load() {
     qs('#tbody').innerHTML = tasks.length ? tasks.map(t => `<tr>
         <td><input type="checkbox" ${t.status==='done'?'checked':''} onchange="toggleDone('${t.id}', this.checked)"></td>
         <td><strong style="${t.status==='done'?'text-decoration:line-through;color:var(--text-muted)':''}">${esc(t.title)}</strong>${t.description ? `<br><span class="small-muted">${esc(t.description)}</span>` : ''}</td>
-        <td>${t.entity_label ? `<span class="small-muted">${esc(t.entity_type)}: ${esc(t.entity_label)}</span>` : '—'}</td>
+        <td>${t.entity_label ? `<span class="small-muted">${esc(t.entity_type)}: ${esc(t.entity_label)}</span>` : ''}</td>
         <td>${t.assignee_first_name ? esc(t.assignee_first_name) + ' ' + esc(t.assignee_last_name||'') : '<span class="small-muted">Unassigned</span>'}</td>
         <td>${fmtDueBadge(t.due_date, t.status)}</td>
         <td>${badge(t.priority, t.priority==='high'?'rejected':(t.priority==='low'?'submitted':'pending'))}</td>

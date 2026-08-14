@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Store Setup — everythingshul</title>
+<title>Store Setup · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -55,7 +55,7 @@ function step1Html() {
     <div class="divider"></div>
     <div class="grid-2"><div><label>Manager Name</label><input id="f-manager_name" value="${esc(store.manager_name||'')}"></div><div><label>Manager Phone</label><input id="f-manager_phone" value="${esc(store.manager_phone||'')}"></div></div>
     <label>Manager Email</label><input id="f-manager_email" value="${esc(store.manager_email||'')}">
-    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue &rarr;</button></div>`;
+    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue</button></div>`;
 }
 function step2Html() {
   return `
@@ -64,7 +64,7 @@ function step2Html() {
     <label>Owner Email</label><input id="f-owner_email" value="${esc(store.owner_email||'')}">
     <p class="small-muted">This is who billing correspondence (amounts owed, payment schedule) will be sent to.</p>
     <div class="checkbox-row" style="margin-top:20px"><input type="checkbox" id="f-agree"><label style="margin:0">I agree to participate in the gift card program under the terms communicated by the administering organization.</label></div>
-    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue &rarr;</button></div>`;
+    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue</button></div>`;
 }
 function step3Html() {
   return `<h3>3. All Set</h3><p class="small-muted">Your setup information has been submitted. An administrator will finish activating your store and reach out with next steps.</p>

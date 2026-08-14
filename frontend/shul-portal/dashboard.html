@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>My Applicants — everythingshul</title>
+<title>My Applicants · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -28,19 +28,19 @@ async function load() {
     const { applicants, total } = await api('/applicants?' + params);
     qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
         <td><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused?' '+badge('paused','paused'):''}</td>
-        <td>${esc(a.marital_status||'—')}</td><td>${esc(a.email||a.home_phone||'—')}</td><td>${a.num_children??0}</td>
-        <td>${a.home_for_yomtov?'Yes':'No'}</td><td>${badge(a.approval_status,a.approval_status)}</td><td>${a.card_amount!=null?fmtMoney(a.card_amount):'—'}</td>
+        <td>${esc(a.marital_status||'')}</td><td>${esc(a.email||a.home_phone||'')}</td><td>${a.num_children??0}</td>
+        <td>${a.home_for_yomtov?'Yes':'No'}</td><td>${badge(a.approval_status,a.approval_status)}</td><td>${a.card_amount!=null?fmtMoney(a.card_amount):''}</td>
       </tr>`).join('') : '<tr><td colspan="7" class="empty-state">No applicants submitted yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
 qs('#f-search').addEventListener('input', () => load());
 qs('#btn-new').addEventListener('click', () => {
   const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
-    <label>Marital Status</label><select id="n-marital_status"><option value="">—</option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
+    <label>Marital Status</label><select id="n-marital_status"><option value=""></option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
     <div class="grid-2"><div><label>Home Phone</label><input id="n-home_phone"></div><div><label>Email</label><input id="n-email"></div></div>
     <div class="grid-2"><div><label>Husband Cell</label><input id="n-husband_cell"></div><div><label>Wife Cell</label><input id="n-wife_cell"></div></div>
-    <div class="grid-2"><div><label>Preferred Contact</label><select id="n-pcm"><option value="">—</option><option>phone</option><option>text</option><option>email</option></select></div>
-    <div><label>Number To Use</label><select id="n-pn"><option value="">—</option><option>home</option><option>husband</option><option>wife</option></select></div></div>
+    <div class="grid-2"><div><label>Preferred Contact</label><select id="n-pcm"><option value=""></option><option>phone</option><option>text</option><option>email</option></select></div>
+    <div><label>Number To Use</label><select id="n-pn"><option value=""></option><option>home</option><option>husband</option><option>wife</option></select></div></div>
     <label>Address</label><input id="n-address">
     <div class="grid-2"><div><label>City</label><input id="n-city"></div><div><label>State</label><input id="n-state"></div></div>
     <label>Number of Children</label><input id="n-children" type="number" value="0">
@@ -60,8 +60,8 @@ async function openApplicant(id) {
     const { applicant: a } = await api(`/applicants/${id}`);
     openModal(`${a.first_name} ${a.last_name}`, `
       <p><strong>Status:</strong> ${badge(a.approval_status,a.approval_status)}</p>
-      <p><strong>Marital Status:</strong> ${esc(a.marital_status||'—')} &nbsp; <strong>Children:</strong> ${a.num_children??0}</p>
-      <p><strong>Contact:</strong> ${esc(a.preferred_contact_method||'—')} (${esc(a.preferred_number||'—')})</p>
+      <p><strong>Marital Status:</strong> ${esc(a.marital_status||'')} &nbsp; <strong>Children:</strong> ${a.num_children??0}</p>
+      <p><strong>Contact:</strong> ${esc(a.preferred_contact_method||'')} (${esc(a.preferred_number||'')})</p>
       <p><strong>Home for Yom Tov:</strong> ${a.home_for_yomtov?'Yes':'No'}</p>
       <p><strong>Card Amount:</strong> ${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>
       <p class="small-muted">Editable fields are locked once reviewed by the administrator; contact your admin for changes.</p>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cards & Transactions — everythingshul</title>
+<title>Cards & Transactions · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -14,7 +14,7 @@
 Auth.requireAuth();
 renderShell('/admin/cards.html', `
   <div class="flex-between"><h2>Cards & Transactions</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-sync-all">Sync All Now</button><button class="btn btn-outline btn-sm" id="btn-export-cards">Export Cards CSV</button><button class="btn btn-outline btn-sm" id="btn-export-txns">Export Transactions CSV</button></div></div>
-  <p class="small-muted">Cards auto-sync with disccardpromos every 15 minutes in the background — use Sync All Now for an immediate refresh.</p>
+  <p class="small-muted">Cards auto-sync with disccardpromos every 15 minutes in the background. Use Sync All Now for an immediate refresh.</p>
   <div id="mock-banner"></div>
   <div class="tabs"><button class="active" id="tab-cards-btn">Cards</button><button id="tab-txns-btn">All Transactions</button></div>
   <div id="panel-cards">
@@ -54,12 +54,12 @@ async function loadCards() {
     const { cards, total, mockMode } = await api('/cards?' + params);
     if (mockMode) qs('#mock-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px"><strong>Mock mode:</strong> disccardpromos.com API keys are not configured yet, so card numbers/transactions are simulated placeholders. Set <code>DISCCARDPROMOS_API_BASE</code> and <code>DISCCARDPROMOS_API_KEY</code> to go live.</div>`;
     qs('#tbody-cards').innerHTML = cards.length ? cards.map(c => `<tr>
-        <td>${esc(c.first_name)} ${esc(c.last_name)}</td><td>${esc(c.shul_name||'—')}</td><td>${esc(c.card_number_masked||'—')}</td>
-        <td>${badge(c.status,c.status)}</td><td>${fmtMoney(c.amount)}</td><td>${c.activated_at?fmtDateTime(c.activated_at):'—'}</td>
+        <td>${esc(c.first_name)} ${esc(c.last_name)}</td><td>${esc(c.shul_name||'')}</td><td>${esc(c.card_number_masked||'')}</td>
+        <td>${badge(c.status,c.status)}</td><td>${fmtMoney(c.amount)}</td><td>${c.activated_at?fmtDateTime(c.activated_at):''}</td>
         <td><button class="btn btn-sm btn-outline" onclick="openCard('${c.id}')">Manage</button></td>
-      </tr>`).join('') : "<tr><td colspan=\"7\" class=\"empty-state\">No cards yet — assign cards from an approved applicant's profile.</td></tr>";
+      </tr>`).join('') : "<tr><td colspan=\"7\" class=\"empty-state\">No cards yet. Assign cards from an approved applicant's profile.</td></tr>";
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
-    qs('#pager-cards').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
+    qs('#pager-cards').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; loadCards(); }
@@ -72,7 +72,7 @@ async function loadTxns() {
     const { transactions, total } = await api('/cards/transactions/all?page=' + txnPage);
     qs('#tbody-txns').innerHTML = transactions.length ? transactions.map(t => `<tr>
         <td>${fmtDateTime(t.occurred_at)}</td><td>${esc(t.first_name||'')} ${esc(t.last_name||'')}</td><td>${esc(t.card_number_masked||'')}</td>
-        <td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'—')}</td>
+        <td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'')}</td>
       </tr>`).join('') : '<tr><td colspan="6" class="empty-state">No transactions yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
@@ -87,13 +87,13 @@ async function openCard(id) {
       </div>
       <div class="divider"></div>
       <div class="grid-2">
-        <div><strong>Card Number</strong><br>${esc(card.card_number_masked||'—')}</div>
+        <div><strong>Card Number</strong><br>${esc(card.card_number_masked||'')}</div>
         <div><strong>Amount</strong><br>${fmtMoney(card.amount)}</div>
       </div>
       ${card.status === 'assigned' ? `<div class="divider"></div><label>Activation Phone</label><input id="act-phone" placeholder="(555) 555-5555">` : ''}
       <div class="divider"></div>
       <h4>Transaction History</h4>
-      ${transactions.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Store</th></tr></thead><tbody>${transactions.map(t=>`<tr><td>${fmtDateTime(t.occurred_at)}</td><td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'—')}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No transactions synced yet.</p>'}
+      ${transactions.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Store</th></tr></thead><tbody>${transactions.map(t=>`<tr><td>${fmtDateTime(t.occurred_at)}</td><td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'')}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No transactions synced yet.</p>'}
     `;
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="syncCard('${id}')">Sync Now</button>

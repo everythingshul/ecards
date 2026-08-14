@@ -234,7 +234,7 @@ router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
   if (shul.status !== 'approved' || !shul.portal_user_id) return res.status(400).json({ error: 'This shul has not been approved yet' });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(shul.portal_user_id);
   if (!user) return res.status(404).json({ error: 'Portal account not found' });
-  if (user.is_active) return res.status(400).json({ error: 'This shul has already set up their account and signed in — nothing to resend' });
+  if (user.is_active) return res.status(400).json({ error: 'This shul has already set up their account and signed in. Nothing to resend.' });
   const token = uuid();
   const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
   db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Settings — everythingshul</title>
+<title>Settings · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -36,7 +36,7 @@ renderShell('/admin/settings.html', `
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Full System Export</h3>
-      <p class="small-muted">Download everything — every shul, applicant, card, transaction, store, billing record, task, and note — as one Excel workbook with a separate sheet per table.</p>
+      <p class="small-muted">Download everything: every shul, applicant, card, transaction, store, billing record, task, and note, as one Excel workbook with a separate sheet per table.</p>
       <button class="btn btn-sm btn-primary" onclick="downloadFullExport()">Download Full System Export (.xlsx)</button>
     </div>
   </div>
@@ -50,13 +50,13 @@ renderShell('/admin/settings.html', `
 
   <div id="panel-fields" style="display:none">
     <div class="card">
-      <h3>Shul Application — Required Fields</h3>
+      <h3>Shul Application Required Fields</h3>
       <p class="small-muted">Toggle which fields are required on the public shul form, and which fields admins may fill in even when normally locked.</p>
       <div id="fields-shul"></div>
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('shul')">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
-      <h3>Applicant Submission — Required Fields</h3>
+      <h3>Applicant Submission Required Fields</h3>
       <div id="fields-applicant"></div>
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('applicant')">Save</button>
     </div>
@@ -182,7 +182,7 @@ async function loadContractPdfStatus() {
   const { hasCustomTemplate } = await api('/settings/contract-pdf');
   qs('#pdf-status').innerHTML = hasCustomTemplate
     ? '<strong style="color:var(--success)">A custom contract PDF is currently in use.</strong>'
-    : 'No custom PDF uploaded — using the generated text template below.';
+    : 'No custom PDF uploaded. Using the generated text template below.';
   qs('#btn-remove-pdf').style.display = hasCustomTemplate ? 'inline-flex' : 'none';
 }
 window.uploadContractPdf = async () => {
@@ -200,7 +200,7 @@ async function loadDocPdfStatus(entityType) {
   const { hasCustomTemplate } = await api(`/settings/document-pdf/${entityType}`);
   qs(`#doc-pdf-status-${entityType}`).innerHTML = hasCustomTemplate
     ? '<strong style="color:var(--success)">A custom PDF is currently in use.</strong>'
-    : 'No custom PDF uploaded — using the generated text template below.';
+    : 'No custom PDF uploaded. Using the generated text template below.';
   qs(`#btn-remove-doc-pdf-${entityType}`).style.display = hasCustomTemplate ? 'inline-flex' : 'none';
 }
 window.uploadDocPdf = async (entityType) => {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Applicants — everythingshul</title>
+<title>Applicants · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -27,7 +27,7 @@ renderShell('/admin/applicants.html', `
     <input id="f-search" placeholder="Search name, phone, email…">
     <select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
     <select id="f-marital"><option value="">Any marital status</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option><option value="divorced">Divorced</option></select>
-    <select id="f-yomtov"><option value="">Home for Yom Tov — any</option><option value="1">Yes</option><option value="0">No</option></select>
+    <select id="f-yomtov"><option value="">Home for Yom Tov (any)</option><option value="1">Yes</option><option value="0">No</option></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -52,14 +52,14 @@ async function load() {
     const { applicants, total } = await api('/applicants?' + params);
     qs('#tbody').innerHTML = applicants.length ? applicants.map(rowHtml).join('') : '<tr><td colspan="11" class="empty-state">No applicants found.</td></tr>';
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
-    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
+    qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
     qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; load(); }
 
 function contactLine(a) {
-  const method = a.preferred_contact_method || '—';
+  const method = a.preferred_contact_method || '';
   const num = a.preferred_number === 'husband' ? a.husband_cell : a.preferred_number === 'wife' ? a.wife_cell : a.home_phone;
   return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
 }
@@ -68,13 +68,13 @@ function rowHtml(a) {
   return `<tr>
     <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}" ${a.is_paused ? 'disabled' : ''}></td>
     <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused ? ' ' + badge('paused','paused') : ''}</td>
-    <td onclick="openApplicant('${a.id}')" style="cursor:pointer">${esc(a.shul_name||'—')}</td>
-    <td>${esc(a.marital_status||'—')}</td>
+    <td onclick="openApplicant('${a.id}')" style="cursor:pointer">${esc(a.shul_name||'')}</td>
+    <td>${esc(a.marital_status||'')}</td>
     <td>${contactLine(a)}</td>
     <td>${a.num_children ?? 0}</td>
     <td>${a.home_for_yomtov ? 'Yes' : 'No'}</td>
     <td>${badge(a.approval_status, a.approval_status)}</td>
-    <td>${a.card_amount != null ? fmtMoney(a.card_amount) : '—'}</td>
+    <td>${a.card_amount != null ? fmtMoney(a.card_amount) : ''}</td>
     <td>${fmtDate(a.created_at)}</td>
     <td><button class="btn btn-sm btn-outline" onclick="openApplicant('${a.id}')">View</button></td>
   </tr>`;
@@ -123,7 +123,7 @@ async function openApplicant(id) {
       <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button></div>
       <div id="atab-info">
         <div class="grid-2">
-          <div><strong>Shul</strong><br>${esc(a.shul_name||'—')}</div>
+          <div><strong>Shul</strong><br>${esc(a.shul_name||'')}</div>
           <div><strong>Status</strong><br>${badge(a.approval_status, a.approval_status)} ${a.is_paused ? badge('paused','paused') : ''}</div>
         </div>
         <div class="divider"></div>
@@ -140,22 +140,22 @@ async function openApplicant(id) {
           <div><label>Wife Cell</label><input id="e-wife_cell" value="${esc(a.wife_cell||'')}"></div>
         </div>
         <div class="grid-2">
-          <div><label>Preferred Contact</label><select id="e-pcm"><option value="">—</option><option ${a.preferred_contact_method==='phone'?'selected':''}>phone</option><option ${a.preferred_contact_method==='text'?'selected':''}>text</option><option ${a.preferred_contact_method==='email'?'selected':''}>email</option></select></div>
-          <div><label>Number To Use</label><select id="e-pn"><option value="">—</option><option ${a.preferred_number==='home'?'selected':''}>home</option><option ${a.preferred_number==='husband'?'selected':''}>husband</option><option ${a.preferred_number==='wife'?'selected':''}>wife</option></select></div>
+          <div><label>Preferred Contact</label><select id="e-pcm"><option value=""></option><option ${a.preferred_contact_method==='phone'?'selected':''}>phone</option><option ${a.preferred_contact_method==='text'?'selected':''}>text</option><option ${a.preferred_contact_method==='email'?'selected':''}>email</option></select></div>
+          <div><label>Number To Use</label><select id="e-pn"><option value=""></option><option ${a.preferred_number==='home'?'selected':''}>home</option><option ${a.preferred_number==='husband'?'selected':''}>husband</option><option ${a.preferred_number==='wife'?'selected':''}>wife</option></select></div>
         </div>
         <label>Address</label><input id="e-address" value="${esc(a.address||'')}">
         <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(a.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(a.state||'')}"></div></div>
         <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-yomtov" ${a.home_for_yomtov?'checked':''}><label style="margin:0">Home for Yom Tov</label></div>
         <label>Card Amount ($)</label><input id="e-card" type="number" step="0.01" value="${a.card_amount ?? ''}">
         <label>Comments</label><textarea id="e-comments" rows="3">${esc(a.comments||'')}</textarea>
-        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open</strong> — resolve from Applicants > Duplicates.</div>` : ''}
+        ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from Applicants > Duplicates.</div>` : ''}
       </div>
       <div id="atab-notes" style="display:none">
         <div style="display:flex;gap:8px"><input id="new-anote" placeholder="Add an internal note…"><button class="btn btn-sm btn-primary" onclick="addApplicantNote('${id}')">Add</button></div>
         <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
       </div>
       <div id="atab-cards" style="display:none">
-        ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards.html?card=${c.id}">View transactions &rarr;</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
+        ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards.html?card=${c.id}">View transactions</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
       </div>
       <div id="atab-documents" style="display:none">
         <div id="atab-documents-list"><p class="small-muted">Loading…</p></div>
@@ -193,7 +193,7 @@ window.assignCard = async (id) => { try { await api('/cards/assign', { method: '
 function openApplicantForm() {
   const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
     <label>Shul ID *</label><input id="n-shul_id" placeholder="Paste shul ID from Shuls page">
-    <label>Marital Status</label><select id="n-marital_status"><option value="">—</option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
+    <label>Marital Status</label><select id="n-marital_status"><option value=""></option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
     <label>Home Phone</label><input id="n-home_phone">
     <label>Email</label><input id="n-email">`;
   openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Create</button>`);
@@ -250,7 +250,7 @@ window.compareDup = (flagId) => {
   const f = dupFlagsCache.find(x => x.id === flagId);
   if (!f) return;
   const body = `<p class="small-muted">Reason flagged: ${esc(f.reason)}</p>` + renderCompareTable(APPLICANT_COMPARE_FIELDS, f.entity, f.matched);
-  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">&larr; Back to List</button>
+  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">Back to List</button>
     <button class="btn btn-outline btn-sm" onclick="resolveDup('${flagId}','bypass')">Bypass</button>
     <button class="btn btn-primary btn-sm" onclick="resolveDup('${flagId}','resolve')">Mark Resolved</button>`;
   openModal('Compare Records', body, footer);

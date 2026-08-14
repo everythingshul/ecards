@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shul Registration — everythingshul</title>
+<title>Shul Registration · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -62,7 +62,7 @@
     <label>Zip</label><input id="gabai_zip" name="gabai_zip" style="max-width:160px">
 
     <div style="margin-top:26px;text-align:right">
-      <button type="submit" class="btn btn-primary" id="submit-btn">Continue to Contract &rarr;</button>
+      <button type="submit" class="btn btn-primary" id="submit-btn">Continue to Contract</button>
     </div>
   </form>
 
@@ -118,7 +118,7 @@ qs('#apply-form').addEventListener('submit', async (e) => {
     qs('#clear-sig').onclick = () => sigPad.clear();
   } catch (err) {
     toast(err.message, true);
-    btn.disabled = false; btn.textContent = 'Continue to Contract →';
+    btn.disabled = false; btn.textContent = 'Continue to Contract';
   }
 });
 

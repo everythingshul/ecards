@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bulk Upload — everythingshul</title>
+<title>Bulk Upload · Kipas Hair BP Platform</title>
 <link rel="stylesheet" href="/css/theme.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -15,7 +15,7 @@ Auth.requireAuth();
 renderShell('/shul-portal/upload.html', `
   <h2>Bulk Upload Applicants</h2>
   <div class="card">
-    <p class="small-muted">Download the template, fill it in (CSV or Excel), then upload. You don't need to include a shul column — applicants are automatically assigned to your shul.</p>
+    <p class="small-muted">Download the template, fill it in (CSV or Excel), then upload. You don't need to include a shul column: applicants are automatically assigned to your shul.</p>
     <button class="btn btn-outline btn-sm" onclick="downloadAuthed('/applicants/import/template','applicant_import_template.csv')">Download Template</button>
     <div class="divider"></div>
     <input type="file" id="import-file" accept=".csv,.xlsx,.xls">

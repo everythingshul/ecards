@@ -95,7 +95,7 @@ export async function sendMail(orgId, to, subject, bodyHtml) {
 export async function sendMailChecked(orgId, to, subject, bodyHtml) {
   try {
     const result = await sendMail(orgId, to, subject, bodyHtml);
-    if (result?.dryRun) return { emailError: 'Email provider not configured (BREVO_API_KEY missing) — no email was actually sent.' };
+    if (result?.dryRun) return { emailError: 'Email provider not configured (BREVO_API_KEY missing). No email was actually sent.' };
     return { emailError: null };
   } catch (e) {
     return { emailError: e.message };
@@ -104,27 +104,27 @@ export async function sendMailChecked(orgId, to, subject, bodyHtml) {
 
 export const templates = {
   contractReady: (shulName, signUrl) => ({
-    subject: `Contract ready to sign — ${shulName}`,
+    subject: `Contract ready to sign: ${shulName}`,
     body: `<p>Shalom,</p><p>Thank you for registering <strong>${shulName}</strong>. Please review and sign your contract to complete onboarding:</p>
       <p style="text-align:center;margin:28px 0;"><a href="${signUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review & Sign Contract</a></p>
       <p>If the button doesn't work, copy this link: ${signUrl}</p>`
   }),
   accountApproved: (shulName, loginUrl, slots) => ({
-    subject: `You're approved! Set up your account — ${shulName}`,
-    body: `<p>Mazal tov — <strong>${shulName}</strong> has been approved with <strong>${slots} slot(s)</strong> for this season.</p>
+    subject: `You're approved! Set up your account: ${shulName}`,
+    body: `<p>Mazal tov. <strong>${shulName}</strong> has been approved with <strong>${slots} slot(s)</strong> for this season.</p>
       <p>Create your account password to begin submitting applicants:</p>
       <p style="text-align:center;margin:28px 0;"><a href="${loginUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Set Up Account</a></p>`
   }),
   duplicateHold: (name) => ({
-    subject: `Action required: duplicate record detected — ${name}`,
+    subject: `Action required: duplicate record detected for ${name}`,
     body: `<p>A duplicate record was detected involving <strong>${name}</strong>. Both accounts have been temporarily paused until this is resolved by an administrator.</p>`
   }),
   applicantApproved: (name) => ({
-    subject: `Applicant approved — ${name}`,
+    subject: `Applicant approved: ${name}`,
     body: `<p><strong>${name}</strong> has been approved and a gift card will be issued.</p>`
   }),
   storeSetup: (storeName, portalUrl) => ({
-    subject: `Welcome — ${storeName} setup`,
+    subject: `Welcome, ${storeName}`,
     body: `<p>Your store <strong>${storeName}</strong> has been added as a participating location.</p>
       <p style="text-align:center;margin:28px 0;"><a href="${portalUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Go to Store Portal</a></p>
       <p>If the button doesn't work, copy this link: ${portalUrl}</p>`

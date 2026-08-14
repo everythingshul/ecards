@@ -32,7 +32,7 @@ export function isMockMode() {
 
 async function call(orgId, path, opts = {}) {
   const cfg = CONFIG;
-  if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured — running in mock mode, this should not be reached');
+  if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured (running in mock mode; this should not be reached)');
   const res = await fetch(`${cfg.apiBase}${path}`, {
     ...opts,
     headers: {
