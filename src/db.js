@@ -333,6 +333,30 @@ CREATE TABLE IF NOT EXISTS settings (
   PRIMARY KEY (org_id, key)
 );
 
+-- ===================== To-Do / Tasks =====================
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  assigned_to TEXT REFERENCES users(id),
+  created_by TEXT REFERENCES users(id),
+  entity_type TEXT,          -- 'shul' | 'applicant' | 'store' | NULL (standalone task)
+  entity_id TEXT,
+  due_date TEXT,              -- ISO date, e.g. "2026-08-20"
+  priority TEXT DEFAULT 'normal', -- low | normal | high
+  status TEXT DEFAULT 'open',      -- open | in_progress | done
+  completed_at TEXT,
+  last_reminded_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_org ON tasks(org_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
 CREATE INDEX IF NOT EXISTS idx_shuls_org ON shuls(org_id);
 CREATE INDEX IF NOT EXISTS idx_shuls_status ON shuls(status);
 CREATE INDEX IF NOT EXISTS idx_applicants_org ON applicants(org_id);

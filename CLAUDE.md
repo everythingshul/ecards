@@ -34,16 +34,17 @@ src/
     giftcard.js              — disccardpromos.com adapter, per-org account resolution (MOCK MODE until keys set)
     duplicates.js             — Duplicate detection + account pause/unpause
     importer.js                — CSV/XLSX parsing + template generation
+    reminders.js               — Due-date task reminder emails (in-process interval, see index.js)
   routes/
     auth.js, users.js, orgs.js, seasons.js, settings.js,
-    shuls.js, applicants.js, cards.js, stores.js, forms.js, dashboard.js
+    shuls.js, applicants.js, cards.js, stores.js, forms.js, dashboard.js, tasks.js
 frontend/
   css/theme.css           — Brand tokens (deep espresso brown + antique gold, from the org logo)
-  js/app.js                — Auth/api/toast/modal/sidebar/signature-pad/compare-table helpers, shared by every page
+  js/app.js                — Auth/api/toast/modal/sidebar/signature-pad/compare-table/quick-task helpers, shared by every page
   index.html, apply.html, apply-store.html, login.html, sign-contract.html,
   accept-invite.html, forgot-password.html, reset-password.html,
   form.html (generic public form renderer)
-  admin/                  — Internal staff/admin app (dashboard, shuls, applicants, cards, stores,
+  admin/                  — Internal staff/admin app (dashboard, shuls, applicants, cards, stores, tasks,
                              forms, users, settings, organizations [super_admin only])
   shul-portal/            — Shul login: their own applicants, bulk upload, contract status
   store-portal/           — Store login: onboarding wizard, overview, billing
@@ -124,6 +125,28 @@ platform (e.g. Render dashboard). It is never committed to this repo (`.env`
 is gitignored); this sandbox's network policy also blocks outbound requests to
 `api.brevo.com`, so the key could not be live-verified from here — it should
 work once the app is actually deployed with normal internet access.
+
+## Tasks / to-do list
+Internal-team feature (staff/org_admin/super_admin only — not exposed to shul
+or store portal logins). `tasks` table: title, description, `assigned_to`
+(any internal user in the org), `due_date`, `priority`, `status`
+(open/in_progress/done), and an optional link to a shul/applicant/store
+(`entity_type`/`entity_id`) so follow-ups can be created directly from a
+record's detail view ("+ Add Task" button — `openQuickTaskModal()` in
+`app.js`, used by both Shuls and Applicants detail modals). Full management
+UI at Admin > Tasks (filter by assignee/status/overdue); the dashboard also
+shows a "My Open Tasks" widget for the logged-in user.
+
+**Reminders**: `services/reminders.js` runs on a 30-minute in-process
+interval (plus once ~15s after boot) and emails the assignee — via the same
+per-org `sendMail()` used everywhere else, so it respects each org's Brevo
+account/branding — for any non-done task due today, tomorrow, or overdue,
+throttled to at most one reminder per task per 20 hours (`last_reminded_at`).
+Changing a task's due date resets that clock so a rescheduled task doesn't
+immediately re-fire. This is a single-instance in-process timer, not an
+external cron job — fine for one Render web dyno; if this ever scales to
+multiple instances, move it to a dedicated scheduled job so reminders don't
+fire once per instance.
 
 ## Store onboarding
 Mirrors the shul flow: `apply-store.html` is a public application form

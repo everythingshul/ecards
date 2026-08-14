@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { initMail } from './services/mail.js';
+import { sendDueTaskReminders } from './services/reminders.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -16,6 +17,7 @@ import cardRoutes from './routes/cards.js';
 import storeRoutes from './routes/stores.js';
 import formRoutes from './routes/forms.js';
 import dashboardRoutes from './routes/dashboard.js';
+import taskRoutes from './routes/tasks.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -49,6 +51,7 @@ app.use('/api/cards', cardRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/tasks', taskRoutes);
 
 // Signed/generated PDFs and uploaded logos.
 app.use('/uploads/contracts', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'contracts')));
@@ -71,3 +74,9 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => console.log(`[ecards] listening on :${PORT}`));
+
+// Due-date task reminders — checked periodically (single-instance in-process
+// interval; see services/reminders.js for why).
+const REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => { sendDueTaskReminders().catch(e => console.error('[reminders] check failed', e.message)); }, REMINDER_INTERVAL_MS);
+setTimeout(() => { sendDueTaskReminders().catch(e => console.error('[reminders] check failed', e.message)); }, 15 * 1000);

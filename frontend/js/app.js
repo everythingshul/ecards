@@ -52,6 +52,7 @@ const NAV_ITEMS = [
   { href: '/admin/applicants.html', label: 'Applicants', icon: '&#9670;', resource: 'applicants' },
   { href: '/admin/cards.html', label: 'Cards & Transactions', icon: '&#9670;', resource: 'cards' },
   { href: '/admin/stores.html', label: 'Stores', icon: '&#9670;', resource: 'stores' },
+  { href: '/admin/tasks.html', label: 'Tasks', icon: '&#9670;', resource: 'tasks' },
   { href: '/admin/forms.html', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
@@ -143,6 +144,27 @@ async function loadGoogleMaps() {
     });
   } catch { /* address autofill unavailable — forms remain fully usable manually */ }
 }
+
+// Quick "+ Add Task" flow usable from any detail modal (shul, applicant, ...).
+// Linked to that record via entity_type/entity_id.
+async function openQuickTaskModal(entityType, entityId, entityLabel) {
+  let users = [];
+  try { ({ users } = await api('/users')); } catch { /* non-admin viewers won't have access; button shouldn't be shown to them anyway */ }
+  const options = `<option value="">Unassigned</option>` + users.filter(u => u.is_active).map(u => `<option value="${u.id}">${esc(u.first_name)} ${esc(u.last_name||'')}</option>`).join('');
+  const body = `
+    <p class="small-muted">Linked to ${esc(entityType)}: <strong>${esc(entityLabel)}</strong></p>
+    <label>Title <span class="req">*</span></label><input id="qt-title">
+    <label>Assign To</label><select id="qt-assigned_to">${options}</select>
+    <label>Due Date</label><input type="date" id="qt-due_date" style="max-width:200px">`;
+  openModal('Add Task', body, `<button class="btn btn-primary btn-sm" onclick="submitQuickTask('${entityType}','${entityId}')">Create Task</button>`);
+}
+window.openQuickTaskModal = openQuickTaskModal;
+window.submitQuickTask = async (entityType, entityId) => {
+  const title = document.getElementById('qt-title').value.trim();
+  if (!title) return toast('Title is required', true);
+  const body = { title, assigned_to: document.getElementById('qt-assigned_to').value || null, due_date: document.getElementById('qt-due_date').value || null, entity_type: entityType, entity_id: entityId };
+  try { await api('/tasks', { method: 'POST', body }); toast('Task created'); closeModal(); } catch (err) { toast(err.message, true); }
+};
 
 // Side-by-side field comparison table for duplicate review (shuls & applicants).
 // fields: [[key, label], ...]. Differing values get a highlighted background.

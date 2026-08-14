@@ -12,9 +12,13 @@ Auth.requireAuth();
 renderShell('/admin/dashboard.html', `
   <div class="flex-between"><h2>Dashboard</h2></div>
   <div class="stat-grid" id="stats"><div class="small-muted">Loading…</div></div>
-  <div class="card" id="dup-panel" style="display:none">
+  <div class="card" id="dup-panel" style="display:none;margin-bottom:16px">
     <div class="flex-between"><h3 style="margin:0">Open Duplicate Flags</h3><a href="/admin/shuls.html?dup=1" class="btn btn-sm btn-outline">Review</a></div>
     <p class="small-muted" id="dup-text"></p>
+  </div>
+  <div class="card">
+    <div class="flex-between"><h3 style="margin:0">My Open Tasks</h3><a href="/admin/tasks.html" class="btn btn-sm btn-outline">View All Tasks</a></div>
+    <div id="my-tasks" style="margin-top:10px"></div>
   </div>
 `);
 
@@ -37,6 +41,18 @@ renderShell('/admin/dashboard.html', `
       qs('#dup-text').textContent = `${stats.duplicates.open} record(s) are flagged as possible duplicates and paused pending review.`;
     }
   } catch (err) { toast(err.message, true); }
+
+  try {
+    const { tasks } = await api('/tasks?assigned_to=me&status=open&pageSize=8');
+    const today = new Date().toISOString().slice(0, 10);
+    qs('#my-tasks').innerHTML = tasks.length ? tasks.map(t => {
+      const overdue = t.due_date && t.due_date < today;
+      const dueLabel = t.due_date ? `<span style="${overdue ? 'color:var(--danger);font-weight:600' : 'color:var(--text-muted)'}">${fmtDate(t.due_date)}${overdue ? ' (overdue)' : ''}</span>` : '';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px">
+        <span>${esc(t.title)}</span>${dueLabel}
+      </div>`;
+    }).join('') : '<p class="small-muted">No open tasks assigned to you.</p>';
+  } catch (err) { /* tasks widget is non-critical */ }
 })();
 </script>
 </body>
