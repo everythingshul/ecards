@@ -3,11 +3,25 @@ import { join } from 'path';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
+export const CUSTOM_TEMPLATE_PATH = join(DATA_DIR, 'contracts', 'org-template.pdf');
 
-// Very small contract renderer. Real legal contract text should be set via
-// Admin > Settings > Contract Template (stored as settings key 'contract_template_text').
-// Kept intentionally simple/dependency-free (no HTML->PDF engine) so it runs anywhere.
+export function hasCustomTemplate() { return existsSync(CUSTOM_TEMPLATE_PATH); }
+
+// Contract source is either (a) an admin-uploaded PDF (Settings > Contract
+// Template > Upload PDF) used as-is, or (b) a simple generated PDF built
+// from the shul/season details + a plain-text clause (Settings > Contract
+// Template > Template Text). Either way the result is a per-shul "unsigned"
+// PDF that stampSignature() below adds a signature to.
 export async function generateContractPdf({ shul, season, templateText, orgName }) {
+  const path = join(DATA_DIR, 'contracts', `${shul.id}-unsigned.pdf`);
+
+  if (hasCustomTemplate()) {
+    // Uploaded PDF used verbatim as the contract body — the signature is
+    // stamped onto its last page at sign time (see stampSignature).
+    writeFileSync(path, readFileSync(CUSTOM_TEMPLATE_PATH));
+    return path;
+  }
+
   const doc = await PDFDocument.create();
   let page = doc.addPage([612, 792]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -45,37 +59,42 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
   const body = templateText || `By signing below, the undersigned, on behalf of the above shul, agrees to participate in the gift card assistance program for the current season, to submit applicant information accurately and in good faith, and to abide by the program's terms as communicated by the administering organization. The organization reserves the right to allocate a limited number of slots per season and to approve or decline individual applicants at its discretion.`;
   drawText(body, { size: 10.5, gap: 15 });
 
-  doc.registerFontkit?.(); // no-op guard if not needed
   const bytes = await doc.save();
-  const path = join(DATA_DIR, 'contracts', `${shul.id}-unsigned.pdf`);
   writeFileSync(path, bytes);
   return path;
 }
 
-// Stamps a signature (base64 PNG or typed name) + metadata onto the last page of the unsigned PDF.
+// Stamps a signature (base64 PNG or typed name) + metadata onto the last page
+// of the unsigned PDF. Positioned relative to the actual page size so this
+// works correctly whether the PDF is our generated Letter-size doc or an
+// admin-uploaded PDF of any dimensions.
 export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, signerName, signedAt, ip }) {
   const bytes = readFileSync(unsignedPath);
   const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
   const page = pages[pages.length - 1];
+  const { width: pw, height: ph } = page.getSize();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  let sigY = 130;
-  page.drawLine({ start: { x: 56, y: sigY + 40 }, end: { x: 300, y: sigY + 40 }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
+  const margin = Math.max(32, pw * 0.09);
+  const sigY = Math.max(60, ph * 0.16); // signature block ~16% up from the bottom of the last page
+  const lineWidth = Math.min(260, pw - margin * 2);
+
+  page.drawLine({ start: { x: margin, y: sigY + 40 }, end: { x: margin + lineWidth, y: sigY + 40 }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
 
   if (signatureDataUrl && signatureDataUrl.startsWith('data:image/png;base64,')) {
     const pngBytes = Buffer.from(signatureDataUrl.split(',')[1], 'base64');
     const png = await doc.embedPng(pngBytes);
     const dims = png.scale(0.35);
-    page.drawImage(png, { x: 56, y: sigY + 42, width: Math.min(dims.width, 220), height: Math.min(dims.height, 70) });
+    page.drawImage(png, { x: margin, y: sigY + 42, width: Math.min(dims.width, lineWidth), height: Math.min(dims.height, 70) });
   } else {
-    page.drawText(signerName || '', { x: 60, y: sigY + 50, size: 20, font: bold, color: rgb(0.15, 0.11, 0.09) });
+    page.drawText(signerName || '', { x: margin + 4, y: sigY + 50, size: 20, font: bold, color: rgb(0.15, 0.11, 0.09) });
   }
 
-  page.drawText(`Signed by: ${signerName || ''}`, { x: 56, y: sigY + 20, size: 10, font });
-  page.drawText(`Date: ${signedAt}`, { x: 56, y: sigY + 5, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
-  page.drawText(`IP: ${ip || 'n/a'}`, { x: 56, y: sigY - 10, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
+  page.drawText(`Signed by: ${signerName || ''}`, { x: margin, y: sigY + 20, size: 10, font });
+  page.drawText(`Date: ${signedAt}`, { x: margin, y: sigY + 5, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
+  page.drawText(`IP: ${ip || 'n/a'}`, { x: margin, y: sigY - 10, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
 
   const outBytes = await doc.save();
   const outPath = join(DATA_DIR, 'contracts', `${shulId}-signed.pdf`);

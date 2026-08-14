@@ -61,7 +61,17 @@ renderShell('/admin/settings.html', `
 
   <div id="panel-contract" style="display:none">
     <div class="card">
-      <h3>Contract Template Text</h3>
+      <h3>Upload Your Own Contract PDF</h3>
+      <p class="small-muted" id="pdf-status">Checking…</p>
+      <p class="small-muted">Upload your own signed-off contract document to use as-is instead of the generated one below. When a shul signs, their signature is stamped onto the bottom of the last page automatically — no other setup needed.</p>
+      <input type="file" id="contract-pdf-file" accept="application/pdf">
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="uploadContractPdf()">Upload PDF</button>
+        <button class="btn btn-sm btn-outline" id="btn-remove-pdf" style="display:none" onclick="removeContractPdf()">Remove & Use Generated Template</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Contract Template Text <span class="small-muted">(used only if no PDF is uploaded above)</span></h3>
       <p class="small-muted">This text is inserted into the generated contract PDF body, below the shul/Rav/Gabai details.</p>
       <textarea id="contract-text" rows="10"></textarea>
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveContractText()">Save</button>
@@ -144,7 +154,25 @@ async function loadContractText() {
 }
 window.saveContractText = async () => { try { await api('/settings', { method: 'PUT', body: { contract_template_text: qs('#contract-text').value } }); toast('Saved'); } catch (err) { toast(err.message, true); } };
 
-loadOrg(); loadSeasons(); loadFields(); loadContractText();
+async function loadContractPdfStatus() {
+  const { hasCustomTemplate } = await api('/settings/contract-pdf');
+  qs('#pdf-status').innerHTML = hasCustomTemplate
+    ? '<strong style="color:var(--success)">A custom contract PDF is currently in use.</strong>'
+    : 'No custom PDF uploaded — using the generated text template below.';
+  qs('#btn-remove-pdf').style.display = hasCustomTemplate ? 'inline-flex' : 'none';
+}
+window.uploadContractPdf = async () => {
+  const file = qs('#contract-pdf-file').files[0];
+  if (!file) return toast('Choose a PDF file first', true);
+  const fd = new FormData(); fd.append('file', file);
+  try { await api('/settings/contract-pdf', { method: 'POST', isForm: true, body: fd }); toast('Contract PDF uploaded'); loadContractPdfStatus(); } catch (err) { toast(err.message, true); }
+};
+window.removeContractPdf = async () => {
+  if (!confirm('Remove the custom PDF and go back to the generated text template?')) return;
+  try { await api('/settings/contract-pdf', { method: 'DELETE' }); toast('Removed'); loadContractPdfStatus(); } catch (err) { toast(err.message, true); }
+};
+
+loadOrg(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 </script>
 </body>
 </html>
