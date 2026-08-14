@@ -3,41 +3,224 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>everythingshul e-cards</title>
+<title id="page-title">everythingshul e-cards</title>
+<meta name="description" content="Season-based gift card assistance management for shuls, applicants, and participating stores.">
 <link rel="stylesheet" href="/css/theme.css">
 <style>
   body { background: var(--brand-bg); color: var(--text-on-dark); }
-  .hero { max-width: 760px; margin: 0 auto; padding: 90px 20px; text-align: center; }
-  .hero .dot { width: 60px; height: 60px; border-radius: 50%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); display:flex; align-items:center; justify-content:center; margin: 0 auto 24px; }
-  .hero .dot span { color: var(--brand-gold); font-size: 26px; }
-  .hero h1 { color: #fdf7ea; font-size: 34px; }
-  .hero p { color: #c9bda3; font-size: 16px; line-height: 1.6; }
-  .cta-row { display:flex; gap: 14px; justify-content:center; margin-top: 30px; flex-wrap: wrap; }
-  .cards-row { display:grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-top:60px; text-align:left; }
-  .mini-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 20px; }
-  .mini-card h3 { color: var(--brand-gold-light); font-size: 15px; }
-  .mini-card p { color: #c9bda3; font-size: 13px; margin: 0; }
+
+  .site-header { display: flex; align-items: center; justify-content: space-between; padding: 22px 32px; max-width: 1180px; margin: 0 auto; }
+  .site-header .brand { display: flex; align-items: center; gap: 12px; }
+  .site-header .brand .dot { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16); display: flex; align-items: center; justify-content: center; }
+  .site-header .brand .dot span { color: var(--brand-gold); font-size: 17px; }
+  .site-header .brand-text { font-family: Georgia, serif; line-height: 1.2; }
+  .site-header .brand-text strong { color: #fdf7ea; font-size: 16px; display: block; }
+  .site-header .brand-text span { color: #b8a688; font-size: 11px; letter-spacing: .3px; }
+  .site-header nav { display: flex; gap: 10px; align-items: center; }
+  .site-header nav a.link { color: #d8c9ac; text-decoration: none; font-size: 13.5px; font-weight: 600; padding: 8px 6px; }
+  .site-header nav a.link:hover { color: #fdf7ea; }
+
+  .hero { max-width: 820px; margin: 0 auto; padding: 60px 20px 80px; text-align: center; }
+  .hero .eyebrow { display: inline-block; color: var(--brand-gold-light); font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; border: 1px solid rgba(227,207,158,.3); border-radius: 999px; padding: 6px 16px; margin-bottom: 22px; }
+  .hero h1 { color: #fdf7ea; font-size: clamp(30px, 5vw, 46px); line-height: 1.15; margin-bottom: 18px; }
+  .hero h1 em { color: var(--brand-gold-light); font-style: normal; }
+  .hero p.lead { color: #c9bda3; font-size: 17px; line-height: 1.7; max-width: 620px; margin: 0 auto; }
+  .cta-row { display: flex; gap: 14px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+  .cta-row .btn { padding: 13px 26px; font-size: 14.5px; }
+  .cta-row .btn-outline { color: #e3cf9e; border-color: #e3cf9e; }
+
+  .band { padding: 70px 20px; }
+  .band-inner { max-width: 1080px; margin: 0 auto; }
+  .band-light { background: var(--brand-cream); color: var(--text-body); }
+  .band-light h2, .band-light h3 { color: var(--text-dark); }
+
+  .section-head { text-align: center; max-width: 640px; margin: 0 auto 44px; }
+  .section-head .eyebrow-sm { display: block; font-size: 12px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--brand-gold-dark); margin-bottom: 10px; }
+  .section-head h2 { font-size: clamp(24px, 3.4vw, 32px); margin-bottom: 12px; }
+  .section-head p { color: var(--text-muted); font-size: 15px; line-height: 1.7; }
+
+  .audience-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; }
+  .audience-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 28px 24px; box-shadow: var(--shadow); }
+  .audience-card .num { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, var(--brand-gold-light), var(--brand-gold-dark)); color: var(--text-dark); font-weight: 700; font-family: Georgia, serif; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+  .audience-card h3 { font-size: 17px; margin-bottom: 8px; }
+  .audience-card p { color: var(--text-muted); font-size: 13.5px; line-height: 1.65; margin: 0 0 16px; }
+  .audience-card a.audience-link { font-size: 13px; font-weight: 700; color: var(--brand-gold-dark); text-decoration: none; }
+  .audience-card a.audience-link:hover { text-decoration: underline; }
+
+  .mission-wrap { display: grid; grid-template-columns: 1.1fr 1fr; gap: 50px; align-items: center; }
+  .mission-wrap .quote-mark { font-family: Georgia, serif; font-size: 60px; color: rgba(227,207,158,.35); line-height: 1; margin-bottom: 6px; }
+  .mission-wrap h2 { color: #fdf7ea; font-size: clamp(24px, 3.4vw, 32px); }
+  .mission-wrap p { color: #c9bda3; font-size: 15.5px; line-height: 1.8; }
+  .mission-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .mission-stat { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 22px 18px; text-align: center; }
+  .mission-stat .n { font-family: Georgia, serif; font-size: 26px; color: var(--brand-gold-light); }
+  .mission-stat .l { font-size: 12px; color: #b8a688; text-transform: uppercase; letter-spacing: .4px; margin-top: 4px; }
+  @media (max-width: 800px) { .mission-wrap { grid-template-columns: 1fr; } }
+
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .feature-card { padding: 22px 4px; }
+  .feature-card .icon { width: 42px; height: 42px; border-radius: 10px; background: linear-gradient(135deg, var(--brand-gold-light), var(--brand-gold-dark)); display: flex; align-items: center; justify-content: center; color: var(--text-dark); font-size: 18px; margin-bottom: 14px; }
+  .feature-card h3 { font-size: 15.5px; margin-bottom: 6px; }
+  .feature-card p { color: var(--text-muted); font-size: 13.5px; line-height: 1.6; margin: 0; }
+
+  .contact-band { background: linear-gradient(180deg, var(--brand-bg) 0%, var(--brand-bg-2) 100%); }
+  .contact-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 50px; }
+  .contact-grid h2 { color: #fdf7ea; }
+  .contact-grid p.lead-c { color: #c9bda3; font-size: 15px; line-height: 1.7; }
+  .contact-list { list-style: none; margin: 26px 0 0; padding: 0; }
+  .contact-list li { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0; border-top: 1px solid rgba(255,255,255,.08); }
+  .contact-list li:first-child { border-top: none; }
+  .contact-list .ic { width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; color: var(--brand-gold-light); font-size: 14px; flex-shrink: 0; }
+  .contact-list a, .contact-list span.val { color: #f3ede2; text-decoration: none; font-size: 14.5px; font-weight: 600; }
+  .contact-list a:hover { color: var(--brand-gold-light); }
+  .contact-list .lbl { font-size: 11px; color: #9a8c72; text-transform: uppercase; letter-spacing: .4px; display: block; margin-bottom: 2px; }
+  .contact-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 30px; }
+  .contact-card h3 { color: #fdf7ea; font-size: 17px; margin-bottom: 10px; }
+  .contact-card p { color: #c9bda3; font-size: 13.5px; line-height: 1.7; margin: 0 0 20px; }
+  @media (max-width: 800px) { .contact-grid { grid-template-columns: 1fr; } }
+
+  .home-footer { border-top: 1px solid rgba(255,255,255,.08); padding: 34px 20px 44px; text-align: center; }
+  .home-footer .fi { font-size: 12.5px; color: #9a8c72; }
+  .home-footer a { color: var(--brand-gold-light); text-decoration: none; font-weight: 700; }
+  .home-footer a:hover { text-decoration: underline; }
+  .home-footer .foot-mark { color: var(--brand-gold); margin-left: 3px; }
+  .home-footer .foot-links { margin-top: 10px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .home-footer .foot-links a { color: #b8a688; font-weight: 600; font-size: 12.5px; }
 </style>
 </head>
 <body>
+
+  <header class="site-header">
+    <div class="brand">
+      <div class="dot"><span>&#9670;</span></div>
+      <div class="brand-text"><strong id="org-name-nav">everythingshul</strong><span>e-cards</span></div>
+    </div>
+    <nav>
+      <a href="/apply-store.html" class="link">Store Sign-Up</a>
+      <a href="/login.html" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
+    </nav>
+  </header>
+
   <div class="hero">
-    <div class="dot"><span>&#9670;</span></div>
-    <h1 id="org-name">everythingshul e-cards</h1>
-    <p>Season-based gift card assistance management for shuls, applicants, and participating stores.</p>
+    <span class="eyebrow">Season Gift Card Assistance Platform</span>
+    <h1 id="org-name">everythingshul <em>e-cards</em></h1>
+    <p class="lead">A single, organized home for shul contracts, applicant approvals, and gift card issuance — every season, from application to redemption, tracked end to end.</p>
     <div class="cta-row">
       <a href="/apply.html" class="btn btn-primary">Register Your Shul</a>
-      <a href="/apply-store.html" class="btn btn-outline" style="color:#e3cf9e;border-color:#e3cf9e;">Apply as a Store</a>
-      <a href="/login.html" class="btn btn-outline" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
-    </div>
-    <div class="cards-row">
-      <div class="mini-card"><h3>For Shuls</h3><p>Submit your contract, get approved, and manage applicant submissions each season.</p></div>
-      <div class="mini-card"><h3>For Applicants</h3><p>Approved through your shul, gift cards are mailed, delivered in person, or via your Gabai.</p></div>
-      <div class="mini-card"><h3>For Stores</h3><p>Participating locations manage setup status and billing through their own portal.</p></div>
+      <a href="/apply-store.html" class="btn btn-outline">Apply as a Participating Store</a>
+      <a href="/login.html" class="btn btn-outline">Sign In</a>
     </div>
   </div>
+
+  <section class="band">
+    <div class="band-inner">
+      <div class="mission-wrap">
+        <div>
+          <div class="quote-mark">&ldquo;</div>
+          <h2>Our Mission</h2>
+          <p>We exist to make it simple, dignified, and reliable for shuls to help their families before Yom Tov. Every shul that signs on gets a clear process, every applicant gets a fair and timely answer, and every gift card is tracked from issuance to the register — so generosity never gets lost in paperwork.</p>
+          <p style="margin-top:14px">Behind the scenes we handle the contracts, the approvals, the card issuance, and the store relationships, so your team can focus on the people you're helping.</p>
+        </div>
+        <div class="mission-stats">
+          <div class="mission-stat"><div class="n">3</div><div class="l">Groups Served</div></div>
+          <div class="mission-stat"><div class="n">1</div><div class="l">Simple Platform</div></div>
+          <div class="mission-stat"><div class="n">Live</div><div class="l">Card &amp; Spend Tracking</div></div>
+          <div class="mission-stat"><div class="n">E-Sign</div><div class="l">Every Agreement</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-light">
+    <div class="band-inner">
+      <div class="section-head">
+        <span class="eyebrow-sm">How It Works</span>
+        <h2>Built for three audiences, one process</h2>
+        <p>Shuls, applicants, and stores each get exactly what they need — nothing more, nothing hidden.</p>
+      </div>
+      <div class="audience-grid">
+        <div class="audience-card">
+          <div class="num">1</div>
+          <h3>For Shuls</h3>
+          <p>Submit your information, e-sign your participation agreement, and get an allocated number of slots each season. Manage your applicants and bulk-upload submissions from your own portal.</p>
+          <a class="audience-link" href="/apply.html">Register your shul &rarr;</a>
+        </div>
+        <div class="audience-card">
+          <div class="num">2</div>
+          <h3>For Applicants</h3>
+          <p>Submitted and approved through your shul. Once approved, your gift card is issued and delivered — mailed, handed to you in person, or through your Gabai.</p>
+          <a class="audience-link" href="/login.html">Already approved? Sign in &rarr;</a>
+        </div>
+        <div class="audience-card">
+          <div class="num">3</div>
+          <h3>For Stores</h3>
+          <p>Apply to become a participating redemption location, complete a short onboarding, and manage your billing and live transaction history from your own store portal.</p>
+          <a class="audience-link" href="/apply-store.html">Apply as a store &rarr;</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-inner">
+      <div class="section-head">
+        <span class="eyebrow-sm" style="color:var(--brand-gold-light)">Why It Works</span>
+        <h2 style="color:#fdf7ea">Everything tracked, nothing lost</h2>
+        <p style="color:#c9bda3">A single system that keeps contracts, approvals, cards, and spend all in one place.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card"><div class="icon">&#9998;</div><h3 style="color:#fdf7ea">E-Signed Agreements</h3><p style="color:#b8a688">Shuls, applicants, and stores can all sign their agreements electronically, with a legally attributable signature, timestamp, and IP address.</p></div>
+        <div class="feature-card"><div class="icon">&#128179;</div><h3 style="color:#fdf7ea">Live Card &amp; Spend Tracking</h3><p style="color:#b8a688">Gift card balances and store-level spend sync automatically, so everyone always sees an up-to-date picture.</p></div>
+        <div class="feature-card"><div class="icon">&#9989;</div><h3 style="color:#fdf7ea">Fast Approvals</h3><p style="color:#b8a688">Admins review, approve, and allocate card amounts in a few clicks, with automatic email notifications at every step.</p></div>
+        <div class="feature-card"><div class="icon">&#128274;</div><h3 style="color:#fdf7ea">Role-Based Access</h3><p style="color:#b8a688">Shuls, stores, and staff each see only what's relevant to them, with field-level permissions for sensitive data.</p></div>
+        <div class="feature-card"><div class="icon">&#128203;</div><h3 style="color:#fdf7ea">Full Data Exports</h3><p style="color:#b8a688">Every list can be downloaded in full, plus one complete system export covering every table, whenever you need it.</p></div>
+        <div class="feature-card"><div class="icon">&#128276;</div><h3 style="color:#fdf7ea">Tasks &amp; Reminders</h3><p style="color:#b8a688">Assign follow-ups to your team with due dates and automatic reminder emails, so nothing falls through the cracks.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band contact-band">
+    <div class="band-inner">
+      <div class="contact-grid">
+        <div>
+          <span class="eyebrow" style="margin-bottom:16px">Get In Touch</span>
+          <h2 style="font-size:clamp(24px,3.4vw,32px)">We're here to help</h2>
+          <p class="lead-c">Questions about registering your shul, applying as an approved store, or checking on a gift card? Reach out — a real person will get back to you.</p>
+          <ul class="contact-list" id="contact-list">
+            <li><div class="ic">&#9993;</div><div><span class="lbl">Email</span><span class="val" id="contact-email">Loading…</span></div></li>
+            <li><div class="ic">&#9742;</div><div><span class="lbl">Phone</span><span class="val" id="contact-phone">Loading…</span></div></li>
+            <li><div class="ic">&#8962;</div><div><span class="lbl">Address</span><span class="val" id="contact-address">Loading…</span></div></li>
+          </ul>
+        </div>
+        <div class="contact-card">
+          <h3>Ready to get started?</h3>
+          <p>Register your shul in a few minutes and get your participation agreement out for signature right away.</p>
+          <a href="/apply.html" class="btn btn-primary" style="width:100%">Register Your Shul</a>
+          <p style="margin-top:22px">Own a store and want to participate as a redemption location?</p>
+          <a href="/apply-store.html" class="btn btn-outline" style="width:100%">Apply as a Store</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="home-footer">
+    <div class="fi">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener">everythingshul<span class="foot-mark">&#9670;</span></a></div>
+    <div class="foot-links">
+      <a href="/apply.html">Register a Shul</a>
+      <a href="/apply-store.html">Apply as a Store</a>
+      <a href="/login.html">Sign In</a>
+    </div>
+  </footer>
+
   <script src="/js/app.js"></script>
   <script>
-    api('/orgs/resolve').then(({ org }) => { if (org?.name) document.getElementById('org-name').textContent = org.name; }).catch(()=>{});
+    api('/orgs/resolve').then(({ org }) => {
+      if (!org) return;
+      if (org.name) { document.getElementById('org-name').textContent = org.name; document.getElementById('org-name-nav').textContent = org.name; document.getElementById('page-title').textContent = org.name; }
+      document.getElementById('contact-email').innerHTML = org.support_email ? `<a href="mailto:${org.support_email}">${org.support_email}</a>` : 'support@everythingshul.com';
+      document.getElementById('contact-phone').innerHTML = org.support_phone ? `<a href="tel:${org.support_phone}">${org.support_phone}</a>` : 'Contact us by email';
+      document.getElementById('contact-address').textContent = org.address || 'Available upon request';
+    }).catch(() => {});
   </script>
 </body>
 </html>

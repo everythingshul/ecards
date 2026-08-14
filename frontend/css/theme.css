@@ -134,3 +134,11 @@ tr:hover td { background: #fbf8f1; }
 .paginator { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 16px; font-size: 13px; }
 
 #sig-pad { border: 2px dashed var(--border); border-radius: 8px; touch-action: none; background: #fff; width: 100%; height: 160px; }
+
+/* Shared footer for public-facing pages (light background) — homepage has
+   its own dark-themed variant built inline since it sits on --brand-bg. */
+.site-footer { padding: 36px 20px 44px; text-align: center; border-top: 1px solid var(--border); margin-top: 50px; }
+.site-footer-inner { font-size: 12.5px; color: var(--text-muted); }
+.site-footer-inner a { color: var(--brand-gold-dark); text-decoration: none; font-weight: 700; }
+.site-footer-inner a:hover { text-decoration: underline; }
+.site-footer-mark { color: var(--brand-gold-dark); margin-left: 3px; }

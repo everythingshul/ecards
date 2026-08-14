@@ -281,6 +281,16 @@ window.voidDocument = async (docId, entityType, entityId, containerId, defaultEm
 };
 window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 
+// Shared footer for public-facing pages (login/apply/sign-*/form) — every
+// page carries the "Powered by everythingshul" mark linking to
+// everythingshul.com, matching the treatment on every outbound email.
+function renderPublicFooter() {
+  const el = document.createElement('footer');
+  el.className = 'site-footer';
+  el.innerHTML = `<div class="site-footer-inner">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener">everythingshul<span class="site-footer-mark">&#9670;</span></a></div>`;
+  document.body.appendChild(el);
+}
+
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.
 function initSignaturePad(canvasId) {
   const canvas = document.getElementById(canvasId);

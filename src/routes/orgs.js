@@ -7,7 +7,7 @@ const router = Router();
 // Public: org branding for the public pages (apply form, store signup, etc).
 // Single-org platform, so this always resolves to the one organization.
 router.get('/resolve', (req, res) => {
-  const org = db.prepare('SELECT id, name, logo_url, primary_color, accent_color, support_email FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
+  const org = db.prepare('SELECT id, name, logo_url, primary_color, accent_color, support_email, support_phone, address FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
   res.json({ org });
 });
 
