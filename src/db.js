@@ -44,26 +44,9 @@ CREATE TABLE IF NOT EXISTS seasons (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Every org runs its own disccardpromos.com account (different orgs, different
--- merchant accounts/API keys — same vendor for everyone though, see
--- services/giftcard.js). Falls back to the platform-wide default env vars,
--- then mock mode, if an org hasn't configured its own.
-CREATE TABLE IF NOT EXISTS org_giftcard_settings (
-  org_id TEXT PRIMARY KEY REFERENCES organizations(id),
-  api_base TEXT,
-  api_key TEXT,
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS org_email_settings (
-  org_id TEXT PRIMARY KEY REFERENCES organizations(id),
-  provider TEXT DEFAULT 'brevo',
-  api_key TEXT,
-  sender_email TEXT,
-  sender_name TEXT,
-  reply_to TEXT,
-  updated_at TEXT DEFAULT (datetime('now'))
-);
+-- Single-org platform: one Brevo account, one disccardpromos account for the
+-- whole system (see services/mail.js and services/giftcard.js). No per-org
+-- credential tables — that was tried and explicitly reverted.
 
 -- ===================== Users / RBAC =====================
 CREATE TABLE IF NOT EXISTS users (

@@ -1,16 +1,18 @@
 // ---------------------------------------------------------------------------
-// disccardpromos.com gift card provider — this platform only ever talks to
-// disccardpromos (single vendor), but every ORGANIZATION runs its own
-// disccardpromos account/API key (different orgs have different merchant
-// accounts). Configured by a super_admin under Admin > Organizations > Gift
-// Cards (org_giftcard_settings table). Falls back to the platform-wide
-// DISCCARDPROMOS_API_BASE/DISCCARDPROMOS_API_KEY env vars if an org hasn't
-// set its own, and to MOCK MODE if neither exists.
+// disccardpromos.com gift card provider — single-org platform, single
+// disccardpromos account for the whole system. Set DISCCARDPROMOS_API_BASE /
+// DISCCARDPROMOS_API_KEY to go live; MOCK MODE (simulated card ids,
+// activation, empty transaction feed) until both are set.
 //
-// This module is the only place in the app that talks to disccardpromos.com.
-// Every call site in routes/cards.js passes orgId through, so if the real API
-// contract differs once confirmed (or they add an endpoint we need), only
-// this file changes — nothing about the per-org account resolution does.
+// (This app previously supported a per-org disccardpromos account per
+// organization; that was reverted along with per-org email — the whole
+// platform now runs as one organization, one merchant account. Function
+// signatures still take an unused orgId first argument to avoid touching
+// every call site in routes/cards.js.)
+//
+// This module is the only place in the app that talks to disccardpromos.com —
+// if the real API contract differs once confirmed (or they add an endpoint we
+// need), only this file changes.
 //
 // Their docs host (docs.disccardpromos.com) blocked automated fetching from
 // this build environment, so the exact endpoint paths/payloads below are a
@@ -18,27 +20,19 @@
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
-import { db } from '../db.js';
 
-const PLATFORM_DEFAULT = {
+const CONFIG = {
   apiBase: process.env.DISCCARDPROMOS_API_BASE || '',
   apiKey: process.env.DISCCARDPROMOS_API_KEY || '',
 };
 
-function resolveConfig(orgId) {
-  const row = orgId ? db.prepare('SELECT * FROM org_giftcard_settings WHERE org_id = ?').get(orgId) : null;
-  if (row?.api_base && row?.api_key) return { apiBase: row.api_base, apiKey: row.api_key };
-  return PLATFORM_DEFAULT;
-}
-
-export function isMockMode(orgId) {
-  const cfg = resolveConfig(orgId);
-  return !cfg.apiBase || !cfg.apiKey;
+export function isMockMode() {
+  return !CONFIG.apiBase || !CONFIG.apiKey;
 }
 
 async function call(orgId, path, opts = {}) {
-  const cfg = resolveConfig(orgId);
-  if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured for this org — running in mock mode, this should not be reached');
+  const cfg = CONFIG;
+  if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured — running in mock mode, this should not be reached');
   const res = await fetch(`${cfg.apiBase}${path}`, {
     ...opts,
     headers: {

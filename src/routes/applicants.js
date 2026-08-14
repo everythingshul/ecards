@@ -99,7 +99,7 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
 });
 
-router.post('/:id/approve', requireAdmin, (req, res) => {
+router.post('/:id/approve', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant has an unresolved duplicate flag' });
@@ -107,9 +107,13 @@ router.post('/:id/approve', requireAdmin, (req, res) => {
   const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
   db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
     .run(req.user.id, amount, applicant.id);
-  const tmpl = templates.applicantApproved(`${applicant.first_name} ${applicant.last_name}`);
-  if (applicant.email) sendMail(req.user.org_id, applicant.email, tmpl.subject, tmpl.body);
-  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
+  let emailError = null;
+  if (applicant.email) {
+    const tmpl = templates.applicantApproved(`${applicant.first_name} ${applicant.last_name}`);
+    try { await sendMail(req.user.org_id, applicant.email, tmpl.subject, tmpl.body); }
+    catch (e) { console.error('[mail] applicant approval email failed:', e.message); emailError = e.message; }
+  }
+  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError });
 });
 
 router.post('/:id/reject', requireAdmin, (req, res) => {

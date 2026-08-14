@@ -23,7 +23,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Invite a new internal user with a role + optional per-resource permission overrides.
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { email, first_name, last_name, role = 'staff', permissions = [] } = req.body || {};
   if (!email || !first_name) return res.status(400).json({ error: 'Email and first name are required' });
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'A user with this email already exists' });
@@ -34,8 +34,10 @@ router.post('/', (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
-  sendMail(req.user.org_id, email, 'You\'ve been invited', `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
-  res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id) });
+  let emailError = null;
+  try { await sendMail(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`); }
+  catch (e) { console.error('[mail] user invite email failed:', e.message); emailError = e.message; }
+  res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id), emailError });
 });
 
 router.put('/:id', (req, res) => {

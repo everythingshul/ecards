@@ -57,9 +57,6 @@ const NAV_ITEMS = [
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
 ];
-const SUPER_ADMIN_NAV_ITEMS = [
-  { href: '/admin/organizations.html', label: 'Organizations', icon: '&#9670;' },
-];
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard.html', label: 'My Applicants' },
   { href: '/shul-portal/upload.html', label: 'Bulk Upload' },
@@ -76,7 +73,6 @@ function renderShell(activeHref, contentHtml) {
   let items = NAV_ITEMS;
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
-  else if (role === 'super_admin') items = items.concat(SUPER_ADMIN_NAV_ITEMS);
   const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}">${i.icon ? `<span>${i.icon}</span>` : ''}${esc(i.label)}</a>`).join('');
   document.body.innerHTML = `
     <div class="app-shell">

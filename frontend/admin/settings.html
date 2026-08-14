@@ -12,12 +12,28 @@ Auth.requireAuth();
 renderShell('/admin/settings.html', `
   <h2>Settings</h2>
   <div class="tabs">
-    <button class="active" data-t="seasons">Seasons</button>
+    <button class="active" data-t="org">Organization</button>
+    <button data-t="seasons">Seasons</button>
     <button data-t="fields">Required Fields</button>
     <button data-t="contract">Contract Template</button>
   </div>
 
-  <div id="panel-seasons">
+  <div id="panel-org">
+    <div class="card">
+      <h3>Organization Info & Branding</h3>
+      <label>Organization Name</label><input id="org-name">
+      <div class="grid-2">
+        <div><label>Primary Color</label><input id="org-primary_color" type="color"></div>
+        <div><label>Accent Color</label><input id="org-accent_color" type="color"></div>
+      </div>
+      <label>Support Email</label><input id="org-support_email">
+      <label>Support Phone</label><input id="org-support_phone">
+      <label>Address</label><input id="org-address">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveOrg()">Save</button>
+    </div>
+  </div>
+
+  <div id="panel-seasons" style="display:none">
     <div class="card">
       <div class="flex-between"><h3 style="margin:0">Seasons</h3><button class="btn btn-sm btn-primary" onclick="openNewSeason()">+ New Season</button></div>
       <div id="seasons-list" style="margin-top:14px">Loading…</div>
@@ -50,8 +66,25 @@ renderShell('/admin/settings.html', `
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['seasons','fields','contract'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  ['org','seasons','fields','contract'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
 }));
+
+async function loadOrg() {
+  const { organization: o } = await api('/orgs/me');
+  qs('#org-name').value = o.name || '';
+  qs('#org-primary_color').value = o.primary_color || '#241a15';
+  qs('#org-accent_color').value = o.accent_color || '#c9a76a';
+  qs('#org-support_email').value = o.support_email || '';
+  qs('#org-support_phone').value = o.support_phone || '';
+  qs('#org-address').value = o.address || '';
+}
+window.saveOrg = async () => {
+  const body = {
+    name: qs('#org-name').value, primary_color: qs('#org-primary_color').value, accent_color: qs('#org-accent_color').value,
+    support_email: qs('#org-support_email').value, support_phone: qs('#org-support_phone').value, address: qs('#org-address').value,
+  };
+  try { await api('/orgs/me', { method: 'PUT', body }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
 
 const ALL_SHUL_FIELDS = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address'];
 const ALL_APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','shul_id','preferred_contact_method','num_children','home_for_yomtov'];
@@ -105,7 +138,7 @@ async function loadContractText() {
 }
 window.saveContractText = async () => { try { await api('/settings', { method: 'PUT', body: { contract_template_text: qs('#contract-text').value } }); toast('Saved'); } catch (err) { toast(err.message, true); } };
 
-loadSeasons(); loadFields(); loadContractText();
+loadOrg(); loadSeasons(); loadFields(); loadContractText();
 </script>
 </body>
 </html>

@@ -41,7 +41,7 @@ router.post('/accept-invite', (req, res) => {
   res.json({ token: signToken(fresh), user: safe });
 });
 
-router.post('/forgot-password', (req, res) => {
+router.post('/forgot-password', async (req, res) => {
   const { email } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email || '').trim().toLowerCase());
   // Always respond 200 to avoid leaking which emails exist.
@@ -50,7 +50,8 @@ router.post('/forgot-password', (req, res) => {
     const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
     const resetUrl = `${process.env.APP_URL || ''}/reset-password.html?token=${token}`;
-    sendMail(user.org_id, user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`);
+    try { await sendMail(user.org_id, user.email, 'Reset your password', `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`); }
+    catch (e) { console.error('[mail] password reset email failed:', e.message); }
   }
   res.json({ ok: true });
 });

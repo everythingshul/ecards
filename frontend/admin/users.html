@@ -93,7 +93,7 @@ qs('#btn-new').addEventListener('click', () => {
 });
 window.createUser = async () => {
   const body = { email: qs('#n-email').value, first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, role: qs('#n-role').value };
-  try { await api('/users', { method: 'POST', body }); toast('Invite sent'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+  try { const r = await api('/users', { method: 'POST', body }); toast(r.emailError ? `User created, but invite email failed: ${r.emailError}` : 'Invite sent', !!r.emailError); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 
 load();

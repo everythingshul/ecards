@@ -45,7 +45,7 @@ async function loadCards() {
         <td>${esc(c.first_name)} ${esc(c.last_name)}</td><td>${esc(c.shul_name||'—')}</td><td>${esc(c.card_number_masked||'—')}</td>
         <td>${badge(c.status,c.status)}</td><td>${fmtMoney(c.amount)}</td><td>${c.activated_at?fmtDateTime(c.activated_at):'—'}</td>
         <td><button class="btn btn-sm btn-outline" onclick="openCard('${c.id}')">Manage</button></td>
-      </tr>`).join('') : '<tr><td colspan="7" class="empty-state">No cards yet — assign cards from an approved applicant\\'s profile.</td></tr>';
+      </tr>`).join('') : "<tr><td colspan=\"7\" class=\"empty-state\">No cards yet — assign cards from an approved applicant's profile.</td></tr>";
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
     qs('#pager-cards').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">&larr; Prev</button> Page ${state.page} of ${pages} <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next &rarr;</button>`;
   } catch (err) { toast(err.message, true); }

@@ -134,12 +134,20 @@ window.addShulNote = async (id) => {
 window.approveShul = async (id) => {
   const slots = prompt('Number of slots to allocate for this shul this season:', qs('#edit-slots')?.value || '0');
   if (slots === null) return;
-  try { await api(`/shuls/${id}/approve`, { method: 'POST', body: { slots_allocated: +slots } }); toast('Shul approved — account setup email sent'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+  try {
+    const r = await api(`/shuls/${id}/approve`, { method: 'POST', body: { slots_allocated: +slots } });
+    toast(r.emailError ? `Shul approved, but the account setup email failed to send: ${r.emailError}` : 'Shul approved — account setup email sent', !!r.emailError);
+    closeModal(); load();
+  } catch (err) { toast(err.message, true); }
 };
 window.rejectShul = async (id) => { if (!confirm('Reject this shul application?')) return; try { await api(`/shuls/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.pauseToggle = async (id, pause) => { try { await api(`/shuls/${id}/${pause?'pause':'unpause'}`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
-window.sendContract = async (id) => { try { await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast('Contract emailed'); closeModal(); openShul(id); } catch (err) { toast(err.message, true); } };
-window.resendContract = async (id) => { try { await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast('Contract re-emailed'); } catch (err) { toast(err.message, true); } };
+window.sendContract = async (id) => {
+  try { const r = await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast(r.emailError ? `Contract generated, but email failed: ${r.emailError}` : 'Contract emailed', !!r.emailError); closeModal(); openShul(id); } catch (err) { toast(err.message, true); }
+};
+window.resendContract = async (id) => {
+  try { const r = await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast(r.emailError ? `Email failed: ${r.emailError}` : 'Contract re-emailed', !!r.emailError); } catch (err) { toast(err.message, true); }
+};
 
 function openShulForm() {
   const body = `

@@ -100,7 +100,7 @@ window.saveStore = async (id) => {
   body.setup_status = qs('#e-status').value; body.has_provider_account = qs('#e-has_account').checked;
   try { await api(`/stores/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
-window.inviteStore = async (id) => { try { await api(`/stores/${id}/invite`, { method: 'POST' }); toast('Invite sent'); } catch (err) { toast(err.message, true); } };
+window.inviteStore = async (id) => { try { const r = await api(`/stores/${id}/invite`, { method: 'POST' }); toast(r.emailError ? `Invite created, but email failed: ${r.emailError}` : 'Invite sent', !!r.emailError); } catch (err) { toast(err.message, true); } };
 window.addBilling = async (id) => {
   const period = qs('#b-period').value.trim(), amount_owed = +qs('#b-amount').value || 0;
   if (!period) return toast('Enter a period', true);

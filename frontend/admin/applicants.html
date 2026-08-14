@@ -101,7 +101,7 @@ qs('#btn-new').addEventListener('click', () => openApplicantForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
 qs('#f-dupes').addEventListener('click', showDuplicates);
 qs('#btn-mass-approve').addEventListener('click', async () => {
-  const amount = prompt('Card amount to set for all selected (leave blank to use each applicant\\'s existing/default amount):', '');
+  const amount = prompt("Card amount to set for all selected (leave blank to use each applicant's existing/default amount):", '');
   try {
     const body = { ids: Array.from(selected) };
     if (amount !== null && amount !== '') body.card_amount = +amount;
@@ -174,7 +174,9 @@ window.saveApplicant = async (id) => {
   };
   try { await api(`/applicants/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
-window.approveApplicant = async (id) => { try { await api(`/applicants/${id}/approve`, { method: 'POST' }); toast('Approved'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.approveApplicant = async (id) => {
+  try { const r = await api(`/applicants/${id}/approve`, { method: 'POST' }); toast(r.emailError ? `Approved, but email failed: ${r.emailError}` : 'Approved', !!r.emailError); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
 window.rejectApplicant = async (id) => { if (!confirm('Reject this applicant?')) return; try { await api(`/applicants/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.trim(); if (!note) return; try { await api(`/applicants/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
 window.assignCard = async (id) => { try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };

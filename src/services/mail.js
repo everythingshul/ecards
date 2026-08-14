@@ -1,48 +1,37 @@
-import { db } from '../db.js';
+import { db, DEFAULT_ORG_ID } from '../db.js';
 
 // ---------------------------------------------------------------------------
 // Email — Brevo (https://api.brevo.com) transactional email API.
 //
-// The platform has one default sending account (from everythingshul.com), set
-// via BREVO_API_KEY / EMAIL_DEFAULT_SENDER env vars. Any organization can be
-// given its OWN Brevo account (API key + verified sender) so its emails send
-// from its own identity instead — configured per-org by a super_admin only,
-// via org_email_settings (see routes/orgs.js email-settings endpoints and
-// admin/organizations.html). Every sendMail() call resolves org -> its own
-// settings if present, else falls back to the platform default.
+// Single-org platform: one Brevo sending account for everything, set via
+// BREVO_API_KEY / EMAIL_DEFAULT_SENDER / EMAIL_DEFAULT_SENDER_NAME env vars.
+// (This app previously supported per-org Brevo accounts; that was reverted —
+// the whole platform now runs as one organization, one sending identity.)
+//
+// IMPORTANT — most common cause of "emails aren't sending": Brevo requires
+// the sender email (EMAIL_DEFAULT_SENDER) to be a verified sender identity
+// (or verified domain) in your Brevo account. If it isn't, every send fails
+// with an auth/sender error — which now surfaces as `emailError` in the API
+// response and a `[mail] Brevo send failed` log line, instead of failing
+// silently. Verify your sender at app.brevo.com > Senders & IP.
 // ---------------------------------------------------------------------------
 
-const PLATFORM_DEFAULT = {
+const CONFIG = {
   apiKey: process.env.BREVO_API_KEY || '',
   senderEmail: process.env.EMAIL_DEFAULT_SENDER || 'noreply@everythingshul.com',
   senderName: process.env.EMAIL_DEFAULT_SENDER_NAME || 'everythingshul',
 };
 
 export function initMail() {
-  if (!PLATFORM_DEFAULT.apiKey) {
-    console.warn('[mail] BREVO_API_KEY not set — platform-default emails will be logged to console (dry-run) instead of sent. Orgs with their own Brevo account configured in Organizations settings will still send normally.');
+  if (!CONFIG.apiKey) {
+    console.warn('[mail] BREVO_API_KEY not set — emails will be logged to console (dry-run) instead of sent.');
   }
 }
 
-function resolveEmailConfig(orgId) {
-  if (orgId) {
-    const row = db.prepare('SELECT * FROM org_email_settings WHERE org_id = ?').get(orgId);
-    if (row?.api_key) {
-      return {
-        apiKey: row.api_key,
-        senderEmail: row.sender_email || PLATFORM_DEFAULT.senderEmail,
-        senderName: row.sender_name || PLATFORM_DEFAULT.senderName,
-        replyTo: row.reply_to || null,
-      };
-    }
-  }
-  return { apiKey: PLATFORM_DEFAULT.apiKey, senderEmail: PLATFORM_DEFAULT.senderEmail, senderName: PLATFORM_DEFAULT.senderName, replyTo: null };
-}
-
-function brandFor(orgId) {
-  const org = orgId ? db.prepare('SELECT name, primary_color, accent_color FROM organizations WHERE id = ?').get(orgId) : null;
+function brandFor() {
+  const org = db.prepare('SELECT name, primary_color, accent_color FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
   return {
-    name: org?.name || PLATFORM_DEFAULT.senderName,
+    name: org?.name || CONFIG.senderName,
     color: org?.primary_color || '#241a15',
     accent: org?.accent_color || '#c9a76a',
   };
@@ -57,17 +46,20 @@ function wrap(bodyHtml, brand) {
           <span style="color:${brand.accent};font-size:20px;font-weight:bold;letter-spacing:.5px;">${brand.name}</span>
         </td></tr>
         <tr><td style="padding:32px;color:#2a231d;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
-        <tr><td style="background:#f3ede2;padding:16px 32px;color:#8a7c63;font-size:12px;">This is an automated message from ${brand.name}.</td></tr>
+        <tr><td style="background:#f3ede2;padding:18px 32px;color:#8a7c63;font-size:12px;border-top:1px solid #e5dcc8;">
+          This is an automated message from ${brand.name}.<br><br>
+          <span style="color:#a8987a;">Powered by</span> <a href="https://everythingshul.com" style="color:#a8987a;text-decoration:underline;">everythingshul.com</a>
+        </td></tr>
       </table>
     </td></tr>
   </table></body></html>`;
 }
 
-// orgId may be null for platform-level mail (e.g. a super_admin invite). Always
-// pass the org whose branding/sending account should be used when known.
+// orgId param kept for call-site compatibility but no longer used to look up
+// per-org credentials — see note above. Every email uses the single platform account.
 export async function sendMail(orgId, to, subject, bodyHtml) {
-  const cfg = resolveEmailConfig(orgId);
-  const brand = brandFor(orgId);
+  const cfg = CONFIG;
+  const brand = brandFor();
   const html = wrap(bodyHtml, brand);
   if (!cfg.apiKey) {
     console.log(`[mail:DRY-RUN org=${orgId || 'platform'}] To: ${to} | Subject: ${subject}\n${bodyHtml.replace(/<[^>]+>/g, ' ')}`);

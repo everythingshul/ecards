@@ -80,7 +80,7 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 // Invite a store to their self-service portal.
-router.post('/:id/invite', requireAdmin, (req, res) => {
+router.post('/:id/invite', requireAdmin, async (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
   const email = req.body?.email || store.owner_email || store.manager_email;
@@ -98,8 +98,10 @@ router.post('/:id/invite', requireAdmin, (req, res) => {
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
   const portalUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
   const tmpl = templates.storeSetup(store.name, portalUrl);
-  sendMail(req.user.org_id, email, tmpl.subject, tmpl.body);
-  res.json({ ok: true });
+  let emailError = null;
+  try { await sendMail(req.user.org_id, email, tmpl.subject, tmpl.body); }
+  catch (e) { console.error('[mail] store invite email failed:', e.message); emailError = e.message; }
+  res.json({ ok: true, emailError });
 });
 
 // ---- Store portal onboarding wizard ----
