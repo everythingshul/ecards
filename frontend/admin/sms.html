@@ -63,12 +63,38 @@ qs('#btn-sync-inbox').addEventListener('click', async () => {
   const btn = qs('#btn-sync-inbox'); btn.disabled = true; btn.textContent = 'Checking…';
   try {
     const r = await api('/sms/inbox/sync', { method: 'POST' });
-    if (r.mockMode) toast('SMS isn\'t turned on yet — nothing to check.', true);
-    else toast(`Found ${r.imported} new message(s) (${r.skipped} not classified as inbound, ${r.total} total on the provider)`);
+    if (r.mockMode) { toast('SMS isn\'t turned on yet — nothing to check.', true); }
+    else {
+      toast(`Found ${r.imported} new message(s) (${r.skipped} not classified as inbound, ${r.total} total on the provider)`);
+      renderSyncDiagnostics(r);
+    }
     loadInbox();
   } catch (err) { toast(err.message, true); }
   finally { btn.disabled = false; btn.textContent = 'Check Now'; }
 });
+
+// Shows exactly what SimpleSender's /v1/messages endpoint actually returned
+// when we can't make sense of it, so figuring out real field names doesn't
+// require Render server-log access — the raw shape is visible right here.
+function renderSyncDiagnostics(r) {
+  let box = qs('#sync-diagnostics');
+  if (!r.sample && !r.rawKeys) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'sync-diagnostics';
+    box.className = 'card';
+    box.style.cssText = 'border-color:var(--warn);margin:12px 0';
+    qs('#panel-inbox').insertBefore(box, qs('#panel-inbox').firstChild.nextSibling);
+  }
+  if (r.rawKeys) {
+    box.innerHTML = `<strong>Couldn't find a message list in the provider's response.</strong>
+      <p class="small-muted" style="margin-top:6px">Expected a <code>messages</code> array but the response only has these top-level fields: <code>${esc(r.rawKeys.join(', '))}</code>. Share this with support to fix the sync.</p>`;
+  } else {
+    box.innerHTML = `<strong>Found messages, but couldn't tell which ones are incoming.</strong>
+      <p class="small-muted" style="margin-top:6px">None of the ${r.skipped} message(s) checked had a recognizable direction field. Here's a sample message as the provider sent it — share this with support to fix the sync:</p>
+      <pre style="white-space:pre-wrap;word-break:break-all;background:var(--bg-alt,#f6f6f6);padding:10px;border-radius:6px;font-size:12px;margin-top:6px">${esc(JSON.stringify(r.sample, null, 2))}</pre>`;
+  }
+}
 
 qs('#webhook-url').textContent = window.location.origin + '/api/sms/webhook/inbound';
 

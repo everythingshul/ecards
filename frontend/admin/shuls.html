@@ -19,6 +19,7 @@ renderShell('/admin/shuls', `
       <button class="btn btn-outline btn-sm" id="btn-template">Download Import Template</button>
       <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
       <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
+      <button class="btn btn-outline btn-sm" id="btn-columns">Customize Columns</button>
       <button class="btn btn-primary btn-sm" id="btn-new">+ Add Shul</button>
     </div>
   </div>
@@ -31,11 +32,8 @@ renderShell('/admin/shuls', `
   <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
-      <thead><tr>
-        <th data-sort="name_en">Shul</th><th>State / City</th><th>Rav</th><th>Gabai</th>
-        <th data-sort="status">Status</th><th data-sort="slots_allocated">Slots</th><th>Applicants</th><th data-sort="created_at">Submitted</th><th></th>
-      </tr></thead>
-      <tbody id="tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody>
+      <thead id="thead"></thead>
+      <tbody id="tbody"><tr><td class="empty-state">Loading…</td></tr></tbody>
     </table>
   </div>
   <div class="paginator" id="pager"></div>
@@ -44,28 +42,53 @@ renderShell('/admin/shuls', `
 let state = { search:'', status:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
 if (new URLSearchParams(location.search).get('dup') === '1') showDuplicates();
 
+// Every field a column can show, plus how to render it. Which of these
+// show, and in what order, is per-admin (Customize Columns button, saved
+// via attachColumnCustomizer) — same pattern as the Applicants list.
+const SHUL_COLUMNS = [
+  { key: 'name', label: 'Shul', sort: 'name_en', render: s => `<strong>${esc(s.name_en)}</strong>${s.name_he ? `<br><span dir="rtl" class="small-muted">${esc(s.name_he)}</span>` : ''}${s.is_paused ? ' ' + badge('paused','paused') : ''}` },
+  { key: 'state_city', label: 'State / City', render: s => `${esc(s.state)}, ${esc(s.city)}` },
+  { key: 'address', label: 'Address', render: s => esc(s.address||'') },
+  { key: 'zip', label: 'Zip', render: s => esc(s.zip||'') },
+  { key: 'rav', label: 'Rav', render: s => `${esc(s.ruv_first_name)} ${esc(s.ruv_last_name)}<br><span class="small-muted">${esc(s.ruv_phone)}</span>` },
+  { key: 'gabai', label: 'Gabai', render: s => `${esc(s.gabai_first_name)} ${esc(s.gabai_last_name)}<br><span class="small-muted">${esc(s.gabai_cell)}</span>` },
+  { key: 'gabai_email', label: 'Gabai Email', render: s => esc(s.gabai_email||'') },
+  { key: 'status', label: 'Status', sort: 'status', render: s => badge(s.status, s.status) },
+  { key: 'slots_allocated', label: 'Slots', sort: 'slots_allocated', render: s => s.slots_allocated ?? 0 },
+  { key: 'applicant_count', label: 'Applicants', render: s => s.applicant_count },
+  { key: 'created_at', label: 'Submitted', sort: 'created_at', render: s => fmtDate(s.created_at) },
+];
+const DEFAULT_SHUL_COLUMNS = ['name','state_city','rav','gabai','status','slots_allocated','applicant_count','created_at'];
+let activeColumns = DEFAULT_SHUL_COLUMNS;
+
+function renderThead() {
+  const cols = activeColumns.map(k => SHUL_COLUMNS.find(c => c.key === k)).filter(Boolean);
+  qs('#thead').innerHTML = `<tr>${cols.map(c => `<th ${c.sort ? `data-sort="${c.sort}"` : ''}>${esc(c.label)}</th>`).join('')}<th></th></tr>`;
+}
+qs('#thead').parentElement.addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (!th) return;
+  const key = th.dataset.sort;
+  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
+  state.sort = key; load();
+});
+
 async function load() {
   const params = new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize });
   try {
     const { shuls, total } = await api('/shuls?' + params);
-    if (!shuls.length) { qs('#tbody').innerHTML = '<tr><td colspan="9" class="empty-state">No shuls found.</td></tr>'; }
-    else qs('#tbody').innerHTML = shuls.map(rowHtml).join('');
+    const cols = activeColumns.map(k => SHUL_COLUMNS.find(c => c.key === k)).filter(Boolean);
+    if (!shuls.length) { qs('#tbody').innerHTML = `<tr><td colspan="${cols.length+1}" class="empty-state">No shuls found.</td></tr>`; }
+    else qs('#tbody').innerHTML = shuls.map(s => rowHtml(s, cols)).join('');
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
     qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; load(); }
 
-function rowHtml(s) {
+function rowHtml(s, cols) {
   return `<tr onclick="openShul('${s.id}')" style="cursor:pointer">
-    <td><strong>${esc(s.name_en)}</strong>${s.name_he ? `<br><span dir="rtl" class="small-muted">${esc(s.name_he)}</span>` : ''}${s.is_paused ? ' ' + badge('paused','paused') : ''}</td>
-    <td>${esc(s.state)}, ${esc(s.city)}</td>
-    <td>${esc(s.ruv_first_name)} ${esc(s.ruv_last_name)}<br><span class="small-muted">${esc(s.ruv_phone)}</span></td>
-    <td>${esc(s.gabai_first_name)} ${esc(s.gabai_last_name)}<br><span class="small-muted">${esc(s.gabai_cell)}</span></td>
-    <td>${badge(s.status, s.status)}</td>
-    <td>${s.slots_allocated ?? 0}</td>
-    <td>${s.applicant_count}</td>
-    <td>${fmtDate(s.created_at)}</td>
+    ${cols.map(c => `<td>${c.render(s)}</td>`).join('')}
     <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openShul('${s.id}')">View</button></td>
   </tr>`;
 }
@@ -73,11 +96,6 @@ function rowHtml(s) {
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
-qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
-  const key = th.dataset.sort;
-  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
-  state.sort = key; load();
-}));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 qs('#btn-template').addEventListener('click', () => downloadAuthed('/shuls/import/template', 'shul_import_template.csv'));
@@ -290,6 +308,8 @@ window.compareDup = (flagId) => {
 };
 window.resolveDup = async (id, action) => { try { await api(`/shuls/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
+attachColumnCustomizer('btn-columns', 'columns_shuls', SHUL_COLUMNS, DEFAULT_SHUL_COLUMNS, (order) => { activeColumns = order; renderThead(); load(); })
+  .then(order => { activeColumns = order; renderThead(); });
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
 attachLiveRefresh('live-banner', async () => {
   const params = new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id, pageSize: 1 });

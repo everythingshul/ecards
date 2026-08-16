@@ -42,11 +42,16 @@ router.post('/apply-ezras-habayis', (req, res) => {
 
   const id = uuid();
   const initialStatus = isZipAllowed(orgId, b.zip) ? 'pending' : 'rejected';
+  // extra_notes: fields the admin added in the Form Builder beyond this
+  // page's fixed set (see frontend/js/app.js's attachExtraFormFields) —
+  // appended rather than overwriting whatever the applicant typed into the
+  // page's own free-text Comments box.
+  const comments = [b.comments, b.extra_notes].filter(Boolean).join(' | ');
   db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
       address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'public_form', ?)`)
     .run(id, orgId, shul.id, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
-      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, b.comments || '', initialStatus);
+      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, comments, initialStatus);
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
   detectAndFlag(orgId, 'applicant', applicant);
   res.status(201).json({ ok: true, message: 'Application received. You will be contacted if any additional information is needed.' });

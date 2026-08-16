@@ -20,12 +20,17 @@ router.post('/apply', (req, res) => {
   const b = req.body || {};
   if (!b.name || !b.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });
   const id = uuid();
+  // extra_notes: fields the admin added in the Form Builder beyond this
+  // page's fixed set (see frontend/js/app.js's attachExtraFormFields) —
+  // appended rather than overwriting whatever the applicant typed into the
+  // page's own free-text Comments box.
+  const comments = [b.comments, b.extra_notes].filter(Boolean).join(' | ');
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
       owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
     .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
       b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email,
-      b.comments || '', b.has_provider_account ? 1 : 0);
+      comments, b.has_provider_account ? 1 : 0);
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
 });
 

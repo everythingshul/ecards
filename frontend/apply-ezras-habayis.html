@@ -79,6 +79,8 @@
     </div>
     <label>Comments</label><textarea name="comments" rows="3"></textarea>
 
+    <div id="extra-fields"></div>
+
     <div style="margin-top:26px;text-align:right">
       <button type="submit" class="btn btn-primary" id="submit-btn">Submit Application</button>
     </div>
@@ -94,6 +96,10 @@
 <script>
 guardFormWindow('ezras-habayis-application', '#apply-form');
 
+const APPLICANT_KNOWN_KEYS = ['first_name','last_name','marital_status','home_phone','email','husband_cell','wife_cell',
+  'preferred_contact_method','preferred_number','address','city','state','zip','num_children','home_for_yomtov','comments'];
+const extraFieldsPromise = attachExtraFormFields('ezras-habayis-application', 'extra-fields', APPLICANT_KNOWN_KEYS);
+
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('app_address', { address:'app_address', city:'app_city', state:'app_state', zip:'app_zip' });
 });
@@ -103,6 +109,7 @@ qs('#apply-form').addEventListener('submit', async (e) => {
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   const fd = new FormData(e.target);
   const data = Object.fromEntries(fd.entries());
+  data.extra_notes = collectExtraFieldsText(await extraFieldsPromise, e.target);
   try {
     await api('/applicants/apply-ezras-habayis', { method: 'POST', body: data });
     qs('#apply-form').style.display = 'none';

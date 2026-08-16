@@ -21,6 +21,17 @@ router.get('/public/:slug', (req, res) => {
   res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
 
+// Public: same as above but for the three built-in application pages
+// (apply.html, apply-store.html, apply-ezras-habayis.html), which are fixed
+// pages at fixed URLs — not slug-driven — so they look their form up by the
+// permanent builtin_key instead of the now-editable slug (see PUT /:id and
+// utils/formSchedule.js).
+router.get('/public/builtin/:builtinKey', (req, res) => {
+  const form = db.prepare('SELECT * FROM forms WHERE builtin_key = ? AND is_active = 1').get(req.params.builtinKey);
+  if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
+  res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
+});
+
 // Splits submitted fields into whatever matches a known column for this
 // entity type vs. everything else (appended to comments so no data is ever
 // lost just because the builder let someone add an arbitrary field).
@@ -128,19 +139,29 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
-  const { name, visibility, schema, target, is_active, opens_at, closes_at, season_id } = req.body || {};
+  const { name, visibility, schema, target, is_active, opens_at, closes_at, season_id, slug } = req.body || {};
   if (season_id !== undefined) {
     if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
     if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
+  }
+  // Renaming a built-in form's slug is safe — the public page that actually
+  // serves it (apply.html etc.) looks itself up by the permanent
+  // builtin_key, not slug (see utils/formSchedule.js) — but slug still has
+  // to stay unique and non-empty for the generic /forms/public/:slug lookup
+  // that custom forms (and anyone with an old link to this one) rely on.
+  if (slug !== undefined) {
+    if (!slug) return res.status(400).json({ error: 'URL Slug is required' });
+    const conflict = db.prepare('SELECT 1 FROM forms WHERE slug = ? AND id != ?').get(slug, form.id);
+    if (conflict) return res.status(409).json({ error: 'That slug is already in use' });
   }
   // opens_at/closes_at: undefined leaves it as-is; explicit null/'' clears
   // the date (open-ended) — same pattern as seasons.js's max_accepted_applicants.
   const opensAt = opens_at === undefined ? undefined : (opens_at || null);
   const closesAt = closes_at === undefined ? undefined : (closes_at || null);
-  db.prepare(`UPDATE forms SET name=COALESCE(?,name), visibility=COALESCE(?,visibility),
+  db.prepare(`UPDATE forms SET name=COALESCE(?,name), visibility=COALESCE(?,visibility), slug=COALESCE(?,slug),
     schema_json=COALESCE(?,schema_json), target_json=COALESCE(?,target_json), is_active=COALESCE(?,is_active), season_id=COALESCE(?,season_id),
     opens_at=CASE WHEN ? THEN ? ELSE opens_at END, closes_at=CASE WHEN ? THEN ? ELSE closes_at END, updated_at=datetime('now') WHERE id=?`)
-    .run(name, visibility, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0), season_id || null,
+    .run(name, visibility, slug, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0), season_id || null,
       opensAt !== undefined ? 1 : 0, opensAt, closesAt !== undefined ? 1 : 0, closesAt, form.id);
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });

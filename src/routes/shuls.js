@@ -44,6 +44,12 @@ router.post('/apply', (req, res) => {
       b.ruv_first_name, b.ruv_last_name, b.ruv_phone, b.ruv_address || '', b.ruv_city || '', b.ruv_state || '', b.ruv_zip || '', b.ruv_place_id || null,
       b.gabai_first_name, b.gabai_last_name, b.gabai_cell, b.gabai_email, b.gabai_address || '', b.gabai_city || '', b.gabai_state || '', b.gabai_zip || '', b.gabai_place_id || null);
 
+  // Extra fields the admin added in the Form Builder beyond this page's fixed
+  // set (see frontend/js/app.js's attachExtraFormFields/collectExtraFieldsText)
+  // — same "append to notes so nothing's lost" behavior as the generic
+  // form-builder submit handler in routes/forms.js's splitKnown().
+  if (b.extra_notes) db.prepare('INSERT INTO shul_notes (id, shul_id, note) VALUES (?,?,?)').run(uuid(), id, b.extra_notes);
+
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
   const flag = detectAndFlag(orgId, 'shul', shul);
   logAudit(orgId, null, 'create', 'shul', id, null, shul, req.ip);

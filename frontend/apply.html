@@ -61,6 +61,8 @@
     </div>
     <label>Zip</label><input id="gabai_zip" name="gabai_zip" style="max-width:160px">
 
+    <div id="extra-fields"></div>
+
     <div style="margin-top:26px;text-align:right">
       <button type="submit" class="btn btn-primary" id="submit-btn">Continue to Contract</button>
     </div>
@@ -92,6 +94,11 @@ let shulId = null, signToken = null, sigPad = null;
 
 guardFormWindow('shul-application', '#apply-form');
 
+const SHUL_KNOWN_KEYS = ['name_en','name_he','address','city','state','zip','place_id','lat','lng',
+  'ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
+  'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
+const extraFieldsPromise = attachExtraFormFields('shul-application', 'extra-fields', SHUL_KNOWN_KEYS);
+
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('shul_address', { address:'shul_address', city:'shul_city', state:'shul_state', zip:'shul_zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });
   attachPlacesAutocomplete('ruv_address', { address:'ruv_address', city:'ruv_city', state:'ruv_state', zip:'ruv_zip' });
@@ -102,6 +109,7 @@ qs('#apply-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   const data = Object.fromEntries(new FormData(e.target).entries());
+  data.extra_notes = collectExtraFieldsText(await extraFieldsPromise, e.target);
   try {
     const { shul, duplicate, message } = await api('/shuls/apply', { method: 'POST', body: data });
     shulId = shul.id;

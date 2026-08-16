@@ -129,8 +129,20 @@ export async function syncInboundSms(orgId) {
     insert.run(uuid(), orgId, 'inbound', phone, body, providerId);
     imported++;
   }
+  // Diagnostics for whichever failure mode is actually happening in
+  // production, surfaced all the way to the admin's "Check Now" click
+  // (see routes/sms.js) instead of sitting only in a server log the admin
+  // has no access to — nobody here has ever seen a real response from this
+  // endpoint, so the two most likely blind spots are: the array itself isn't
+  // under `data.messages` (rawKeys catches that — messages.length would be
+  // 0 even though the provider has messages, per `total`), or it is, but the
+  // per-message field names guessed in classifyDirection()/phone/body above
+  // don't match the provider's real ones (sample catches that).
+  const diagnostics = {};
+  if (!messages.length && (data.total || Object.keys(data).length)) diagnostics.rawKeys = Object.keys(data);
   if (messages.length && classified === 0) {
+    diagnostics.sample = messages[0];
     console.warn(`[sms] synced ${messages.length} message(s) from /v1/messages but classified 0 as inbound — sample item for review:`, JSON.stringify(messages[0]));
   }
-  return { imported, skipped, total: data.total ?? messages.length };
+  return { imported, skipped, total: data.total ?? messages.length, ...diagnostics };
 }

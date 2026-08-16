@@ -814,15 +814,20 @@ async function attachColumnCustomizer(buttonId, storageKey, columns, defaultOrde
 }
 
 // Checks a built-in public application form's schedule (opens_at/closes_at,
-// is_active) before letting the caller show its form. Returns true if the
-// form is open for submissions; on false, it has already hidden `formSelector`
-// and rendered a "not open yet"/"closed" card in its place, so callers just
-// need to bail out of their own init logic. Missing/unreachable config
-// (network hiccup, pre-migration env) fails open — never block a real
-// applicant because this one check couldn't be made.
-async function guardFormWindow(slug, formSelector) {
+// is_active) before letting the caller show its form. `builtinKey` is one of
+// 'shul-application'/'store-application'/'ezras-habayis-application' — the
+// permanent identifier for these three (see utils/formSchedule.js), looked
+// up via /forms/public/builtin/:builtinKey rather than by slug, since these
+// pages are fixed at fixed URLs and the slug is just an editable label for
+// them, not a route. Returns true if the form is open for submissions; on
+// false, it has already hidden `formSelector` and rendered a "not open
+// yet"/"closed" card in its place, so callers just need to bail out of
+// their own init logic. Missing/unreachable config (network hiccup,
+// pre-migration env) fails open — never block a real applicant because this
+// one check couldn't be made.
+async function guardFormWindow(builtinKey, formSelector) {
   try {
-    const { windowError } = await api(`/forms/public/${slug}`);
+    const { windowError } = await api(`/forms/public/builtin/${builtinKey}`);
     if (!windowError) return true;
     const form = qs(formSelector);
     if (form) {
@@ -834,6 +839,59 @@ async function guardFormWindow(slug, formSelector) {
     }
     return false;
   } catch { return true; }
+}
+
+// Renders one custom form-builder field for the fixed, hand-built public
+// pages (apply.html, apply-store.html, apply-ezras-habayis.html). These
+// pages have their own hardcoded field set, so this is only ever called
+// with fields the admin added *beyond* that set in the Form Builder — a
+// checkbox is the main use case ("I agree to the Terms and Conditions…"),
+// but any of the builder's other field types work too. Mirrors form.html's
+// fieldHtml() checkbox layout so the two renderers look consistent.
+function extraFieldHtml(f) {
+  const req = f.required ? 'required' : '';
+  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" data-extra-key="${esc(f.key)}" id="extra-${esc(f.key)}" ${req}><label style="margin:0" for="extra-${esc(f.key)}">${esc(f.label || f.key)}</label></div>`;
+  const label = `<label>${esc(f.label || f.key)} ${f.required ? '<span class="req">*</span>' : ''}</label>`;
+  if (f.type === 'textarea') return `${label}<textarea data-extra-key="${esc(f.key)}" ${req}></textarea>`;
+  if (f.type === 'select') return `${label}<select data-extra-key="${esc(f.key)}" ${req}><option value=""></option>${(f.options || []).map(o => `<option>${esc(o)}</option>`).join('')}</select>`;
+  const inputType = f.type === 'number' ? 'number' : (f.type === 'email' ? 'email' : (f.type === 'tel' ? 'tel' : 'text'));
+  return `${label}<input type="${inputType}" data-extra-key="${esc(f.key)}" ${req}>`;
+}
+
+// Fetches a built-in public form's schema, filters out whatever the hardcoded
+// page already collects natively (knownKeys), and injects the rest into
+// containerId — so fields added in the Form Builder beyond the fixed set
+// actually show up on the real public page instead of being silently
+// ignored. Returns the extra-field schema (possibly empty) for the submit
+// handler to read values back out of via collectExtraFieldsText(). Fails
+// open (returns []) on any error — a form-builder hiccup should never block
+// a real applicant from submitting the base form.
+async function attachExtraFormFields(builtinKey, containerId, knownKeys) {
+  try {
+    const { form } = await api(`/forms/public/builtin/${builtinKey}`);
+    const extra = (form.schema_json || []).filter(f => f.key && !knownKeys.includes(f.key));
+    const container = qs('#' + containerId);
+    if (container) container.innerHTML = extra.map(extraFieldHtml).join('');
+    return extra;
+  } catch { return []; }
+}
+
+// Reads back whatever the admin filled into attachExtraFormFields()'s
+// rendered inputs and formats them as "Label: value | Label2: value2" —
+// same shape the form-builder's own generic submit handler (splitKnown() in
+// routes/forms.js) already produces, so extra data lands the same way
+// (appended to comments/notes) whether it came through the generic form
+// renderer or one of these hand-built pages. Unchecked checkboxes and blank
+// fields are omitted rather than recorded as empty.
+function collectExtraFieldsText(extraSchema, formEl) {
+  const parts = [];
+  for (const f of extraSchema) {
+    const el = formEl.querySelector(`[data-extra-key="${f.key}"]`);
+    if (!el) continue;
+    const value = el.type === 'checkbox' ? (el.checked ? 'Yes' : '') : el.value;
+    if (value) parts.push(`${f.label || f.key}: ${value}`);
+  }
+  return parts.join(' | ');
 }
 
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.

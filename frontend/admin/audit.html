@@ -85,14 +85,14 @@ async function load() {
           ${changeList(a)}
           <div class="small-muted" style="margin-top:8px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}</div>
         </div>
-        ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}')">Undo</button>` : ''}
-        ${a.redoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.undo_entry_id}')">Redo</button>` : ''}
+        ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}', false)">Undo</button>` : ''}
+        ${a.redoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.undo_entry_id}', true)">Redo</button>` : ''}
       </div>
     </div>`).join('') : '<p class="small-muted">No actions in this window.</p>';
 }
-window.undoAction = async (id) => {
-  if (!confirm('Undo this action? This restores the affected record to how it was right before this change.')) return;
-  try { await api(`/audit/${id}/undo`, { method: 'POST' }); toast('Undone'); load(); } catch (err) { toast(err.message, true); }
+window.undoAction = async (id, isRedo) => {
+  if (!confirm(isRedo ? 'Redo this action? This brings the change back.' : 'Undo this action? This restores the affected record to how it was right before this change.')) return;
+  try { await api(`/audit/${id}/undo`, { method: 'POST' }); toast(isRedo ? 'Redone' : 'Undone'); load(); } catch (err) { toast(err.message, true); }
 };
 qs('#f-hours').addEventListener('change', load);
 load();
