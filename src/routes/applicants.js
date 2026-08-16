@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { db, uuid } from '../db.js';
+import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
@@ -10,12 +10,43 @@ import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
+import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email',
   'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount'];
+
+// ============================= PUBLIC ==============================
+// Ezras Habayis applicants self-apply directly (no shul in between), so
+// this mirrors the shul/store public /apply forms: no auth, and the shul_id
+// is never taken from the client — every submission auto-attaches to this
+// season's locked system shul (see utils/ezrasHabayis.js).
+router.post('/apply-ezras-habayis', (req, res) => {
+  const orgId = req.body.org_id || DEFAULT_ORG_ID;
+  const b = req.body || {};
+  if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
+  if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
+  if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
+  if (!b.first_name || !b.last_name) return res.status(400).json({ error: 'First and last name are required' });
+
+  const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(orgId);
+  const shul = getOrCreateEzrasHabayisShul(orgId, season?.id || null);
+  const capError = seasonCapacityError(shul.season_id);
+  if (capError) return res.status(400).json({ error: capError });
+
+  const id = uuid();
+  const initialStatus = isZipAllowed(orgId, b.zip) ? 'pending' : 'rejected';
+  db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'public_form', ?)`)
+    .run(id, orgId, shul.id, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
+      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, b.comments || '', initialStatus);
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
+  detectAndFlag(orgId, 'applicant', applicant);
+  res.status(201).json({ ok: true, message: 'Application received. You will be contacted if any additional information is needed.' });
+});
 
 router.use(auth, requirePermission('applicants'));
 

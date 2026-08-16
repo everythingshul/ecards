@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ezras Habayis Application · Kipas Hair BP Platform</title>
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+</head>
+<body>
+<div class="public-wrap">
+  <div class="public-header">
+    <img class="brand-mark" src="/img/org-logo.png" alt="Organization logo">
+    <h1>Ezras Habayis Application</h1>
+    <p class="small-muted">Apply directly for assistance. There is no need to go through a shul for this application.</p>
+  </div>
+
+  <form id="apply-form" class="card">
+    <div class="section-title">Applicant Information</div>
+    <div class="grid-2">
+      <div><label>First Name <span class="req">*</span></label><input name="first_name" required></div>
+      <div><label>Last Name <span class="req">*</span></label><input name="last_name" required></div>
+    </div>
+    <label>Marital Status</label>
+    <select name="marital_status">
+      <option value=""></option>
+      <option value="single">Single</option>
+      <option value="married">Married</option>
+      <option value="widowed">Widowed</option>
+      <option value="divorced">Divorced</option>
+    </select>
+
+    <div class="section-title">Contact Information</div>
+    <div class="grid-2">
+      <div><label>Home Phone</label><input name="home_phone"></div>
+      <div><label>Email</label><input name="email" type="email"></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Husband Cell</label><input name="husband_cell"></div>
+      <div><label>Wife Cell</label><input name="wife_cell"></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Preferred Contact Method</label>
+        <select name="preferred_contact_method">
+          <option value=""></option>
+          <option value="phone">Phone</option>
+          <option value="text">Text</option>
+          <option value="email">Email</option>
+        </select>
+      </div>
+      <div><label>Number To Use</label>
+        <select name="preferred_number">
+          <option value=""></option>
+          <option value="home">Home</option>
+          <option value="husband">Husband</option>
+          <option value="wife">Wife</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-title">Address</div>
+    <label>Address</label><input id="app_address" name="address" autocomplete="off">
+    <div class="grid-2">
+      <div><label>City</label><input id="app_city" name="city"></div>
+      <div><label>State</label><input id="app_state" name="state"></div>
+    </div>
+    <label>Zip</label><input id="app_zip" name="zip" style="max-width:160px">
+
+    <div class="section-title">Household</div>
+    <div class="grid-2">
+      <div><label>Number of Children</label><input name="num_children" type="number" min="0" value="0"></div>
+      <div><label>Home for Yom Tov</label>
+        <select name="home_for_yomtov">
+          <option value="1">Yes</option>
+          <option value="0">No</option>
+        </select>
+      </div>
+    </div>
+    <label>Comments</label><textarea name="comments" rows="3"></textarea>
+
+    <div style="margin-top:26px;text-align:right">
+      <button type="submit" class="btn btn-primary" id="submit-btn">Submit Application</button>
+    </div>
+  </form>
+
+  <div class="card" id="done-section" style="display:none;text-align:center">
+    <h3>&#10003; Application Submitted</h3>
+    <p class="small-muted" id="done-message"></p>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+<script>renderPublicFooter();</script>
+<script>
+loadGoogleMaps().then(() => {
+  attachPlacesAutocomplete('app_address', { address:'app_address', city:'app_city', state:'app_state', zip:'app_zip' });
+});
+
+qs('#apply-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+  try {
+    await api('/applicants/apply-ezras-habayis', { method: 'POST', body: data });
+    qs('#apply-form').style.display = 'none';
+    qs('#done-section').style.display = 'block';
+    qs('#done-message').textContent = 'Application received. You will be contacted if any additional information is needed.';
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = 'Submit Application';
+  }
+});
+</script>
+</body>
+</html>

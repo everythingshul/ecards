@@ -47,9 +47,11 @@ router.post('/apply', (req, res) => {
 });
 
 // Public: minimal shul picker list for public applicant forms (name + id only).
+// Excludes locked system shuls (e.g. "Ezras Habayis") — those auto-attach
+// applicants themselves and were never meant to be picked from a list.
 router.get('/public/list', (req, res) => {
   const orgId = req.query.org_id || DEFAULT_ORG_ID;
-  const rows = db.prepare(`SELECT id, name_en, name_he FROM shuls WHERE org_id = ? AND status='approved' AND is_paused = 0 ORDER BY name_en`).all(orgId);
+  const rows = db.prepare(`SELECT id, name_en, name_he FROM shuls WHERE org_id = ? AND status='approved' AND is_paused = 0 AND is_locked = 0 ORDER BY name_en`).all(orgId);
   res.json({ shuls: rows });
 });
 
@@ -114,7 +116,9 @@ router.use(auth, requirePermission('shuls'));
 
 router.get('/', (req, res) => {
   const { search, status, season_id, sort = 'created_at', dir = 'DESC', page = 1, pageSize = 50 } = req.query;
-  let where = 'WHERE org_id = ?';
+  // Locked system shuls (e.g. "Ezras Habayis") are excluded from the normal
+  // shul-management list — they're not a real shul to review/approve/edit.
+  let where = 'WHERE org_id = ? AND is_locked = 0';
   const params = [req.user.org_id];
   if (req.permission.scope === 'assigned') {
     where += ` AND id IN (SELECT entity_id FROM user_assignments WHERE user_id = ? AND entity_type = 'shul')`;
@@ -144,7 +148,7 @@ router.get('/', (req, res) => {
 // filters as the list view. Must be registered before /:id.
 router.get('/export', requirePermission('shuls', 'can_export'), (req, res) => {
   const { search, status, season_id } = req.query;
-  let where = 'WHERE org_id = ?';
+  let where = 'WHERE org_id = ? AND is_locked = 0';
   const params = [req.user.org_id];
   if (status) { where += ' AND status = ?'; params.push(status); }
   if (season_id) { where += ' AND season_id = ?'; params.push(season_id); }

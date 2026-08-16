@@ -15,10 +15,10 @@ router.get('/stats', (req, res) => {
 
   if (shulPerm.can_view) {
     stats.shuls = {
-      total: db.prepare('SELECT COUNT(*) c FROM shuls WHERE org_id = ?').get(orgId).c,
-      pending: db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND status IN ('submitted','contract_sent','contract_signed')`).get(orgId).c,
-      approved: db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND status = 'approved'`).get(orgId).c,
-      paused: db.prepare('SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_paused = 1').get(orgId).c,
+      total: db.prepare('SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0').get(orgId).c,
+      pending: db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND status IN ('submitted','contract_sent','contract_signed')`).get(orgId).c,
+      approved: db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND status = 'approved'`).get(orgId).c,
+      paused: db.prepare('SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND is_paused = 1').get(orgId).c,
     };
   }
   if (applicantPerm.can_view) {
