@@ -158,12 +158,13 @@ sent/failed/mock/received, error message, optional
 `isSmsMockMode()` returns true whenever `SMS_API_BASE` or `SMS_API_KEY` is
 unset — in mock mode every send is logged with `status: 'mock'` and a
 console line instead of making a real HTTP call, mirroring the
-Brevo-dry-run and disccardpromos-mock patterns elsewhere in the app. Once a
-provider is chosen, set `SMS_API_BASE`, `SMS_API_KEY`, and `SMS_FROM_NUMBER`
-as Render environment variables (never committed) and `sendSmsChecked()`
-POSTs `{ to, from, body }` to `${SMS_API_BASE}/messages` with a Bearer
-token — adjust that one call site if the chosen provider's API shape
-differs.
+Brevo-dry-run and disccardpromos-mock patterns elsewhere in the app. The
+provider is SimpleSender (Developer > Docs & Keys in its dashboard for the
+base URL + key): set `SMS_API_BASE` and `SMS_API_KEY` as Render environment
+variables (never committed) and `sendSmsChecked()` POSTs `{ to, message }`
+(digits-only `to`, no `from` — the account has one dedicated number) to
+`${SMS_API_BASE}/v1/messages/send` with a Bearer token, treating a
+`queued`/`sent` response status as success.
 
 The "Templates" tab is plain CRUD (`sms_templates` table, `{{variable}}`
 placeholders) via `/api/sms/templates*`. "Send Message"

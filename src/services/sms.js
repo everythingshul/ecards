@@ -1,13 +1,14 @@
 // ---------------------------------------------------------------------------
-// SMS provider — generic REST adapter, single-org platform (mirrors the
-// disccardpromos gift card adapter's shape). MOCK MODE (logged only, nothing
-// actually sent) until SMS_API_BASE / SMS_API_KEY are set — the user has not
-// picked a provider yet and will supply the real API key + endpoint later.
+// SMS provider — SimpleSender (https://simplesender.com) REST API. MOCK MODE
+// (logged only, nothing actually sent) until SMS_API_BASE / SMS_API_KEY are
+// set in the deploy environment.
 //
-// The exact request shape below (Authorization: Bearer + JSON {to, from,
-// body}) is a reasonable default matching most REST SMS providers (Twilio,
-// Vonage, Plivo, etc. all differ slightly), but is a best-guess placeholder:
-// once the real provider is known, only this file should need to change.
+// SimpleSender's API takes a bare 10-digit `to` and a `message` field (no
+// `from` — the account has a single dedicated sending number), and considers
+// a "queued" response a successful hand-off, not a delivery guarantee (mirrors
+// how every other status here — "sent" — is really just "accepted by the
+// provider"). Base URL + key: Developer > Docs & Keys in the SimpleSender
+// dashboard.
 // ---------------------------------------------------------------------------
 
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
@@ -15,7 +16,6 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 const CONFIG = {
   apiBase: process.env.SMS_API_BASE || '',
   apiKey: process.env.SMS_API_KEY || '',
-  fromNumber: process.env.SMS_FROM_NUMBER || '',
 };
 
 export function isSmsMockMode() {
@@ -35,13 +35,14 @@ export async function sendSmsChecked(orgId, to, body, meta = {}) {
     console.log(`[sms:MOCK org=${orgId || 'platform'}] To: ${to}\n${body}`);
   } else {
     try {
-      const res = await fetch(`${CONFIG.apiBase}/messages`, {
+      const res = await fetch(`${CONFIG.apiBase}/v1/messages/send`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${CONFIG.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, from: CONFIG.fromNumber, body }),
+        body: JSON.stringify({ to: String(to).replace(/\D/g, ''), message: body }),
       });
       const resBody = await res.json().catch(() => ({}));
-      if (!res.ok) { status = 'failed'; error = resBody?.message || `SMS send failed (${res.status})`; }
+      if (!res.ok) { status = 'failed'; error = resBody?.error || resBody?.message || `SMS send failed (${res.status})`; }
+      else if (resBody?.status && !['queued', 'sent'].includes(resBody.status)) { status = 'failed'; error = `Unexpected provider status: ${resBody.status}`; }
     } catch (e) {
       status = 'failed'; error = e.message;
     }
