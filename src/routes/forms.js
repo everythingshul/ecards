@@ -76,12 +76,14 @@ router.post('/public/:slug/submit', (req, res) => {
     for (const f of ['name_en', 'address', 'city', 'state', 'zip', 'ruv_first_name', 'ruv_last_name', 'ruv_phone', 'gabai_first_name', 'gabai_last_name', 'gabai_cell', 'gabai_email']) {
       if (!shul[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
     }
-    const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(form.org_id);
+    // The form's own pinned season, not whichever season is "active" right
+    // now — a link someone already has open shouldn't silently start
+    // landing in a different season if the active one changes underneath it.
     const id = uuid();
     db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip,
         ruv_first_name, ruv_last_name, ruv_phone, gabai_first_name, gabai_last_name, gabai_cell, gabai_email, status, source)
       VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, 'submitted', 'form')`)
-      .run(id, form.org_id, season?.id || null, shul.name_en, shul.name_he || '', shul.address, shul.city, shul.state, shul.zip,
+      .run(id, form.org_id, form.season_id, shul.name_en, shul.name_he || '', shul.address, shul.city, shul.state, shul.zip,
         shul.ruv_first_name, shul.ruv_last_name, normalizePhone(shul.ruv_phone), shul.gabai_first_name, shul.gabai_last_name, normalizePhone(shul.gabai_cell), shul.gabai_email);
     const created = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
     if (extra) db.prepare('INSERT INTO shul_notes (id, shul_id, note) VALUES (?,?,?)').run(uuid(), id, extra);
@@ -112,27 +114,33 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, type, visibility = 'public', slug, schema, target = [] } = req.body || {};
+  const { name, type, visibility = 'public', slug, schema, target = [], season_id } = req.body || {};
   if (!name || !type || !slug) return res.status(400).json({ error: 'name, type, and slug are required' });
+  if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
+  if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
   if (db.prepare('SELECT 1 FROM forms WHERE slug = ?').get(slug)) return res.status(409).json({ error: 'That slug is already in use' });
   const id = uuid();
-  db.prepare(`INSERT INTO forms (id, org_id, name, type, visibility, slug, schema_json, target_json, is_active)
-    VALUES (?,?,?,?,?,?,?,?,1)`).run(id, req.user.org_id, name, type, visibility, slug, JSON.stringify(schema || []), JSON.stringify(target));
+  db.prepare(`INSERT INTO forms (id, org_id, name, type, visibility, slug, schema_json, target_json, season_id, is_active)
+    VALUES (?,?,?,?,?,?,?,?,?,1)`).run(id, req.user.org_id, name, type, visibility, slug, JSON.stringify(schema || []), JSON.stringify(target), season_id);
   res.status(201).json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(id) });
 });
 
 router.put('/:id', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
-  const { name, visibility, schema, target, is_active, opens_at, closes_at } = req.body || {};
+  const { name, visibility, schema, target, is_active, opens_at, closes_at, season_id } = req.body || {};
+  if (season_id !== undefined) {
+    if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
+    if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
+  }
   // opens_at/closes_at: undefined leaves it as-is; explicit null/'' clears
   // the date (open-ended) — same pattern as seasons.js's max_accepted_applicants.
   const opensAt = opens_at === undefined ? undefined : (opens_at || null);
   const closesAt = closes_at === undefined ? undefined : (closes_at || null);
   db.prepare(`UPDATE forms SET name=COALESCE(?,name), visibility=COALESCE(?,visibility),
-    schema_json=COALESCE(?,schema_json), target_json=COALESCE(?,target_json), is_active=COALESCE(?,is_active),
+    schema_json=COALESCE(?,schema_json), target_json=COALESCE(?,target_json), is_active=COALESCE(?,is_active), season_id=COALESCE(?,season_id),
     opens_at=CASE WHEN ? THEN ? ELSE opens_at END, closes_at=CASE WHEN ? THEN ? ELSE closes_at END, updated_at=datetime('now') WHERE id=?`)
-    .run(name, visibility, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0),
+    .run(name, visibility, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0), season_id || null,
       opensAt !== undefined ? 1 : 0, opensAt, closesAt !== undefined ? 1 : 0, closesAt, form.id);
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });

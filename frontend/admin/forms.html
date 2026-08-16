@@ -20,6 +20,7 @@ renderShell('/admin/forms', `
 
 let fieldDraft = [];
 let formsCache = [];
+let seasonsCache = [];
 
 const DEFAULT_FORM_PREVIEW = { 'shul-application': '/apply', 'store-application': '/apply-store', 'ezras-habayis-application': '/apply-ezras-habayis' };
 function scheduleStatus(f) {
@@ -31,12 +32,14 @@ function scheduleStatus(f) {
 }
 
 async function load() {
-  const { forms } = await api('/forms');
+  const [{ forms }, { seasons }] = await Promise.all([api('/forms'), api('/seasons')]);
   formsCache = forms;
+  seasonsCache = seasons;
+  const seasonName = (id) => seasons.find(s => s.id === id)?.name || 'no season';
   qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
       <div class="flex-between">
         <div><strong>${esc(f.name)}</strong> ${f.is_default ? badge('built-in', 'active') : ''} <span class="small-muted">/${esc(f.slug)}</span><br>
-          <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
+          <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${esc(seasonName(f.season_id))} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
         <div class="pill-row">
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${DEFAULT_FORM_PREVIEW[f.slug] || '/form?slug=' + esc(f.slug)}" target="_blank">Preview Link</a>
@@ -68,7 +71,7 @@ window.saveEditForm = async (id) => {
   // opens_at/closes_at as absolute instants, not wall-clock strings.
   const opensVal = qs('#f-opens').value, closesVal = qs('#f-closes').value;
   const body = {
-    name: qs('#f-name').value, visibility: qs('#f-visibility').value, schema: fieldDraft,
+    name: qs('#f-name').value, visibility: qs('#f-visibility').value, schema: fieldDraft, season_id: qs('#f-season').value,
     opens_at: opensVal ? new Date(opensVal).toISOString() : null, closes_at: closesVal ? new Date(closesVal).toISOString() : null,
   };
   try { await api(`/forms/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
@@ -87,6 +90,7 @@ function formBody(existing = null) {
       </div>
       <div><label>Visibility</label><select id="f-visibility"><option value="public" ${existing?.visibility==='public'?'selected':''}>Public (anyone with the link)</option><option value="group" ${existing?.visibility==='group'?'selected':''}>Group of Shuls</option><option value="individual" ${existing?.visibility==='individual'?'selected':''}>Individual Shul</option></select></div>
     </div>
+    <label>Season *</label><select id="f-season">${seasonsCache.map(s => `<option value="${s.id}" ${(existing ? existing.season_id === s.id : s.is_active) ? 'selected' : ''}>${esc(s.name)}${s.is_active?' (active)':''}</option>`).join('')}</select>
     <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026" value="${existing ? esc(existing.slug) : ''}" ${existing?.editing ? 'disabled' : ''}>
     ${existing?.editing ? `
     <div class="grid-2">
@@ -117,7 +121,7 @@ window.addField = () => { fieldDraft.push({ key: '', label: '', type: 'text', re
 window.removeField = (i) => { fieldDraft.splice(i, 1); renderFields(); };
 
 window.createForm = async () => {
-  const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft };
+  const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft, season_id: qs('#f-season').value };
   try { await api('/forms', { method: 'POST', body }); toast('Form created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 

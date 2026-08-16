@@ -12,7 +12,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
-import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { getFormWindow, formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { logAudit } from '../services/audit.js';
 
 const router = Router();
@@ -36,8 +36,7 @@ router.post('/apply-ezras-habayis', (req, res) => {
   if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
   if (!b.first_name || !b.last_name) return res.status(400).json({ error: 'First and last name are required' });
 
-  const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(orgId);
-  const shul = getOrCreateEzrasHabayisShul(orgId, season?.id || null);
+  const shul = getOrCreateEzrasHabayisShul(orgId, getFormSeasonId(orgId, 'ezras-habayis-application'));
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
 

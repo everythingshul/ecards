@@ -517,6 +517,11 @@ safeAlter(`ALTER TABLE applicants ADD COLUMN external_id TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN opens_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN closes_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
+// Every form is pinned to one season, so which season a submission lands in
+// is determined by the form the applicant/shul/store actually used — not by
+// whichever season happens to be "active" at the moment they hit submit
+// (which could change out from under a link someone already has open).
+safeAlter(`ALTER TABLE forms ADD COLUMN season_id TEXT REFERENCES seasons(id)`);
 safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
 // Points an undone entry at the fresh 'undo' entry that reversed it, so the
 // UI can offer a one-click "Redo" right on that same row instead of making
@@ -624,6 +629,15 @@ insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'app
   { key: 'first_name', label: 'First Name', type: 'text', required: true }, { key: 'last_name', label: 'Last Name', type: 'text', required: true },
   { key: 'home_phone', label: 'Home Phone', type: 'tel', required: false }, { key: 'email', label: 'Email', type: 'email', required: false },
 ]));
+
+// One-time-per-boot backfill: any form (built-in seed rows above, or an
+// older custom form created before season_id existed) that still has no
+// season pinned gets its org's current active season. Runs every boot but
+// is a no-op once every form has one, since new forms are required to set
+// season_id going forward (see routes/forms.js).
+db.prepare(`UPDATE forms SET season_id = (
+    SELECT id FROM seasons WHERE seasons.org_id = forms.org_id AND seasons.is_active = 1 ORDER BY seasons.created_at DESC LIMIT 1
+  ) WHERE season_id IS NULL`).run();
 
 export const DEFAULT_ORG_ID = defaultOrgId;
 export function uuid() { return randomUUID(); }

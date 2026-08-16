@@ -11,7 +11,7 @@ import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../serv
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
-import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { getFormWindow, formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { logAudit } from '../services/audit.js';
 
 const router = Router();
@@ -33,14 +33,14 @@ router.post('/apply', (req, res) => {
   for (const f of REQUIRED_SHUL_FIELDS) {
     if (!b[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
   }
-  const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(orgId);
+  const seasonId = getFormSeasonId(orgId, 'shul-application');
   const id = uuid();
   db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip, lat, lng, place_id,
       ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip, ruv_place_id,
       gabai_first_name, gabai_last_name, gabai_cell, gabai_email, gabai_address, gabai_city, gabai_state, gabai_zip, gabai_place_id,
       status, source)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'submitted', 'form')`)
-    .run(id, orgId, season?.id || null, b.name_en, b.name_he || '', b.address, b.city, b.state, b.zip, b.lat || null, b.lng || null, b.place_id || null,
+    .run(id, orgId, seasonId, b.name_en, b.name_he || '', b.address, b.city, b.state, b.zip, b.lat || null, b.lng || null, b.place_id || null,
       b.ruv_first_name, b.ruv_last_name, b.ruv_phone, b.ruv_address || '', b.ruv_city || '', b.ruv_state || '', b.ruv_zip || '', b.ruv_place_id || null,
       b.gabai_first_name, b.gabai_last_name, b.gabai_cell, b.gabai_email, b.gabai_address || '', b.gabai_city || '', b.gabai_state || '', b.gabai_zip || '', b.gabai_place_id || null);
 
