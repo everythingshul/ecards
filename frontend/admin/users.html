@@ -72,7 +72,7 @@ async function openUser(id) {
       <h4>Page & Field Permissions</h4>
       ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPerm)).join('')}
     `;
-    openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deactivateUser('${id}')">Deactivate</button><button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
+    openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button><button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -88,7 +88,11 @@ window.saveUser = async (id) => {
   const body = { first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value, phone: qs('#e-phone').value, role: qs('#e-role').value, is_active: qs('#e-active').checked, permissions };
   try { await api(`/users/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
-window.deactivateUser = async (id) => { if (!confirm('Deactivate this user?')) return; try { await api(`/users/${id}`, { method: 'DELETE' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.deactivateUser = async (id) => { if (!confirm('Deactivate this user? They will be blocked from signing in, but their account and history stay on file.')) return; try { await api(`/users/${id}`, { method: 'DELETE' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.deleteUserPermanently = async (id) => {
+  if (!confirm('Permanently delete this user? This cannot be undone. Their notes/sent emails/tasks stay on file, but the account itself is gone.')) return;
+  try { await api(`/users/${id}/permanent`, { method: 'DELETE' }); toast('User deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
 
 qs('#btn-new').addEventListener('click', () => {
   const body = `<label>Email *</label><input id="n-email" type="email"><label>First Name *</label><input id="n-first_name"><label>Last Name</label><input id="n-last_name">
