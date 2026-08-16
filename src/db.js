@@ -491,6 +491,9 @@ safeAlter(`ALTER TABLE stores ADD COLUMN agreed_terms_at TEXT`);
 safeAlter(`ALTER TABLE seasons ADD COLUMN max_accepted_applicants INTEGER`);
 safeAlter(`ALTER TABLE shuls ADD COLUMN is_locked INTEGER DEFAULT 0`);
 safeAlter(`ALTER TABLE applicants ADD COLUMN external_id TEXT`);
+safeAlter(`ALTER TABLE forms ADD COLUMN opens_at TEXT`);
+safeAlter(`ALTER TABLE forms ADD COLUMN closes_at TEXT`);
+safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
@@ -565,6 +568,34 @@ if (orgCount === 0) {
 } else {
   defaultOrgId = db.prepare('SELECT id FROM organizations ORDER BY created_at LIMIT 1').get().id;
 }
+
+// ---------------------------------------------------------------------------
+// Seed a `forms` row for each of the three built-in public application pages
+// (apply.html, apply-store.html, apply-ezras-habayis.html) so they show up
+// in Form Builder like any custom form and can be scheduled (opens_at/
+// closes_at) or deactivated from there. These pages keep their own
+// specialized submit routes (shuls.js POST /apply, etc. — contract signing,
+// Places autocomplete, the locked-shul auto-attach) rather than going
+// through the generic /forms/public/:slug/submit; this row is purely the
+// schedule/active-state record those routes check (see utils/formSchedule.js),
+// not a submission target. INSERT OR IGNORE on a UNIQUE slug makes this safe
+// to run on every boot, including for orgs that existed before this existed.
+const insDefaultForm = db.prepare(`INSERT OR IGNORE INTO forms (id, org_id, name, type, slug, schema_json, is_default) VALUES (?,?,?,?,?,?,1)`);
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Shul Registration', 'shul_application', 'shul-application', JSON.stringify([
+  { key: 'name_en', label: 'Shul Name', type: 'text', required: true }, { key: 'address', label: 'Address', type: 'text', required: true },
+  { key: 'ruv_first_name', label: 'Rav First Name', type: 'text', required: true }, { key: 'ruv_last_name', label: 'Rav Last Name', type: 'text', required: true },
+  { key: 'ruv_phone', label: 'Rav Phone', type: 'tel', required: true },
+  { key: 'gabai_first_name', label: 'Gabai First Name', type: 'text', required: true }, { key: 'gabai_last_name', label: 'Gabai Last Name', type: 'text', required: true },
+  { key: 'gabai_cell', label: 'Gabai Cell', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
+]));
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Store Application', 'store_application', 'store-application', JSON.stringify([
+  { key: 'name', label: 'Store Name', type: 'text', required: true }, { key: 'owner_name', label: 'Owner Name', type: 'text', required: false },
+  { key: 'owner_email', label: 'Owner Email', type: 'email', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
+]));
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'applicant_application', 'ezras-habayis-application', JSON.stringify([
+  { key: 'first_name', label: 'First Name', type: 'text', required: true }, { key: 'last_name', label: 'Last Name', type: 'text', required: true },
+  { key: 'home_phone', label: 'Home Phone', type: 'tel', required: false }, { key: 'email', label: 'Email', type: 'email', required: false },
+]));
 
 export const DEFAULT_ORG_ID = defaultOrgId;
 export function uuid() { return randomUUID(); }

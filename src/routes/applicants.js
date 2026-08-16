@@ -11,6 +11,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
+import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -25,6 +26,8 @@ const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone',
 // season's locked system shul (see utils/ezrasHabayis.js).
 router.post('/apply-ezras-habayis', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
+  const windowError = formWindowError(getFormWindow(orgId, 'ezras-habayis-application'));
+  if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
   if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);

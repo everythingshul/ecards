@@ -10,6 +10,7 @@ import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../serv
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
+import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -22,6 +23,8 @@ const REQUIRED_SHUL_FIELDS = ['name_en', 'address', 'city', 'state', 'zip', 'ruv
 // generates (but does not yet send) the contract PDF.
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
+  const windowError = formWindowError(getFormWindow(orgId, 'shul-application'));
+  if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
   if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);

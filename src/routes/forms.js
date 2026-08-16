@@ -5,15 +5,20 @@ import { detectAndFlag } from '../services/duplicates.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { isZipAllowed } from './applicants.js';
+import { formWindowError } from '../utils/formSchedule.js';
 
 const router = Router();
 
 // Public: fetch a form definition by slug to render (spec #12: form builder with
-// ability to set it public, groups, or individuals).
+// ability to set it public, groups, or individuals). Returns the form even when
+// its schedule window hasn't opened/has closed yet (as long as it's still
+// active) — the caller uses windowError to show a friendly "opens on X" /
+// "closed" message rather than a bare 404, since is_active alone doesn't
+// tell that story.
 router.get('/public/:slug', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE slug = ? AND is_active = 1').get(req.params.slug);
   if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
-  res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') } });
+  res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
 
 // Splits submitted fields into whatever matches a known column for this
@@ -41,6 +46,8 @@ const STORE_FIELDS = ['name','address','city','state','zip','phone','manager_nam
 router.post('/public/:slug/submit', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE slug = ? AND is_active = 1').get(req.params.slug);
   if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
+  const windowError = formWindowError(form);
+  if (windowError) return res.status(423).json({ error: windowError });
   const schema = JSON.parse(form.schema_json);
   const b = req.body || {};
   for (const f of schema) if (f.required && !b[f.key]) return res.status(400).json({ error: `Missing required field: ${f.label || f.key}` });
@@ -117,10 +124,16 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
-  const { name, visibility, schema, target, is_active } = req.body || {};
+  const { name, visibility, schema, target, is_active, opens_at, closes_at } = req.body || {};
+  // opens_at/closes_at: undefined leaves it as-is; explicit null/'' clears
+  // the date (open-ended) — same pattern as seasons.js's max_accepted_applicants.
+  const opensAt = opens_at === undefined ? undefined : (opens_at || null);
+  const closesAt = closes_at === undefined ? undefined : (closes_at || null);
   db.prepare(`UPDATE forms SET name=COALESCE(?,name), visibility=COALESCE(?,visibility),
-    schema_json=COALESCE(?,schema_json), target_json=COALESCE(?,target_json), is_active=COALESCE(?,is_active), updated_at=datetime('now') WHERE id=?`)
-    .run(name, visibility, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0), form.id);
+    schema_json=COALESCE(?,schema_json), target_json=COALESCE(?,target_json), is_active=COALESCE(?,is_active),
+    opens_at=CASE WHEN ? THEN ? ELSE opens_at END, closes_at=CASE WHEN ? THEN ? ELSE closes_at END, updated_at=datetime('now') WHERE id=?`)
+    .run(name, visibility, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0),
+      opensAt !== undefined ? 1 : 0, opensAt, closesAt !== undefined ? 1 : 0, closesAt, form.id);
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });
 

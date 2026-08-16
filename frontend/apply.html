@@ -90,6 +90,8 @@
 <script>
 let shulId = null, signToken = null, sigPad = null;
 
+guardFormWindow('shul-application', '#apply-form');
+
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('shul_address', { address:'shul_address', city:'shul_city', state:'shul_state', zip:'shul_zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });
   attachPlacesAutocomplete('ruv_address', { address:'ruv_address', city:'ruv_city', state:'ruv_state', zip:'ruv_zip' });

@@ -92,6 +92,8 @@
 <script src="/js/app.js"></script>
 <script>renderPublicFooter();</script>
 <script>
+guardFormWindow('ezras-habayis-application', '#apply-form');
+
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('app_address', { address:'app_address', city:'app_city', state:'app_state', zip:'app_zip' });
 });

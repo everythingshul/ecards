@@ -601,6 +601,29 @@ window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 // that still call it — there is no footer mark to render anymore.
 function renderPublicFooter() {}
 
+// Checks a built-in public application form's schedule (opens_at/closes_at,
+// is_active) before letting the caller show its form. Returns true if the
+// form is open for submissions; on false, it has already hidden `formSelector`
+// and rendered a "not open yet"/"closed" card in its place, so callers just
+// need to bail out of their own init logic. Missing/unreachable config
+// (network hiccup, pre-migration env) fails open — never block a real
+// applicant because this one check couldn't be made.
+async function guardFormWindow(slug, formSelector) {
+  try {
+    const { windowError } = await api(`/forms/public/${slug}`);
+    if (!windowError) return true;
+    const form = qs(formSelector);
+    if (form) {
+      const notice = document.createElement('div');
+      notice.className = 'card';
+      notice.style.textAlign = 'center';
+      notice.innerHTML = `<h3>Not accepting submissions</h3><p class="small-muted">${esc(windowError)}</p>`;
+      form.replaceWith(notice);
+    }
+    return false;
+  } catch { return true; }
+}
+
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.
 function initSignaturePad(canvasId) {
   const canvas = document.getElementById(canvasId);
