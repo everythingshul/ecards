@@ -26,7 +26,11 @@ renderShell('/admin/tasks.html', `
 `);
 
 let usersCache = [];
-async function loadUsers() { const { users } = await api('/users'); usersCache = users.filter(u => u.is_active); }
+// Fetching the assignee list requires org_admin/super_admin (GET /api/users
+// is admin-only, unlike most other resources). Staff can still fully use
+// Tasks — they just won't get an assignee picker — so every caller of this
+// must not let a failed fetch (a 403 for staff) block the rest of the page.
+async function loadUsers() { try { const { users } = await api('/users'); usersCache = users.filter(u => u.is_active); } catch { usersCache = []; } }
 
 function fmtDueBadge(dueDate, status) {
   if (!dueDate) return '<span class="small-muted">No due date</span>';

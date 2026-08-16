@@ -531,13 +531,22 @@ if (orgCount === 0) {
   db.prepare(`INSERT INTO seasons (id, org_id, name, is_active, default_card_amount) VALUES (?,?,?,1,0)`)
     .run(seasonId, defaultOrgId, 'Season ' + new Date().getFullYear());
 
+  // Never fall back to a hardcoded password here — "ChangeMe123!" was a
+  // fixed, publicly-known default (visible in this repo's history), so any
+  // environment that unexpectedly re-seeds (e.g. a persistent disk that
+  // failed to attach) would silently stand up a super-admin account anyone
+  // could log into. A random one is only ever visible in this boot's server
+  // log, which only whoever runs the deploy can see.
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@everythingshul.com';
-  const adminPass = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe123!';
+  const adminPass = process.env.SEED_ADMIN_PASSWORD || randomUUID();
   db.prepare(`INSERT INTO users (id, org_id, email, password_hash, first_name, last_name, role)
     VALUES (?,?,?,?,?,?,?)`).run(
     randomUUID(), defaultOrgId, adminEmail, bcrypt.hashSync(adminPass, 10), 'Super', 'Admin', 'super_admin'
   );
   console.log(`[db] Seeded default org + super admin (${adminEmail} / ${adminPass}) — CHANGE THIS PASSWORD IMMEDIATELY.`);
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.warn('[db] SEED_ADMIN_PASSWORD was not set — a random one-time password was generated above. Set SEED_ADMIN_PASSWORD (and SEED_ADMIN_EMAIL) in your deploy environment so re-seeding is intentional and predictable, not automatic.');
+  }
 
   // Default field requirement settings mirroring the spec.
   const shulFields = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address'];

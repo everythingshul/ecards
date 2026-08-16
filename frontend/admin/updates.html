@@ -41,8 +41,7 @@ window.viewUpdate = async (id) => {
   try {
     const { update: u, recipients } = await api(`/updates/${id}`);
     const body = `
-      <p style="white-space:pre-wrap">${esc(u.body)}</p>
-      ${u.attachments.length ? `<p><strong>Attachments:</strong></p><ul>${u.attachments.map(a => `<li><a href="/uploads/updates/${esc(a.path)}" target="_blank">${esc(a.filename)}</a></li>`).join('')}</ul>` : ''}
+      ${renderUpdateBody(u)}
       <div class="divider"></div>
       <h4>Recipients</h4>
       <table><thead><tr><th>Type</th><th>Email Status</th><th>Read</th></tr></thead><tbody>

@@ -107,15 +107,17 @@ function templateFormBody(t = {}) {
     <label>Name <span class="req">*</span></label><input id="tp-name" value="${esc(t.name||'')}">
     <label>Category <span class="small-muted">(optional)</span></label><input id="tp-category" value="${esc(t.category||'')}">
     <label>Subject <span class="req">*</span></label><input id="tp-subject" value="${esc(t.subject||'')}">
-    <label>Body (HTML) <span class="req">*</span> <span class="small-muted">(use {{variable}} placeholders as needed)</span></label>
-    <textarea id="tp-body" rows="10">${esc(t.body_html||'')}</textarea>
+    <label>Body <span class="req">*</span> <span class="small-muted">(use {{variable}} placeholders as needed)</span></label>
+    <div id="tp-body-rte"></div>
   `;
 }
+let templateEditor = null;
 qs('#btn-new-template').addEventListener('click', () => {
   openModal('New Template', templateFormBody(), `<button class="btn btn-primary btn-sm" onclick="createTemplate()">Create</button>`);
+  templateEditor = createRichTextEditor('tp-body-rte');
 });
 window.createTemplate = async () => {
-  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: qs('#tp-body').value };
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: templateEditor.getHtml() };
   if (!body.name || !body.subject || !body.body_html) return toast('Name, subject, and body are required', true);
   try { await api('/emails/templates', { method: 'POST', body }); toast('Template created'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
 };
@@ -123,9 +125,10 @@ window.editTemplate = (id) => {
   const t = templatesCache.find(x => x.id === id);
   if (!t) return;
   openModal('Edit Template', templateFormBody(t), `<button class="btn btn-danger btn-sm" onclick="deleteTemplate('${id}')">Delete</button><button class="btn btn-primary btn-sm" onclick="saveTemplate('${id}')">Save</button>`);
+  templateEditor = createRichTextEditor('tp-body-rte', t.body_html);
 };
 window.saveTemplate = async (id) => {
-  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: qs('#tp-body').value };
+  const body = { name: qs('#tp-name').value.trim(), category: qs('#tp-category').value.trim(), subject: qs('#tp-subject').value.trim(), body_html: templateEditor.getHtml() };
   try { await api(`/emails/templates/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
 };
 window.deleteTemplate = async (id) => {
@@ -133,6 +136,7 @@ window.deleteTemplate = async (id) => {
   try { await api(`/emails/templates/${id}`, { method: 'DELETE' }); closeModal(); loadTemplates(); } catch (err) { toast(err.message, true); }
 };
 
+let composeEditor = null;
 qs('#btn-compose').addEventListener('click', async () => {
   if (!templatesCache.length) { try { ({ templates: templatesCache } = await api('/emails/templates/all')); } catch { /* compose still works without templates */ } }
   const options = `<option value="">Start from scratch</option>` + templatesCache.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
@@ -140,17 +144,18 @@ qs('#btn-compose').addEventListener('click', async () => {
     <label>Use Template</label><select id="cp-template">${options}</select>
     <label>To <span class="req">*</span></label><input id="cp-to" type="email" placeholder="recipient@example.com">
     <label>Subject <span class="req">*</span></label><input id="cp-subject">
-    <label>Body (HTML) <span class="req">*</span></label><textarea id="cp-body" rows="10"></textarea>
+    <label>Body <span class="req">*</span></label><div id="cp-body-rte"></div>
   `;
   openModal('Compose Email', body, `<button class="btn btn-primary btn-sm" onclick="sendComposedEmail()">Send</button>`);
+  composeEditor = createRichTextEditor('cp-body-rte');
   qs('#cp-template').addEventListener('change', () => {
     const t = templatesCache.find(x => x.id === qs('#cp-template').value);
     qs('#cp-subject').value = t ? t.subject : '';
-    qs('#cp-body').value = t ? t.body_html : '';
+    composeEditor.setHtml(t ? t.body_html : '');
   });
 });
 window.sendComposedEmail = async () => {
-  const to = qs('#cp-to').value.trim(), subject = qs('#cp-subject').value.trim(), body_html = qs('#cp-body').value;
+  const to = qs('#cp-to').value.trim(), subject = qs('#cp-subject').value.trim(), body_html = composeEditor.getHtml();
   if (!to || !subject || !body_html) return toast('To, subject, and body are required', true);
   try {
     const r = await api('/emails/send', { method: 'POST', body: { to, subject, body_html } });

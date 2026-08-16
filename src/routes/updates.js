@@ -75,8 +75,13 @@ router.post('/', requireAdmin, upload.array('files', 10), async (req, res) => {
   db.prepare(`INSERT INTO updates (id, org_id, title, body, attachments_json, created_by) VALUES (?,?,?,?,?,?)`)
     .run(id, req.user.org_id, title, body, JSON.stringify(attachments), req.user.id);
 
-  const attachmentLinks = attachments.map(a => `<li><a href="${process.env.APP_URL || ''}/uploads/updates/${a.path}">${a.filename}</a></li>`).join('');
-  const bodyHtml = `<p>${String(body).replace(/\n/g, '<br>')}</p>${attachments.length ? `<p><strong>Attachments:</strong></p><ul>${attachmentLinks}</ul>` : ''}`;
+  // Images go inline as their own paragraph (what they'll actually look
+  // like in the email/portal); non-images (PDFs etc.) stay as a link list.
+  const imageAttachments = attachments.filter(a => a.mime_type.startsWith('image/'));
+  const fileAttachments = attachments.filter(a => !a.mime_type.startsWith('image/'));
+  const imagesHtml = imageAttachments.map(a => `<p><img src="${process.env.APP_URL || ''}/uploads/updates/${a.path}" alt="${a.filename}" style="max-width:100%;height:auto;"></p>`).join('');
+  const fileLinks = fileAttachments.map(a => `<li><a href="${process.env.APP_URL || ''}/uploads/updates/${a.path}">${a.filename}</a></li>`).join('');
+  const bodyHtml = `<p>${String(body).replace(/\n/g, '<br>')}</p>${imagesHtml}${fileAttachments.length ? `<p><strong>Attachments:</strong></p><ul>${fileLinks}</ul>` : ''}`;
 
   let sentCount = 0, failedCount = 0;
   for (const t of targets) {

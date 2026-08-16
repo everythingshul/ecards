@@ -143,6 +143,71 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 function closeModal() { document.getElementById('ec-modal')?.remove(); }
 
+// Minimal dependency-free rich text editor for composing HTML email/update
+// bodies — a toolbar of execCommand actions over a contenteditable div, so
+// admins don't have to hand-write HTML tags. Renders into `#${containerId}`
+// and returns { getHtml, setHtml }. Images are inlined as base64 data URIs
+// (no separate upload step needed for something this small).
+function createRichTextEditor(containerId, initialHtml = '') {
+  const container = document.getElementById(containerId);
+  const editorId = containerId + '-surface';
+  container.innerHTML = `
+    <div class="rte-toolbar">
+      <button type="button" data-cmd="bold" title="Bold"><strong>B</strong></button>
+      <button type="button" data-cmd="italic" title="Italic"><em>I</em></button>
+      <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+      <button type="button" data-cmd="formatBlock" data-arg="H3" title="Heading">H</button>
+      <button type="button" data-cmd="insertUnorderedList" title="Bullet list">&bull; List</button>
+      <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+      <button type="button" data-cmd="createLink" title="Link">Link</button>
+      <button type="button" data-action="image" title="Insert image">Image</button>
+      <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+      <input type="file" accept="image/*" class="rte-file-input" style="display:none">
+    </div>
+    <div id="${editorId}" class="rte-surface" contenteditable="true">${initialHtml || ''}</div>
+  `;
+  const surface = document.getElementById(editorId);
+  container.querySelectorAll('.rte-toolbar button[data-cmd]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      surface.focus();
+      const cmd = btn.dataset.cmd;
+      if (cmd === 'createLink') {
+        const url = prompt('Link URL:', 'https://');
+        if (url) document.execCommand(cmd, false, url);
+      } else {
+        document.execCommand(cmd, false, btn.dataset.arg || null);
+      }
+    });
+  });
+  const fileInput = container.querySelector('.rte-file-input');
+  container.querySelector('button[data-action="image"]').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { surface.focus(); document.execCommand('insertImage', false, reader.result); };
+    reader.readAsDataURL(file);
+    fileInput.value = '';
+  });
+  return {
+    getHtml: () => surface.innerHTML,
+    setHtml: (html) => { surface.innerHTML = html || ''; },
+  };
+}
+
+// Shared body renderer for an Update record — used by the portal inbox
+// detail modal and the admin "View" modal alike. Images render inline as
+// their own paragraph; non-image attachments (PDFs etc.) stay as links.
+function renderUpdateBody(u) {
+  const images = (u.attachments || []).filter(a => a.mime_type.startsWith('image/'));
+  const files = (u.attachments || []).filter(a => !a.mime_type.startsWith('image/'));
+  return `
+    <p style="white-space:pre-wrap">${esc(u.body)}</p>
+    ${images.map(a => `<p><img src="/uploads/updates/${esc(a.path)}" alt="${esc(a.filename)}" style="max-width:100%;height:auto;"></p>`).join('')}
+    ${files.length ? `<p><strong>Attachments:</strong></p><ul>${files.map(a => `<li><a href="/uploads/updates/${esc(a.path)}" target="_blank">${esc(a.filename)}</a></li>`).join('')}</ul>` : ''}
+  `;
+}
+
 // Shared "Updates" inbox renderer for the shul/store portal — both call this
 // with their own container id. Unread updates are marked read as soon as
 // they're opened in the detail modal.
@@ -161,11 +226,7 @@ async function loadUpdatesInbox(containerId) {
 window.openInboxUpdate = async (recipientId) => {
   const u = (window._inboxUpdates || []).find(x => x.recipient_id === recipientId);
   if (!u) return;
-  const body = `
-    <p style="white-space:pre-wrap">${esc(u.body)}</p>
-    ${u.attachments.length ? `<p><strong>Attachments:</strong></p><ul>${u.attachments.map(a => `<li><a href="/uploads/updates/${esc(a.path)}" target="_blank">${esc(a.filename)}</a></li>`).join('')}</ul>` : ''}
-  `;
-  openModal(u.title, body);
+  openModal(u.title, renderUpdateBody(u));
   if (!u.read_at) { try { await api(`/updates/inbox/${recipientId}/read`, { method: 'POST' }); } catch {} }
 };
 
