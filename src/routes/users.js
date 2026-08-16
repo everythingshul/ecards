@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
@@ -16,6 +17,11 @@ const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms
 // (routes/shuls.js, routes/stores.js), never through Users & Permissions.
 const INTERNAL_ROLES = ['staff', 'org_admin', 'super_admin'];
 const PORTAL_ROLES = ['shul', 'store'];
+
+// Used only by PUT /:id/set-password below — a strict seniority ordering so
+// an admin can be handed the power to directly set someone's password only
+// for accounts genuinely "under" them, never a peer or someone above.
+const ROLE_RANK = { super_admin: 4, org_admin: 3, staff: 2, shul: 1, store: 1 };
 
 router.use(auth, requireRole('super_admin', 'org_admin'));
 
@@ -85,6 +91,31 @@ router.put('/:id', (req, res) => {
     db.prepare('DELETE FROM user_assignments WHERE user_id = ?').run(user.id);
     for (const a of assignments) assign(user.id, a.entity_type, a.entity_id);
   }
+  res.json({ ok: true });
+});
+
+// Directly sets a password for any account (internal staff or a shul/store
+// portal login) strictly below the caller's own role rank — not the usual
+// "email them a reset link" flow, for when someone's locked out and can't
+// receive it (or the admin just wants to hand them credentials directly).
+// Deliberately allowed on portal accounts too, unlike the rest of this
+// router (see INTERNAL_ROLES note above) — this is a support action, not
+// the role-management CRUD that boundary exists to protect.
+router.put('/:id/set-password', (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  const callerRank = ROLE_RANK[req.user.role] || 0;
+  const targetRank = ROLE_RANK[user.role] || 0;
+  if (targetRank >= callerRank) return res.status(403).json({ error: 'You can only set passwords for accounts at a lower permission level than your own' });
+  const { newPassword } = req.body || {};
+  if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  // Also activates the account and clears any pending invite/reset link —
+  // handing someone a working password directly should leave them able to
+  // log in with it immediately, same end state as if they'd finished an
+  // invite/reset flow themselves.
+  db.prepare(`UPDATE users SET password_hash = ?, token_version = token_version + 1, invite_token = NULL, invite_expires = NULL, is_active = 1 WHERE id = ?`)
+    .run(bcrypt.hashSync(newPassword, 10), user.id);
+  logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { password_reset_by_admin: false }, { password_reset_by_admin: true }, req.ip);
   res.json({ ok: true });
 });
 

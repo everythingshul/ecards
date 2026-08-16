@@ -22,6 +22,17 @@ export function isSmsMockMode() {
   return !CONFIG.apiBase || !CONFIG.apiKey;
 }
 
+// The org's own SimpleSender number — anything a synced message is addressed
+// `to` gets classified as inbound (see classifyDirection below). Settings >
+// SMS lets an admin change this if the number is ever reassigned; falls back
+// to the number confirmed at setup time so sync works out of the box even
+// before anyone visits that settings screen.
+const DEFAULT_OWN_NUMBER = '+18555996232';
+export function getOwnSmsNumber(orgId) {
+  const row = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'sms_own_number'`).get(orgId || DEFAULT_ORG_ID);
+  return row?.value || DEFAULT_OWN_NUMBER;
+}
+
 // Sends one SMS and returns { emailError: null } on success or
 // { emailError: <reason> } on failure/mock — named to match sendMailChecked's
 // return shape so frontend toast-handling code can treat them identically.
@@ -78,31 +89,47 @@ export function logInboundSms(orgId, from, body) {
 //
 // The only confirmed shape of that endpoint's response is
 // `{ messages: [...], total: N }` — no sample message object and no docs
-// were available when this was built. Field names below are therefore a
-// best guess covering the conventions most REST SMS providers use, same
-// spirit as the webhook's field-name matching. Critically, `total` (456 in
-// the one response seen) suggests this returns the FULL message history,
-// sent and received mixed — importing everything blindly would duplicate
-// every outbound send this app already logs at send time in
-// sendSmsChecked(). So a message is only ever imported when it can be
-// confidently classified as inbound via an explicit direction/type field;
-// anything ambiguous is skipped and counted, never guessed into either
-// bucket. If a sync run finds messages but classifies none of them,
-// it logs one sample item's raw JSON so the real field names are visible
-// in the server log the moment this runs against production credentials.
+// were available when this was built. Critically, `total` (456 in the one
+// response seen) suggests this returns the FULL message history, sent and
+// received mixed — importing everything blindly would duplicate every
+// outbound send this app already logs at send time in sendSmsChecked().
+//
+// Classification is now driven by the org's own SMS number (Settings > SMS,
+// `sms_own_number` — confirmed by the org: anything addressed `to` that
+// number is inbound) rather than guessing at a direction/type field, since
+// that's a real, confirmed signal instead of a guess. `to`/`from` field
+// names on each message are still a best guess covering common REST SMS
+// provider conventions (no docs access) — the direction/type field guess
+// below stays as a fallback for any message where a `to`/`from` field can't
+// be found or doesn't match at all. If a sync run finds messages but
+// classifies none of them, it logs one sample item's raw JSON so the real
+// field names are visible in the server log the moment this runs against
+// production credentials.
 // ---------------------------------------------------------------------------
 const INBOUND_DIRECTION_VALUES = ['inbound', 'in', 'received', 'incoming', 'mo'];
 const OUTBOUND_DIRECTION_VALUES = ['outbound', 'out', 'sent', 'outgoing', 'mt'];
 
-function classifyDirection(m) {
+const digitsOnly = (v) => String(v ?? '').replace(/\D/g, '');
+
+function classifyDirection(m, ownNumberDigits) {
+  if (ownNumberDigits) {
+    const to = digitsOnly(m.to ?? m.To ?? m.destination ?? m.recipient);
+    const from = digitsOnly(m.from ?? m.From ?? m.sender ?? m.source);
+    // Compare on the last 10 digits so a `+1` country-code prefix on one
+    // side and not the other (or vice versa) doesn't cause a false miss.
+    const ownLast10 = ownNumberDigits.slice(-10);
+    if (to && ownLast10 && to.slice(-10) === ownLast10) return 'inbound';
+    if (from && ownLast10 && from.slice(-10) === ownLast10) return 'outbound';
+  }
   const raw = String(m.direction ?? m.type ?? m.message_type ?? m.messageType ?? '').toLowerCase();
   if (INBOUND_DIRECTION_VALUES.includes(raw)) return 'inbound';
   if (OUTBOUND_DIRECTION_VALUES.includes(raw)) return 'outbound';
   return null;
 }
 
-export async function syncInboundSms(orgId) {
+export async function syncInboundSms(orgId, ownNumber) {
   if (isSmsMockMode()) return { imported: 0, skipped: 0, total: 0 };
+  const ownNumberDigits = digitsOnly(ownNumber);
   const res = await fetch(`${CONFIG.apiBase}/v1/messages`, { headers: { Authorization: `Bearer ${CONFIG.apiKey}` } });
   if (!res.ok) throw new Error(`SimpleSender /v1/messages failed (${res.status})`);
   const data = await res.json().catch(() => ({}));
@@ -114,7 +141,7 @@ export async function syncInboundSms(orgId) {
   const findByPhoneBody = db.prepare(`SELECT 1 FROM sms_messages WHERE org_id = ? AND direction = 'inbound' AND phone = ? AND body = ? AND created_at > datetime('now', '-2 days')`);
 
   for (const m of messages) {
-    const direction = classifyDirection(m);
+    const direction = classifyDirection(m, ownNumberDigits);
     if (direction !== 'inbound') { skipped++; continue; }
     classified++;
     const phone = m.from || m.sender || m.phone || m.msisdn || m.source;

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms } from '../services/sms.js';
+import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms, getOwnSmsNumber } from '../services/sms.js';
 import { sendCsv } from '../services/csv.js';
 
 const router = Router();
@@ -67,7 +67,7 @@ router.post('/inbox/mark-seen', (req, res) => {
 // also runs automatically on a background interval (see index.js), same
 // pattern as the card-transaction sync.
 router.post('/inbox/sync', async (req, res) => {
-  try { res.json({ ...(await syncInboundSms(req.user.org_id)), mockMode: isSmsMockMode() }); }
+  try { res.json({ ...(await syncInboundSms(req.user.org_id, getOwnSmsNumber(req.user.org_id))), mockMode: isSmsMockMode() }); }
   catch (e) { res.status(502).json({ error: `Sync failed: ${e.message}` }); }
 });
 

@@ -184,6 +184,33 @@ function layoutNavOverflow() {
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+// Mirrors ROLE_RANK in routes/users.js — used client-side only to decide
+// whether to show the "Set Password" button at all; the server independently
+// re-checks the same ordering on every PUT /users/:id/set-password call.
+const ROLE_RANK = { super_admin: 4, org_admin: 3, staff: 2, shul: 1, store: 1 };
+
+// Opens a small "Set Password" modal for directly setting someone's login
+// password (PUT /users/:id/set-password) instead of emailing them a reset
+// link — only ever shown to callers whose own role outranks the target's
+// (server re-checks this too; see ROLE_RANK in routes/users.js). Used from
+// both Users & Permissions (internal staff) and the Shuls/Stores detail
+// modals (portal accounts).
+window.openSetPasswordModal = (userId, label) => {
+  const body = `<p class="small-muted">Sets a new password for <strong>${esc(label)}</strong> immediately — they can sign in with it right away. This does not require them to click an email link.</p>
+    <label>New Password <span class="req">*</span> <span class="small-muted">(at least 8 characters)</span></label>
+    <input id="sp-password" type="password" autocomplete="new-password">`;
+  openModal('Set Password', body, `<button class="btn btn-primary btn-sm" onclick="submitSetPassword('${userId}')">Set Password</button>`);
+};
+window.submitSetPassword = async (userId) => {
+  const newPassword = qs('#sp-password').value;
+  if (!newPassword || newPassword.length < 8) return toast('Password must be at least 8 characters', true);
+  try {
+    await api(`/users/${userId}/set-password`, { method: 'PUT', body: { newPassword } });
+    toast('Password set');
+    closeModal();
+  } catch (err) { toast(err.message, true); }
+};
+
 function openModal(title, bodyHtml, footerHtml = '') {
   const el = document.createElement('div');
   el.className = 'modal-backdrop';
@@ -349,46 +376,20 @@ async function showOtherSeasons(entityLabel, endpoint, reopen) {
   } catch (err) { toast(err.message, true); }
 }
 
-// Searchable dropdown for picking a shul by name instead of pasting a raw
-// ID. `inputId` is the visible text input; `hiddenId` is a hidden input
-// that ends up holding the selected shul's id (what actually gets
-// submitted). Reuses the Places-autocomplete dropdown styling. Debounced,
-// searches via the admin shuls list endpoint so every shul (any status) is
-// reachable, not just approved/public ones.
-function attachShulSearchSelect(inputId, hiddenId, initialLabel = '') {
-  const input = document.getElementById(inputId);
-  const hidden = document.getElementById(hiddenId);
-  if (!input || !hidden) return;
-  if (initialLabel) input.value = initialLabel;
-  input.parentElement.style.position = input.parentElement.style.position || 'relative';
-  let dropdown = null;
-  let debounceTimer = null;
-  function closeDropdown() { if (dropdown) { dropdown.remove(); dropdown = null; } }
-  input.addEventListener('input', () => {
-    hidden.value = '';
-    clearTimeout(debounceTimer);
-    const q = input.value.trim();
-    if (!q) { closeDropdown(); return; }
-    debounceTimer = setTimeout(async () => {
-      try {
-        const { shuls } = await api('/shuls?search=' + encodeURIComponent(q) + '&pageSize=10');
-        closeDropdown();
-        if (!shuls.length) return;
-        dropdown = document.createElement('div');
-        dropdown.className = 'places-dropdown';
-        dropdown.innerHTML = shuls.map(s => `<div class="places-dropdown-item" data-id="${s.id}" data-label="${esc(s.name_en)}">${esc(s.name_en)}${s.city ? ` <span class="small-muted">(${esc(s.city)}, ${esc(s.state||'')})</span>` : ''}</div>`).join('');
-        input.parentElement.appendChild(dropdown);
-        dropdown.querySelectorAll('.places-dropdown-item').forEach(item => {
-          item.addEventListener('click', () => {
-            input.value = item.dataset.label;
-            hidden.value = item.dataset.id;
-            closeDropdown();
-          });
-        });
-      } catch { /* leave the field editable even if search fails */ }
-    }, 300);
-  });
-  document.addEventListener('click', (e) => { if (dropdown && !input.parentElement.contains(e.target)) closeDropdown(); });
+// Real <select> dropdown for picking a shul by name instead of pasting a
+// raw ID or typing into a search box. `selectId` is the <select> element;
+// its own value ends up being the selected shul's id — no separate hidden
+// field needed. Pulls from the admin all-list endpoint so every shul (any
+// status) is selectable, not just approved/public ones.
+async function attachShulSelect(selectId, initialShulId = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  try {
+    const { shuls } = await api('/shuls/all-list');
+    select.innerHTML = '<option value="">Select a shul…</option>' +
+      shuls.map(s => `<option value="${s.id}">${esc(s.name_en)}${s.city ? ` (${esc(s.city)}, ${esc(s.state||'')})` : ''}</option>`).join('');
+    if (initialShulId) select.value = initialShulId;
+  } catch { /* leave the dropdown with just its placeholder if the list fails to load */ }
 }
 
 // Google Places address autocomplete — built on the new Places API's

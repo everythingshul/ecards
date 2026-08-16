@@ -72,7 +72,8 @@ async function openUser(id) {
       <h4>Page & Field Permissions</h4>
       ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPerm)).join('')}
     `;
-    openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button><button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
+    const canSetPassword = ['super_admin','org_admin'].includes(Auth.user()?.role) && ROLE_RANK[u.role] < ROLE_RANK[Auth.user()?.role];
+    openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button>${canSetPassword ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${id}','${esc(u.first_name+' '+u.last_name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
   } catch (err) { toast(err.message, true); }
 }
 

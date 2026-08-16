@@ -45,6 +45,12 @@ renderShell('/admin/settings', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDefaultReplyTo()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Our SMS Number</h3>
+      <p class="small-muted">Your SimpleSender sending number. Incoming-message sync (SMS Center &gt; Inbox) uses this to tell replies to you apart from messages you sent — anything addressed to this number is inbound. Update this if the number is ever reassigned.</p>
+      <label>SMS Number</label><input id="org-sms_own_number" placeholder="+18555996232">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveSmsOwnNumber()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Application Restrictions</h3>
       <label>Allowed Zip Codes <span class="small-muted">(comma-separated, leave blank to accept any zip code)</span></label>
       <textarea id="org-allowed_zips" rows="3" placeholder="e.g. 11201, 11211, 11213"></textarea>
@@ -243,6 +249,13 @@ async function loadDefaultReplyTo() {
 }
 window.saveDefaultReplyTo = async () => {
   try { await api('/settings', { method: 'PUT', body: { email_reply_to: qs('#org-reply_to').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadSmsOwnNumber() {
+  const { settings } = await api('/settings');
+  qs('#org-sms_own_number').value = settings.sms_own_number || '+18555996232';
+}
+window.saveSmsOwnNumber = async () => {
+  try { await api('/settings', { method: 'PUT', body: { sms_own_number: qs('#org-sms_own_number').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 async function loadPopup() {
   const { settings } = await api('/settings');
@@ -586,7 +599,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

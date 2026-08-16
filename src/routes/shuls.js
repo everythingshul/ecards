@@ -125,6 +125,15 @@ router.post('/contract/:token/sign', async (req, res) => {
 // ============================= ADMIN ==============================
 router.use(auth, requirePermission('shuls'));
 
+// Full, unpaginated shul list for the applicant-profile "Shul" dropdown
+// (frontend/js/app.js's attachShulSelect) — every non-locked shul regardless
+// of status, since an admin correcting an applicant's shul assignment needs
+// to be able to pick any real shul, not just approved/active ones.
+router.get('/all-list', (req, res) => {
+  const rows = db.prepare(`SELECT id, name_en, name_he, city, state FROM shuls WHERE org_id = ? AND is_locked = 0 ORDER BY name_en`).all(req.user.org_id);
+  res.json({ shuls: rows });
+});
+
 router.get('/', (req, res) => {
   const { search, status, season_id, sort = 'created_at', dir = 'DESC', page = 1, pageSize = 50 } = req.query;
   // Locked system shuls (e.g. "Ezras Habayis") are excluded from the normal

@@ -159,7 +159,7 @@ async function openApplicant(id) {
           <div><label>First Name</label><input id="e-first_name" value="${esc(a.first_name||'')}"></div>
           <div><label>Last Name</label><input id="e-last_name" value="${esc(a.last_name||'')}"></div>
         </div>
-        <label>Shul</label><input id="e-shul-search" placeholder="Search shuls by name…" autocomplete="off"><input type="hidden" id="e-shul_id">
+        <label>Shul</label><select id="e-shul_id"><option value="">Loading…</option></select>
         <div class="grid-2">
           <div><label>Marital Status</label><select id="e-marital"><option ${a.marital_status==='single'?'selected':''}>single</option><option ${a.marital_status==='married'?'selected':''}>married</option><option ${a.marital_status==='widowed'?'selected':''}>widowed</option><option ${a.marital_status==='divorced'?'selected':''}>divorced</option></select></div>
           <div><label>Children</label><input id="e-children" type="number" value="${a.num_children??0}"></div>
@@ -203,7 +203,7 @@ async function openApplicant(id) {
       ${a.is_paused ? '' : (a.approval_status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectApplicant('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveApplicant('${id}')">Approve</button>` : '')}
       <button class="btn btn-primary btn-sm" onclick="saveApplicant('${id}')">Save</button>`;
     openModal(`${a.first_name} ${a.last_name}`, body, footer);
-    attachShulSearchSelect('e-shul-search', 'e-shul_id', a.shul_name || '');
+    attachShulSelect('e-shul_id', a.shul_id || '');
     qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
       ['info','notes','cards','documents','messages'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
@@ -222,11 +222,11 @@ window.saveApplicant = async (id) => {
     city: qs('#e-city').value, state: qs('#e-state').value, zip: qs('#e-zip').value, home_for_yomtov: qs('#e-yomtov').checked,
     card_amount: qs('#e-card').value === '' ? null : +qs('#e-card').value, comments: qs('#e-comments').value,
   };
-  // Only reassign the shul if the admin actually picked a new one from the
-  // dropdown — the hidden field stays empty otherwise, and sending an empty
-  // shul_id would wipe the applicant's existing shul assignment.
-  const newShulId = qs('#e-shul_id').value;
-  if (newShulId) body.shul_id = newShulId;
+  // Skip shul_id only if the dropdown hasn't finished loading yet — normally
+  // it's always pre-filled with the applicant's current shul, so this just
+  // sends whatever's selected (unchanged or newly picked).
+  const shulId = qs('#e-shul_id').value;
+  if (shulId) body.shul_id = shulId;
   try { await api(`/applicants/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.approveApplicant = async (id) => {
@@ -239,7 +239,7 @@ window.assignCard = async (id) => { try { await api('/cards/assign', { method: '
 function openApplicantForm() {
   const body = `
     <div class="grid-2"><div><label>First Name *</label><input id="n-first_name"></div><div><label>Last Name *</label><input id="n-last_name"></div></div>
-    <label>Shul *</label><input id="n-shul-search" placeholder="Search shuls by name…" autocomplete="off"><input type="hidden" id="n-shul_id">
+    <label>Shul *</label><select id="n-shul_id"><option value="">Loading…</option></select>
     <div class="grid-2">
       <div><label>Marital Status</label><select id="n-marital_status"><option value=""></option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select></div>
       <div><label>Children</label><input id="n-num_children" type="number" value="0"></div>
@@ -260,7 +260,7 @@ function openApplicantForm() {
     <div class="checkbox-row"><input type="checkbox" id="n-bypass"><label style="margin:0">Bypass required fields for this submission</label></div>
   `;
   openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Create</button>`);
-  attachShulSearchSelect('n-shul-search', 'n-shul_id');
+  attachShulSelect('n-shul_id');
 }
 window.createApplicant = async () => {
   const body = {
