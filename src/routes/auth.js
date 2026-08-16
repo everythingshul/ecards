@@ -51,7 +51,7 @@ router.post('/forgot-password', async (req, res) => {
     db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
     const resetUrl = `${process.env.APP_URL || ''}/reset-password?token=${token}`;
     const tmpl = renderSystemTemplate(user.org_id, 'passwordReset', { resetUrl });
-    const { emailError } = await sendMailChecked(user.org_id, user.email, tmpl.subject, tmpl.body);
+    const { emailError } = await sendMailChecked(user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
     if (emailError) console.error('[mail] password reset email failed:', emailError);
   }
   res.json({ ok: true });

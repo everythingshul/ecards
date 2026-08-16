@@ -537,6 +537,10 @@ safeAlter(`ALTER TABLE forms ADD COLUMN season_id TEXT REFERENCES seasons(id)`);
 // syncInboundSms) — this is how re-polling the same messages is recognized
 // as already-imported instead of creating duplicate rows every sweep.
 safeAlter(`ALTER TABLE sms_messages ADD COLUMN provider_message_id TEXT`);
+// Per-template Reply-To override — falls back to the org-wide default
+// (settings key email_reply_to) when null, and to no Reply-To header at all
+// when neither is set. See services/mail.js renderSystemTemplate().
+safeAlter(`ALTER TABLE system_email_templates ADD COLUMN reply_to TEXT`);
 safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
 // Points an undone entry at the fresh 'undo' entry that reversed it, so the
 // UI can offer a one-click "Redo" right on that same row instead of making

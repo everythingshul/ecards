@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
   const tmpl = renderSystemTemplate(req.user.org_id, 'userInvite', { role: role.replace('_', ' '), inviteUrl });
-  const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body);
+  const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
   if (emailError) console.error('[mail] user invite email failed:', emailError);
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   logAudit(req.user.org_id, req.user.id, 'create', 'user', id, null, created, req.ip);

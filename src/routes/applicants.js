@@ -297,7 +297,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   let emailError = null;
   if (applicant.email) {
     const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
-    ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body));
+    ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
     if (emailError) console.error('[mail] applicant approval email failed:', emailError);
   }
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError });

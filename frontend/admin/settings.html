@@ -39,6 +39,12 @@ renderShell('/admin/settings', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveOrg()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Default Reply-To Email</h3>
+      <p class="small-muted">Where replies to automatic system emails go by default. Leave blank to use the sending address itself. Individual email templates (Auto Emails tab) can override this per-template.</p>
+      <label>Default Reply-To</label><input id="org-reply_to" placeholder="e.g. office@yourorg.org">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDefaultReplyTo()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Application Restrictions</h3>
       <label>Allowed Zip Codes <span class="small-muted">(comma-separated, leave blank to accept any zip code)</span></label>
       <textarea id="org-allowed_zips" rows="3" placeholder="e.g. 11201, 11211, 11213"></textarea>
@@ -206,6 +212,13 @@ async function loadZipRestriction() {
 }
 window.saveZipRestriction = async () => {
   try { await api('/settings', { method: 'PUT', body: { allowed_zip_codes: qs('#org-allowed_zips').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadDefaultReplyTo() {
+  const { settings } = await api('/settings');
+  qs('#org-reply_to').value = settings.email_reply_to || '';
+}
+window.saveDefaultReplyTo = async () => {
+  try { await api('/settings', { method: 'PUT', body: { email_reply_to: qs('#org-reply_to').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 async function loadPopup() {
   const { settings } = await api('/settings');
@@ -427,6 +440,7 @@ async function loadEmailTemplates() {
         ${t.isCustomized ? badge('customized', 'active') : badge('default', 'inactive')}
       </div>
       <p class="small-muted" style="margin-top:6px">Available: ${t.vars.map(v => `<code>{{${esc(v)}}}</code>`).join(' ')}</p>
+      <p class="small-muted">Reply-To: ${t.replyTo ? esc(t.replyTo) : (t.defaultReplyTo ? `${esc(t.defaultReplyTo)} (org default)` : 'sending address (no default set)')}</p>
       <button class="btn btn-sm btn-outline" onclick="openEditEmailTemplate('${t.key}')">Edit</button>
       ${t.isCustomized ? `<button class="btn btn-sm btn-outline" onclick="resetEmailTemplate('${t.key}')">Reset to Default</button>` : ''}
     </div>`).join('');
@@ -439,12 +453,14 @@ window.openEditEmailTemplate = (key) => {
   const body = `
     <label>Subject</label><input id="et-subject" value="${esc(t.subject)}">
     <label>Body (HTML)</label><textarea id="et-body" rows="10">${esc(t.body)}</textarea>
+    <label>Reply-To <span class="small-muted">(leave blank to use ${t.defaultReplyTo ? 'the org default, ' + esc(t.defaultReplyTo) : 'the sending address'})</span></label>
+    <input id="et-replyto" value="${esc(t.replyTo || '')}" placeholder="e.g. approvals@yourorg.org">
     <p class="small-muted" style="margin-top:10px">Available placeholders: ${t.vars.map(v => `<code>{{${esc(v)}}}</code>`).join(' ')}</p>
   `;
   openModal(t.label, body, `<button class="btn btn-primary btn-sm" onclick="saveEmailTemplate('${key}')">Save</button>`);
 };
 window.saveEmailTemplate = async (key) => {
-  const body = { subject: qs('#et-subject').value, body: qs('#et-body').value };
+  const body = { subject: qs('#et-subject').value, body: qs('#et-body').value, reply_to: qs('#et-replyto').value };
   try { await api(`/settings/email-templates/${key}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadEmailTemplates(); } catch (err) { toast(err.message, true); }
 };
 window.resetEmailTemplate = async (key) => {
@@ -466,7 +482,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

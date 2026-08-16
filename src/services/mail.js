@@ -64,12 +64,21 @@ function wrap(bodyHtml, brand) {
   </table></body></html>`;
 }
 
+// Org-wide default Reply-To (Settings > Organization), used whenever a send
+// doesn't pass its own replyTo explicitly. Per-template overrides in
+// renderSystemTemplate() take priority over this by passing their own value.
+function defaultReplyTo(orgId) {
+  const row = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'email_reply_to'`).get(orgId || DEFAULT_ORG_ID);
+  return row?.value || null;
+}
+
 // orgId param kept for call-site compatibility but no longer used to look up
 // per-org credentials — see note above. Every email uses the single platform account.
-export async function sendMail(orgId, to, subject, bodyHtml) {
+export async function sendMail(orgId, to, subject, bodyHtml, replyTo) {
   const cfg = CONFIG;
   const brand = brandFor();
   const html = wrap(bodyHtml, brand);
+  const effectiveReplyTo = replyTo || defaultReplyTo(orgId);
   if (!cfg.apiKey) {
     console.log(`[mail:DRY-RUN org=${orgId || 'platform'}] To: ${to} | Subject: ${subject}\n${bodyHtml.replace(/<[^>]+>/g, ' ')}`);
     return { dryRun: true };
@@ -82,7 +91,7 @@ export async function sendMail(orgId, to, subject, bodyHtml) {
       to: [{ email: to }],
       subject,
       htmlContent: html,
-      ...(cfg.replyTo ? { replyTo: { email: cfg.replyTo } } : {}),
+      ...(effectiveReplyTo ? { replyTo: { email: effectiveReplyTo } } : {}),
     }),
   });
   if (!res.ok) {
@@ -109,7 +118,7 @@ export async function sendMail(orgId, to, subject, bodyHtml) {
 export async function sendMailChecked(orgId, to, subject, bodyHtml, meta = {}) {
   let status = 'sent', emailError = null;
   try {
-    const result = await sendMail(orgId, to, subject, bodyHtml);
+    const result = await sendMail(orgId, to, subject, bodyHtml, meta.replyTo);
     if (result?.dryRun) { status = 'dry_run'; emailError = 'Email provider not configured (BREVO_API_KEY missing). No email was actually sent.'; }
   } catch (e) {
     status = 'failed'; emailError = e.message;
@@ -179,7 +188,10 @@ function substitute(text, vars) {
 export function renderSystemTemplate(orgId, key, vars) {
   const def = SYSTEM_EMAIL_TEMPLATES[key];
   if (!def) throw new Error(`Unknown system email template: ${key}`);
-  const override = db.prepare('SELECT subject, body FROM system_email_templates WHERE org_id = ? AND key = ?').get(orgId || DEFAULT_ORG_ID, key);
+  const override = db.prepare('SELECT subject, body, reply_to FROM system_email_templates WHERE org_id = ? AND key = ?').get(orgId || DEFAULT_ORG_ID, key);
   const source = override || def;
-  return { subject: substitute(source.subject, vars), body: substitute(source.body, vars) };
+  // Per-template Reply-To, if this template has its own override; sendMail()
+  // falls back to the org-wide default itself when this comes back null, so
+  // there's no need to resolve that fallback here too.
+  return { subject: substitute(source.subject, vars), body: substitute(source.body, vars), replyTo: override?.reply_to || null };
 }

@@ -130,10 +130,12 @@ router.put('/signature-box/:kind', requireAdmin, (req, res) => {
 // saved override. Only ever returns/accepts the {{var}} placeholder text —
 // the actual substitution happens at send time in renderSystemTemplate().
 router.get('/email-templates', requireAdmin, (req, res) => {
-  const overrides = Object.fromEntries(db.prepare('SELECT key, subject, body FROM system_email_templates WHERE org_id = ?').all(req.user.org_id).map(r => [r.key, r]));
+  const overrides = Object.fromEntries(db.prepare('SELECT key, subject, body, reply_to FROM system_email_templates WHERE org_id = ?').all(req.user.org_id).map(r => [r.key, r]));
+  const defaultReplyTo = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'email_reply_to'`).get(req.user.org_id)?.value || '';
   const templates = Object.entries(SYSTEM_EMAIL_TEMPLATES).map(([key, def]) => ({
     key, label: def.label, vars: def.vars,
     subject: overrides[key]?.subject ?? def.subject, body: overrides[key]?.body ?? def.body,
+    replyTo: overrides[key]?.reply_to || '', defaultReplyTo,
     isCustomized: !!overrides[key], defaultSubject: def.subject, defaultBody: def.body,
   }));
   res.json({ templates });
@@ -142,11 +144,17 @@ router.get('/email-templates', requireAdmin, (req, res) => {
 router.put('/email-templates/:key', requireAdmin, (req, res) => {
   const { key } = req.params;
   if (!SYSTEM_EMAIL_TEMPLATES[key]) return res.status(404).json({ error: 'Unknown template key' });
-  const { subject, body } = req.body || {};
+  const { subject, body, reply_to } = req.body || {};
   if (!subject || !body) return res.status(400).json({ error: 'subject and body are required' });
-  db.prepare(`INSERT INTO system_email_templates (id, org_id, key, subject, body) VALUES (?,?,?,?,?)
-    ON CONFLICT(org_id, key) DO UPDATE SET subject=excluded.subject, body=excluded.body, updated_at=datetime('now')`)
-    .run(uuid(), req.user.org_id, key, subject, body);
+  // reply_to undefined (caller didn't send the field at all) preserves
+  // whatever was already saved; '' explicitly clears it back to "use the
+  // org-wide default" rather than being coerced to null and losing the row's
+  // existing value on a save that only touched subject/body.
+  const existing = db.prepare('SELECT reply_to FROM system_email_templates WHERE org_id = ? AND key = ?').get(req.user.org_id, key);
+  const replyTo = reply_to !== undefined ? (reply_to || null) : (existing?.reply_to || null);
+  db.prepare(`INSERT INTO system_email_templates (id, org_id, key, subject, body, reply_to) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(org_id, key) DO UPDATE SET subject=excluded.subject, body=excluded.body, reply_to=excluded.reply_to, updated_at=datetime('now')`)
+    .run(uuid(), req.user.org_id, key, subject, body, replyTo);
   res.json({ ok: true });
 });
 
