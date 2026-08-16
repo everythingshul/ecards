@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { normalizePhone } from './utils/phone.js';
+import { generateApplicantExternalId } from './utils/externalId.js';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -451,6 +452,9 @@ safeAlter(`ALTER TABLE stores ADD COLUMN source TEXT DEFAULT 'admin'`);
 safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_step INTEGER DEFAULT 0`);
 safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_completed_at TEXT`);
 safeAlter(`ALTER TABLE stores ADD COLUMN agreed_terms_at TEXT`);
+safeAlter(`ALTER TABLE seasons ADD COLUMN max_accepted_applicants INTEGER`);
+safeAlter(`ALTER TABLE shuls ADD COLUMN is_locked INTEGER DEFAULT 0`);
+safeAlter(`ALTER TABLE applicants ADD COLUMN external_id TEXT`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
@@ -474,6 +478,14 @@ normalizePhoneColumn('stores', 'manager_phone');
 normalizePhoneColumn('stores', 'owner_phone');
 normalizePhoneColumn('users', 'phone');
 normalizePhoneColumn('organizations', 'support_phone');
+
+// Backfill a 4-digit external_id for any applicant that predates this
+// column (see routes/applicants.js, which assigns one on every new create).
+{
+  const missing = db.prepare(`SELECT id FROM applicants WHERE external_id IS NULL OR external_id = ''`).all();
+  const setExternalId = db.prepare('UPDATE applicants SET external_id = ? WHERE id = ?');
+  for (const row of missing) setExternalId.run(generateApplicantExternalId(db), row.id);
+}
 
 // ---------------------------------------------------------------------------
 // Seed a default organization + super admin on first boot so the app is usable

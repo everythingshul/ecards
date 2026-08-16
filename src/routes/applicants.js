@@ -8,6 +8,7 @@ import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
+import { generateApplicantExternalId } from '../utils/externalId.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -16,6 +17,18 @@ const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone',
   'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount'];
 
 router.use(auth, requirePermission('applicants'));
+
+// Returns an error string if the given season has a max-accepted-applicants
+// cap set and has already hit it — used to lock out new submissions once a
+// season is full — or null if there's no cap or room remains.
+function seasonCapacityError(seasonId) {
+  if (!seasonId) return null;
+  const season = db.prepare('SELECT max_accepted_applicants FROM seasons WHERE id = ?').get(seasonId);
+  if (!season || season.max_accepted_applicants == null) return null;
+  const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(seasonId).c;
+  if (accepted >= season.max_accepted_applicants) return 'This season has reached its maximum number of accepted applicants and is no longer accepting new applications.';
+  return null;
+}
 
 // Shul-portal users only ever see/act on their own shul's applicants; regardless
 // of any assignment rows, force shul_id = req.user.shul_id for that role.
@@ -39,11 +52,11 @@ router.get('/', (req, res) => {
   if (marital_status) { where += ' AND a.marital_status = ?'; params.push(marital_status); }
   if (home_for_yomtov !== undefined && home_for_yomtov !== '') { where += ' AND a.home_for_yomtov = ?'; params.push(home_for_yomtov === 'true' || home_for_yomtov === '1' ? 1 : 0); }
   if (search) {
-    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR a.email LIKE ? OR a.home_phone LIKE ? OR a.husband_cell LIKE ? OR a.wife_cell LIKE ?)`;
+    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR a.email LIKE ? OR a.home_phone LIKE ? OR a.husband_cell LIKE ? OR a.wife_cell LIKE ? OR a.external_id LIKE ?)`;
     const like = `%${search}%`;
-    params.push(like, like, like, like, like, like);
+    params.push(like, like, like, like, like, like, like);
   }
-  const allowedSort = ['created_at','last_name','approval_status','num_children','card_amount'];
+  const allowedSort = ['created_at','last_name','approval_status','num_children','card_amount','external_id'];
   const sortCol = allowedSort.includes(sort) ? `a.${sort}` : 'a.created_at';
   const sortDir = dir === 'ASC' ? 'ASC' : 'DESC';
   const total = db.prepare(`SELECT COUNT(*) c FROM applicants a ${where}`).get(...params).c;
@@ -63,9 +76,9 @@ router.get('/export', requirePermission('applicants', 'can_export'), (req, res) 
   if (marital_status) { where += ' AND a.marital_status = ?'; params.push(marital_status); }
   if (home_for_yomtov !== undefined && home_for_yomtov !== '') { where += ' AND a.home_for_yomtov = ?'; params.push(home_for_yomtov === 'true' || home_for_yomtov === '1' ? 1 : 0); }
   if (search) {
-    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR a.email LIKE ? OR a.home_phone LIKE ? OR a.husband_cell LIKE ? OR a.wife_cell LIKE ?)`;
+    where += ` AND (a.first_name LIKE ? OR a.last_name LIKE ? OR a.email LIKE ? OR a.home_phone LIKE ? OR a.husband_cell LIKE ? OR a.wife_cell LIKE ? OR a.external_id LIKE ?)`;
     const like = `%${search}%`;
-    params.push(like, like, like, like, like, like);
+    params.push(like, like, like, like, like, like, like);
   }
   const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY a.created_at DESC`).all(...params);
   sendCsv(res, `applicants-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
@@ -79,6 +92,20 @@ router.get('/:id', (req, res) => {
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
   const flags = db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
   res.json({ applicant: redact(applicant, req.permission.hidden_fields), notes, cards, flags });
+});
+
+// Same idea as shuls' /other-seasons: each season's applicant is its own
+// independent record, so match likely repeat applicants across seasons by
+// email (falling back to first+last name) rather than a direct foreign key.
+router.get('/:id/other-seasons', requireAdmin, (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const matches = applicant.email
+    ? db.prepare(`SELECT a.id, a.first_name, a.last_name, a.approval_status, a.season_id, se.name AS season_name FROM applicants a LEFT JOIN seasons se ON se.id = a.season_id
+        WHERE a.org_id = ? AND a.id != ? AND a.email = ? ORDER BY se.created_at DESC`).all(req.user.org_id, applicant.id, applicant.email)
+    : db.prepare(`SELECT a.id, a.first_name, a.last_name, a.approval_status, a.season_id, se.name AS season_name FROM applicants a LEFT JOIN seasons se ON se.id = a.season_id
+        WHERE a.org_id = ? AND a.id != ? AND a.first_name = ? AND a.last_name = ? ORDER BY se.created_at DESC`).all(req.user.org_id, applicant.id, applicant.first_name, applicant.last_name);
+  res.json({ matches });
 });
 
 router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
@@ -95,12 +122,14 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (shul.is_paused) return res.status(423).json({ error: 'This shul account is paused and cannot submit applicants' });
   const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status != 'rejected'`).get(shulId).c;
   if (shul.slots_allocated && used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
+  const capError = seasonCapacityError(shul.season_id);
+  if (capError) return res.status(400).json({ error: capError });
 
   const id = uuid();
-  db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
+  db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
       address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?)`)
-    .run(id, req.user.org_id, shulId, shul.season_id, b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?)`)
+    .run(id, req.user.org_id, shulId, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
       b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, b.comments || '',
       req.user.role === 'shul' ? 'shul_upload' : 'admin');
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
@@ -131,6 +160,10 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant has an unresolved duplicate flag' });
   const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(applicant.season_id);
+  if (applicant.approval_status !== 'approved' && season?.max_accepted_applicants != null) {
+    const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
+    if (accepted >= season.max_accepted_applicants) return res.status(400).json({ error: `This season's cap of ${season.max_accepted_applicants} accepted applicant(s) has already been reached.` });
+  }
   const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
   db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
     .run(req.user.id, amount, applicant.id);
@@ -154,16 +187,20 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
 router.post('/mass-approve', requireAdmin, (req, res) => {
   const { ids, card_amount } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
-  let approved = 0, skipped = 0;
+  let approved = 0, skipped = 0, capReached = false;
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant || applicant.is_paused) { skipped++; continue; }
     const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(applicant.season_id);
+    if (applicant.approval_status !== 'approved' && season?.max_accepted_applicants != null) {
+      const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
+      if (accepted >= season.max_accepted_applicants) { skipped++; capReached = true; continue; }
+    }
     const amount = card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
     db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`).run(req.user.id, amount, id);
     approved++;
   }
-  res.json({ approved, skipped });
+  res.json({ approved, skipped, capReached });
 });
 
 router.post('/:id/notes', (req, res) => {
@@ -200,12 +237,14 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
       if (!shul) { errors.push({ row: i + 2, error: `Shul not found: "${r.shul_name || ''}" (must match an existing shul name exactly)` }); continue; }
     }
     if (shul.is_paused) { errors.push({ row: i + 2, error: `Shul "${shul.name_en}" is paused` }); continue; }
+    const capError = seasonCapacityError(shul.season_id);
+    if (capError) { errors.push({ row: i + 2, error: capError }); continue; }
     try {
       const id = uuid();
-      db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
+      db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
           address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload')`)
-        .run(id, req.user.org_id, shul.id, shul.season_id, r.first_name, r.last_name, r.marital_status || '', normalizePhone(r.home_phone || ''), normalizePhone(r.husband_cell || ''), normalizePhone(r.wife_cell || ''), r.email || '',
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload')`)
+        .run(id, req.user.org_id, shul.id, shul.season_id, generateApplicantExternalId(db), r.first_name, r.last_name, r.marital_status || '', normalizePhone(r.home_phone || ''), normalizePhone(r.husband_cell || ''), normalizePhone(r.wife_cell || ''), r.email || '',
           r.address || '', r.city || '', r.state || '', r.zip || '', r.preferred_contact_method || '', r.preferred_number || '', +r.num_children || 0,
           /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '');
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);

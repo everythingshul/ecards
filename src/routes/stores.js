@@ -78,6 +78,21 @@ router.get('/:id', (req, res) => {
   res.json({ store: redact(store, req.permission.hidden_fields), billing, transactionTotals });
 });
 
+// Stores are one persistent record reused every season (unlike shuls and
+// applicants, which get a fresh record each season) — so "other seasons"
+// for a store means its real per-season activity, derived from the
+// transaction ledger rather than a separate status table.
+router.get('/:id/season-history', requireAdmin, (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  const seasons = db.prepare(`SELECT c.season_id, se.name AS season_name, COUNT(*) AS txn_count,
+      COALESCE(SUM(CASE WHEN ct.amount < 0 THEN -ct.amount ELSE 0 END),0) AS total_purchases,
+      COALESCE(SUM(CASE WHEN ct.type='refund' THEN ct.amount ELSE 0 END),0) AS total_refunds
+    FROM card_transactions ct JOIN cards c ON c.id = ct.card_id LEFT JOIN seasons se ON se.id = c.season_id
+    WHERE ct.store_id = ? GROUP BY c.season_id ORDER BY se.created_at DESC`).all(store.id);
+  res.json({ seasons });
+});
+
 router.post('/', requireAdmin, (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).json({ error: 'Store name is required' });

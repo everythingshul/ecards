@@ -23,34 +23,36 @@ renderShell('/admin/applicants.html', `
       <button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button>
     </div>
   </div>
+  <div id="cap-banner"></div>
   <div class="toolbar">
     <input id="f-search" placeholder="Search name, phone, email…">
     <select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
     <select id="f-marital"><option value="">Any marital status</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option><option value="divorced">Divorced</option></select>
     <select id="f-yomtov"><option value="">Home for Yom Tov (any)</option><option value="1">Yes</option><option value="0">No</option></select>
+    <select id="f-season"></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
       <thead><tr>
         <th style="width:34px"><input type="checkbox" id="chk-all"></th>
-        <th data-sort="last_name">Name</th><th>Shul</th><th>Marital</th><th>Contact</th><th>Children</th>
+        <th data-sort="external_id">ID</th><th data-sort="last_name">Name</th><th>Shul</th><th>Marital</th><th>Contact</th><th>Children</th>
         <th>Home Yom Tov</th><th data-sort="approval_status">Status</th><th data-sort="card_amount">Card $</th><th data-sort="created_at">Submitted</th><th></th>
       </tr></thead>
-      <tbody id="tbody"><tr><td colspan="11" class="empty-state">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td colspan="12" class="empty-state">Loading…</td></tr></tbody>
     </table>
   </div>
   <div class="paginator" id="pager"></div>
 `);
 
-let state = { search:'', status:'', marital_status:'', home_for_yomtov:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
+let state = { search:'', status:'', marital_status:'', home_for_yomtov:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
 let selected = new Set();
 
 async function load() {
   const params = new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([,v]) => v !== '')));
   try {
     const { applicants, total } = await api('/applicants?' + params);
-    qs('#tbody').innerHTML = applicants.length ? applicants.map(rowHtml).join('') : '<tr><td colspan="11" class="empty-state">No applicants found.</td></tr>';
+    qs('#tbody').innerHTML = applicants.length ? applicants.map(rowHtml).join('') : '<tr><td colspan="12" class="empty-state">No applicants found.</td></tr>';
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
     qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
     qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
@@ -67,6 +69,7 @@ function contactLine(a) {
 function rowHtml(a) {
   return `<tr>
     <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}" ${a.is_paused ? 'disabled' : ''}></td>
+    <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><code>${esc(a.external_id||'')}</code></td>
     <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused ? ' ' + badge('paused','paused') : ''}</td>
     <td onclick="openApplicant('${a.id}')" style="cursor:pointer">${esc(a.shul_name||'')}</td>
     <td>${esc(a.marital_status||'')}</td>
@@ -93,6 +96,7 @@ qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
 qs('#f-yomtov').addEventListener('change', () => { state.home_for_yomtov = qs('#f-yomtov').value; state.page = 1; load(); });
+qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
 qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
   const key = th.dataset.sort;
   state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
@@ -111,7 +115,7 @@ qs('#btn-mass-approve').addEventListener('click', async () => {
     const body = { ids: Array.from(selected) };
     if (amount !== null && amount !== '') body.card_amount = +amount;
     const r = await api('/applicants/mass-approve', { method: 'POST', body });
-    toast(`Approved ${r.approved}, skipped ${r.skipped} (paused)`);
+    toast(`Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`);
     selected.clear(); load();
   } catch (err) { toast(err.message, true); }
 });
@@ -123,7 +127,10 @@ async function openApplicant(id) {
       <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button></div>
       <div id="atab-info">
         <div class="grid-2">
+          <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>
           <div><strong>Shul</strong><br>${esc(a.shul_name||'')}</div>
+        </div>
+        <div class="grid-2">
           <div><strong>Status</strong><br>${badge(a.approval_status, a.approval_status)} ${a.is_paused ? badge('paused','paused') : ''}</div>
         </div>
         <div class="divider"></div>
@@ -161,6 +168,7 @@ async function openApplicant(id) {
         <div id="atab-documents-list"><p class="small-muted">Loading…</p></div>
       </div>`;
     const footer = `
+      <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Applicant', '/applicants/${id}/other-seasons', 'openApplicant')">View Other Seasons</button>
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('applicant','${id}','${esc(a.first_name+' '+a.last_name).replace(/'/g,"\\'")}')">+ Add Task</button>
       ${a.is_paused ? '' : (a.approval_status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectApplicant('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveApplicant('${id}')">Approve</button>` : '')}
       <button class="btn btn-primary btn-sm" onclick="saveApplicant('${id}')">Save</button>`;
@@ -257,7 +265,14 @@ window.compareDup = (flagId) => {
 };
 window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
-load();
+populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
+api('/seasons/active').then(({ season }) => {
+  if (!season || season.max_accepted_applicants == null) return;
+  qs('#cap-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${season.is_full ? 'border-color:var(--danger)' : ''}">
+    <strong>${esc(season.name)} capacity:</strong> ${season.accepted_count} of ${season.max_accepted_applicants} accepted (${season.remaining} remaining)
+    ${season.is_full ? ' <strong style="color:var(--danger)">This season is full — new applications are locked.</strong>' : ''}
+  </div>`;
+}).catch(() => {});
 </script>
 </body>
 </html>

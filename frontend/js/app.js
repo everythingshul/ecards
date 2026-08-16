@@ -147,6 +147,39 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 function closeModal() { document.getElementById('ec-modal')?.remove(); }
 
+// Fills a <select id="selectId"> with every season plus an "All Seasons"
+// option, selects the currently active season by default, and returns its
+// id (or '' if there is no active season yet) so the caller can seed its
+// list-page filter state before the first load().
+async function populateSeasonFilter(selectId) {
+  try {
+    const [{ seasons }, { season: active }] = await Promise.all([api('/seasons'), api('/seasons/active')]);
+    const el = qs('#' + selectId);
+    if (!el) return active?.id || '';
+    el.innerHTML = `<option value="">All Seasons</option>` + seasons.map(s => `<option value="${s.id}" ${active && s.id === active.id ? 'selected' : ''}>${esc(s.name)}${active && s.id === active.id ? ' (active)' : ''}</option>`).join('');
+    return active?.id || '';
+  } catch { return ''; }
+}
+
+// Shared "View Other Seasons" popup for shul/applicant/store detail views.
+// Shuls and applicants get a fresh record each season, so `endpoint` returns
+// likely matches in other seasons by identifying field; stores are one
+// persistent record, so their endpoint returns real per-season activity
+// instead. Either shape renders fine here since both return a small array.
+async function showOtherSeasons(entityLabel, endpoint, reopen) {
+  try {
+    const data = await api(endpoint);
+    const rows = data.matches || data.seasons || [];
+    const body = rows.length ? `<table><thead><tr><th>Season</th><th>${data.matches ? 'Status' : 'Activity'}</th><th></th></tr></thead><tbody>
+      ${rows.map(r => data.matches
+        ? `<tr><td>${esc(r.season_name || 'Unknown season')}</td><td>${badge(r.status || r.approval_status || '', r.status || r.approval_status || '')}</td>
+             <td><button class="btn btn-sm btn-outline" onclick="closeModal(); ${reopen}('${r.id}')">Open</button></td></tr>`
+        : `<tr><td>${esc(r.season_name || 'Unknown season')}</td><td>${r.txn_count} transaction(s), $${(+r.total_purchases).toFixed(2)} in purchases</td><td></td></tr>`
+      ).join('')}</tbody></table>` : `<p class="small-muted">No other seasons found for this ${entityLabel} yet.</p>`;
+    openModal(`${entityLabel}: Other Seasons`, body, `<button class="btn btn-outline btn-sm" onclick="closeModal()">Close</button>`);
+  } catch (err) { toast(err.message, true); }
+}
+
 // Google Places address autocomplete — built on the new Places API's
 // AutocompleteSuggestion/Place classes (google.maps.places.Autocomplete, the
 // old widget, needs the legacy "Places API" enabled in addition to "Places

@@ -93,7 +93,7 @@ async function openStore(id) {
       <div id="stab-documents" style="display:none">
         <div id="stab-documents-list"><p class="small-muted">Loading…</p></div>
       </div>`;
-    const footer = `<button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button><button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
+    const footer = `<button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Store', '/stores/${id}/season-history', 'openStore')">View Other Seasons</button><button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button><button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
     openModal(s.name, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');

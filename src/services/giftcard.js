@@ -50,13 +50,16 @@ async function call(orgId, path, opts = {}) {
   return body;
 }
 
-// Assign the next available card to an applicant. Returns { providerCardId, maskedNumber }.
-export async function assignCard(orgId, { applicantId, amount }) {
+// Assign the next available card to an applicant. externalId is the
+// applicant's 4-digit external_id (see utils/externalId.js) — disccardpromos
+// uses this as its own external reference for the card, in place of our
+// internal UUID. Returns { providerCardId, maskedNumber }.
+export async function assignCard(orgId, { applicantId, externalId, amount }) {
   if (isMockMode(orgId)) {
     const last4 = String(Math.floor(1000 + Math.random() * 9000));
     return { providerCardId: `mock_${randomUUID()}`, maskedNumber: `**** **** **** ${last4}`, amount };
   }
-  const body = await call(orgId, '/cards/assign', { method: 'POST', body: JSON.stringify({ external_ref: applicantId, amount }) });
+  const body = await call(orgId, '/cards/assign', { method: 'POST', body: JSON.stringify({ external_ref: externalId || applicantId, amount }) });
   return { providerCardId: body.card_id, maskedNumber: body.masked_number, amount: body.amount ?? amount };
 }
 

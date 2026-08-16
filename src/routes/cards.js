@@ -64,7 +64,7 @@ router.post('/assign', requireAdmin, async (req, res) => {
   if (applicant.approval_status !== 'approved') return res.status(400).json({ error: 'Applicant must be approved before a card is assigned' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant is paused pending duplicate resolution' });
   const finalAmount = amount ?? applicant.card_amount ?? 0;
-  const result = await giftcard.assignCard(req.user.org_id, { applicantId: applicant.id, amount: finalAmount });
+  const result = await giftcard.assignCard(req.user.org_id, { applicantId: applicant.id, externalId: applicant.external_id, amount: finalAmount });
   const id = uuid();
   db.prepare(`INSERT INTO cards (id, org_id, applicant_id, season_id, card_number_masked, provider_card_id, status, amount, assigned_at)
     VALUES (?,?,?,?,?,?,'assigned',?,datetime('now'))`)

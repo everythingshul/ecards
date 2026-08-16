@@ -144,17 +144,23 @@ async function loadSeasons() {
       <div class="flex-between"><strong>${esc(s.name)}</strong>${s.is_active ? badge('active','active') : badge('inactive','rejected')}</div>
       <div class="grid-2" style="margin-top:10px">
         <div><label style="margin-top:0">Default Card Amount</label><input type="number" step="0.01" value="${s.default_card_amount ?? 0}" onchange="updateSeason('${s.id}',{default_card_amount:+this.value})"></div>
-        <div><label style="margin-top:0">Active</label><select onchange="updateSeason('${s.id}',{is_active:this.value==='1'})"><option value="1" ${s.is_active?'selected':''}>Yes</option><option value="0" ${!s.is_active?'selected':''}>No</option></select></div>
+        <div><label style="margin-top:0">Season Status</label>${s.is_active ? `<button class="btn btn-sm btn-outline" disabled>This is the active season</button>` : `<button class="btn btn-sm btn-outline" onclick="updateSeason('${s.id}',{is_active:true})">Set as Active Season</button>`}</div>
+      </div>
+      <div class="grid-2" style="margin-top:10px">
+        <div><label style="margin-top:0">Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input type="number" min="0" value="${s.max_accepted_applicants ?? ''}" placeholder="Unlimited" onchange="updateSeason('${s.id}',{max_accepted_applicants: this.value === '' ? null : +this.value})"></div>
+        <div><label style="margin-top:0">Accepted So Far</label><div style="padding:9px 0">${s.accepted_count}${s.max_accepted_applicants != null ? ` of ${s.max_accepted_applicants} (${s.remaining} remaining)${s.is_full ? ' ' + badge('full','rejected') : ''}` : ' (no cap set)'}</div></div>
       </div>
     </div>`).join('') || '<p class="small-muted">No seasons yet.</p>';
 }
 window.updateSeason = async (id, body) => { try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); loadSeasons(); } catch (err) { toast(err.message, true); } };
 window.openNewSeason = () => {
-  const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">`;
+  const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">
+    <label>Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input id="s-cap" type="number" min="0" placeholder="Unlimited">`;
   openModal('New Season', body, `<button class="btn btn-primary btn-sm" onclick="createSeason()">Create</button>`);
 };
 window.createSeason = async () => {
-  try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
+  const cap = qs('#s-cap').value;
+  try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value, max_accepted_applicants: cap === '' ? null : +cap } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
 };
 
 async function loadFields() {

@@ -25,6 +25,7 @@ renderShell('/admin/shuls.html', `
   <div class="toolbar">
     <input id="f-search" placeholder="Search name, city, Rav, Gabai…">
     <select id="f-status"><option value="">All statuses</option><option value="submitted">Submitted</option><option value="contract_sent">Contract Sent</option><option value="contract_signed">Contract Signed</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
+    <select id="f-season"></select>
     <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
   </div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -39,11 +40,11 @@ renderShell('/admin/shuls.html', `
   <div class="paginator" id="pager"></div>
 `);
 
-let state = { search:'', status:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
+let state = { search:'', status:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
 if (new URLSearchParams(location.search).get('dup') === '1') showDuplicates();
 
 async function load() {
-  const params = new URLSearchParams({ search: state.search, status: state.status, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize });
+  const params = new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize });
   try {
     const { shuls, total } = await api('/shuls?' + params);
     if (!shuls.length) { qs('#tbody').innerHTML = '<tr><td colspan="9" class="empty-state">No shuls found.</td></tr>'; }
@@ -70,6 +71,7 @@ function rowHtml(s) {
 
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
+qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
 qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
   const key = th.dataset.sort;
   state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
@@ -80,7 +82,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 qs('#btn-template').addEventListener('click', () => downloadAuthed('/shuls/import/template', 'shul_import_template.csv'));
 qs('#btn-new').addEventListener('click', () => openShulForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
-qs('#btn-export').addEventListener('click', () => downloadAuthed('/shuls/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'shuls.csv'));
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/shuls/export?' + new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id }), 'shuls.csv'));
 qs('#f-dupes').addEventListener('click', showDuplicates);
 
 async function openShul(id) {
@@ -117,6 +119,7 @@ async function openShul(id) {
       </div>
     `;
     const footer = `
+      <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Shul', '/shuls/${id}/other-seasons', 'openShul')">View Other Seasons</button>
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('shul','${id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">+ Add Task</button>
       ${shul.is_paused ? `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',false)">Unpause</button>` : `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',true)">Pause</button>`}
       ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : `<button class="btn btn-outline btn-sm" onclick="resendWelcome('${id}')">Resend Welcome Email</button>`}
@@ -236,7 +239,7 @@ window.compareDup = (flagId) => {
 };
 window.resolveDup = async (id, action) => { try { await api(`/shuls/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
-load();
+populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
 </script>
 </body>
 </html>

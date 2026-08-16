@@ -168,6 +168,22 @@ router.get('/:id', (req, res) => {
   res.json({ shul: redact(shul, req.permission.hidden_fields), notes, contract, applicants, flags });
 });
 
+// Each season's application is its own independent shul record (spec: "treat
+// every season as an entire new thing"), so there's no direct foreign key
+// tying one year's record to the next. This finds likely matches for "the
+// same shul" in other seasons by the identifying fields most likely to stay
+// stable year over year (Gabai email, falling back to the shul's name).
+router.get('/:id/other-seasons', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const matches = shul.gabai_email
+    ? db.prepare(`SELECT sh.id, sh.name_en, sh.status, sh.season_id, se.name AS season_name FROM shuls sh LEFT JOIN seasons se ON se.id = sh.season_id
+        WHERE sh.org_id = ? AND sh.id != ? AND sh.gabai_email = ? ORDER BY se.created_at DESC`).all(req.user.org_id, shul.id, shul.gabai_email)
+    : db.prepare(`SELECT sh.id, sh.name_en, sh.status, sh.season_id, se.name AS season_name FROM shuls sh LEFT JOIN seasons se ON se.id = sh.season_id
+        WHERE sh.org_id = ? AND sh.id != ? AND sh.name_en = ? ORDER BY se.created_at DESC`).all(req.user.org_id, shul.id, shul.name_en);
+  res.json({ matches });
+});
+
 router.post('/', requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
