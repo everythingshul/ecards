@@ -158,12 +158,23 @@ async function loadTemplates() {
       </div>`).join('') : '<p class="small-muted">No templates yet.</p>';
   } catch (err) { toast(err.message, true); }
 }
+// Same variable names ENTITY_TEMPLATE_VARS (app.js) fills in automatically
+// when this template is picked from an applicant or shul profile's quick-send
+// box — shown here so admins know what to type while building the template,
+// without having to go find a profile first to check.
+function availableVarsHint() {
+  return `<p class="small-muted" style="margin-top:6px">
+    <strong>When sent from an applicant profile:</strong> ${ENTITY_TEMPLATE_VARS.applicant.map(([k,l]) => `<code title="${esc(l)}">{{${k}}}</code>`).join(' ')}<br>
+    <strong>When sent from a shul profile:</strong> ${ENTITY_TEMPLATE_VARS.shul.map(([k,l]) => `<code title="${esc(l)}">{{${k}}}</code>`).join(' ')}
+  </p>`;
+}
 function templateFormBody(t = {}) {
   return `
     <label>Name <span class="req">*</span></label><input id="tp-name" value="${esc(t.name||'')}">
     <label>Category <span class="small-muted">(optional)</span></label><input id="tp-category" value="${esc(t.category||'')}">
     <label>Message <span class="req">*</span> <span class="small-muted">(use {{variable}} placeholders as needed)</span></label>
     <textarea id="tp-body" rows="5">${esc(t.body||'')}</textarea>
+    ${availableVarsHint()}
   `;
 }
 qs('#btn-new-template').addEventListener('click', () => {

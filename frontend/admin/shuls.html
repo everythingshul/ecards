@@ -185,7 +185,7 @@ async function openShul(id) {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
       ['info','notes','contract','applicants','messages'].forEach(t => qs('#tab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
-    loadMessagesTab('shul', id, 'tab-messages-list', shul.gabai_cell || shul.ruv_phone || '', shul.gabai_email || '');
+    loadMessagesTab('shul', id, 'tab-messages-list', shul.gabai_cell || shul.ruv_phone || '', shul.gabai_email || '', shul);
   } catch (err) { toast(err.message, true); }
 }
 

@@ -629,23 +629,63 @@ window.retractDocumentSignature = async (docId, entityType, entityId, containerI
 };
 window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 
+// {{variable}} names filled in automatically when sending from a specific
+// applicant/shul profile — same substitution style as the Email/SMS Center's
+// own POST /send (routes/emails.js, routes/sms.js), done client-side here
+// since the quick-send box already has the live entity record in hand.
+// Exported by name so the Template editors (Email Center / SMS Center) can
+// show admins what's available while building a template (see emailVarsHint/
+// wireQuickSendTemplate below), without duplicating this list.
+const ENTITY_TEMPLATE_VARS = {
+  applicant: [['first_name', 'First Name'], ['last_name', 'Last Name'], ['shul_name', 'Shul Name'], ['email', 'Email'], ['external_id', 'Applicant ID']],
+  shul: [['name', 'Shul Name'], ['rav_first_name', 'Rav First Name'], ['rav_last_name', 'Rav Last Name'], ['gabai_first_name', 'Gabai First Name'], ['gabai_last_name', 'Gabai Last Name'], ['email', 'Gabai Email']],
+};
+function buildEntityVariables(entityType, entity) {
+  if (!entity) return {};
+  if (entityType === 'applicant') return { first_name: entity.first_name || '', last_name: entity.last_name || '', shul_name: entity.shul_name || '', email: entity.email || '', external_id: entity.external_id || '' };
+  if (entityType === 'shul') return { name: entity.name_en || '', rav_first_name: entity.ruv_first_name || '', rav_last_name: entity.ruv_last_name || '', gabai_first_name: entity.gabai_first_name || '', gabai_last_name: entity.gabai_last_name || '', email: entity.gabai_email || '' };
+  return {};
+}
+function substituteVars(text, vars) { return String(text || '').replace(/\{\{(\w+)\}\}/g, (m, key) => (vars && vars[key] != null ? vars[key] : m)); }
+function varsHintHtml(entityType, vars) {
+  return ENTITY_TEMPLATE_VARS[entityType].map(([key, label]) => `<code title="${esc(label)}">{{${key}}}</code>${vars[key] ? ` → ${esc(vars[key])}` : ''}`).join('&nbsp;&nbsp;');
+}
+
 // Shared SMS+Email history/quick-send tab for applicant & shul detail modals.
 // entityType is 'applicant' or 'shul' — the route prefix is just that plus 's'.
-async function loadMessagesTab(entityType, entityId, containerId, defaultPhone, defaultEmail) {
+// `entity` is the full record already fetched by the caller (openApplicant's
+// `a` / openShul's `shul`) — used only to fill in {{variables}} when a
+// template is picked, so it's optional and everything else still works
+// without it.
+async function loadMessagesTab(entityType, entityId, containerId, defaultPhone, defaultEmail, entity) {
   const container = qs('#' + containerId);
   container.innerHTML = '<p class="small-muted">Loading…</p>';
   const prefix = `/${entityType}s/${entityId}`;
   const safePhone = esc(defaultPhone || '').replace(/'/g, "\\'");
   const safeEmail = esc(defaultEmail || '').replace(/'/g, "\\'");
+  // Reload-after-send calls (sendQuickSms/sendQuickEmail below) don't have
+  // the entity record handy, so fall back to what the first load cached.
+  entity = entity || window.__msgTemplates?.[entityId]?.entity;
+  const vars = buildEntityVariables(entityType, entity);
   try {
-    const { sms, emails } = await api(`${prefix}/messages`);
+    const [{ sms, emails }, smsTemplates, emailTemplates] = await Promise.all([
+      api(`${prefix}/messages`),
+      api('/sms/templates/all').then(r => r.templates).catch(() => []),
+      api('/emails/templates/all').then(r => r.templates).catch(() => []),
+    ]);
+    window.__msgTemplates = window.__msgTemplates || {};
+    window.__msgTemplates[entityId] = { sms: smsTemplates, email: emailTemplates, vars, entity };
+    const smsTemplateOptions = `<option value="">No template — write your own</option>` + smsTemplates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    const emailTemplateOptions = `<option value="">No template — write your own</option>` + emailTemplates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     container.innerHTML = `
       <div class="card" style="margin-bottom:14px">
         <strong>Send SMS</strong>
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
           <div style="flex:1;min-width:140px"><label style="margin-top:0">To</label><input id="msg-sms-to-${entityId}" value="${esc(defaultPhone || '')}" placeholder="phone number"></div>
         </div>
+        ${smsTemplates.length ? `<label>Use Template</label><select id="msg-sms-template-${entityId}" onchange="applyQuickSendTemplate('sms','${entityType}','${entityId}')">${smsTemplateOptions}</select>` : ''}
         <label>Message</label><textarea id="msg-sms-body-${entityId}" rows="2" placeholder="Type a message…"></textarea>
+        <p class="small-muted" style="margin-top:4px">Available variables: ${varsHintHtml(entityType, vars)}</p>
         <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="sendQuickSms('${entityType}','${entityId}','${containerId}','${safePhone}','${safeEmail}')">Send SMS</button>
       </div>
       <div style="margin-bottom:16px">${sms.length ? sms.map(m => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
@@ -659,8 +699,10 @@ async function loadMessagesTab(entityType, entityId, containerId, defaultPhone, 
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
           <div style="flex:1;min-width:160px"><label style="margin-top:0">To</label><input id="msg-email-to-${entityId}" value="${esc(defaultEmail || '')}" placeholder="email address"></div>
         </div>
+        ${emailTemplates.length ? `<label>Use Template</label><select id="msg-email-template-${entityId}" onchange="applyQuickSendTemplate('email','${entityType}','${entityId}')">${emailTemplateOptions}</select>` : ''}
         <label>Subject</label><input id="msg-email-subject-${entityId}" placeholder="Subject">
         <label>Message</label><textarea id="msg-email-body-${entityId}" rows="3" placeholder="Type a message…"></textarea>
+        <p class="small-muted" style="margin-top:4px">Available variables: ${varsHintHtml(entityType, vars)}</p>
         <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="sendQuickEmail('${entityType}','${entityId}','${containerId}','${safePhone}','${safeEmail}')">Send Email</button>
       </div>
       <div>${emails.length ? emails.map(m => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
@@ -671,6 +713,18 @@ async function loadMessagesTab(entityType, entityId, containerId, defaultPhone, 
     `;
   } catch (err) { container.innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
 }
+window.applyQuickSendTemplate = (kind, entityType, entityId) => {
+  const store = window.__msgTemplates?.[entityId];
+  if (!store) return;
+  if (kind === 'sms') {
+    const t = store.sms.find(x => x.id === qs(`#msg-sms-template-${entityId}`).value);
+    qs(`#msg-sms-body-${entityId}`).value = t ? substituteVars(t.body, store.vars) : '';
+  } else {
+    const t = store.email.find(x => x.id === qs(`#msg-email-template-${entityId}`).value);
+    qs(`#msg-email-subject-${entityId}`).value = t ? substituteVars(t.subject, store.vars) : '';
+    qs(`#msg-email-body-${entityId}`).value = t ? substituteVars(t.body_html, store.vars) : '';
+  }
+};
 window.sendQuickSms = async (entityType, entityId, containerId, defaultPhone, defaultEmail) => {
   const to = qs(`#msg-sms-to-${entityId}`).value.trim();
   const body = qs(`#msg-sms-body-${entityId}`).value.trim();

@@ -209,7 +209,7 @@ async function openApplicant(id) {
       ['info','notes','cards','documents','messages'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
     loadDocumentsTab('applicant', id, 'atab-documents-list', a.email || '');
-    loadMessagesTab('applicant', id, 'atab-messages-list', a.husband_cell || a.wife_cell || a.home_phone || '', a.email || '');
+    loadMessagesTab('applicant', id, 'atab-messages-list', a.husband_cell || a.wife_cell || a.home_phone || '', a.email || '', a);
   } catch (err) { toast(err.message, true); }
 }
 
