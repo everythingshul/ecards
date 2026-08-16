@@ -186,6 +186,29 @@ variants (`from`/`From`/`sender`/`msisdn`, `body`/`Body`/`text`/`message`)
 since the real provider's payload shape isn't known yet, and always
 responds `200` so providers don't retry.
 
+## Updates (`/admin/updates.html`, formerly the shul portal's "Contract" page)
+Admin-broadcast announcements to specific shuls/stores or whole groups
+(`all_shuls` / `all_stores`), with optional image/PDF attachments. Every
+recipient gets both an email (`sendMailChecked`) and a portal notification —
+`update_recipients` rows track per-recipient email status and `read_at`.
+`POST /api/updates` accepts multipart form data (`title`, `body`,
+`recipients` as a JSON string `{recipients:[{entity_type,entity_id}],
+groups:[...]}`, and `files[]`); attachments are written to
+`DATA_DIR/updates/` and statically served from `/uploads/updates/` (same
+pattern as `/uploads/contracts` and `/uploads/logos` — no auth on the file
+itself, only on the admin API that created it).
+
+The shul portal's nav item that used to be "Contract" (a narrow
+contract-status viewer at `shul-portal/contract.html`) is now "Updates"
+(`shul-portal/updates.html`) — it still shows the contract-status card at
+the top, with the Updates inbox below it. The store portal gets a matching
+`store-portal/updates.html` with just the inbox (stores never had a
+contract). Both portal pages call the shared `loadUpdatesInbox(containerId)`
+helper in `app.js`, which hits `GET /api/updates/inbox/mine` and
+`POST /api/updates/inbox/:recipientId/read`. The header nav shows an unread
+count badge next to "Updates" for shul/store roles (`GET
+/api/updates/inbox/unread-count`), computed on every `renderShell()` call.
+
 ## Downloads / exports — always use `downloadAuthed()`
 This app has no cookie session, only a Bearer token in `localStorage`. A
 plain `location.href = '/api/...'` navigation sends **no** Authorization
@@ -335,6 +358,14 @@ before guessing from docs.
   page, since nothing in that block runs, not even `renderShell()`. This bit
   us twice (Applicants, Cards pages). Run the frontend syntax audit below
   after editing any `<script>` block before considering the change done.
+- **Layout is a horizontal header, not a sidebar.** `renderShell()` in
+  `app.js` renders one `<header class="app-header">` (brand, a
+  horizontally-scrollable nav strip, user email + sign out) followed by
+  `.content` — there is no `.sidebar`/`.main` split anymore (that was tried
+  first and replaced once the nav grew past ~10 items). On narrow screens
+  the nav collapses behind a hamburger (`#header-menu-btn` toggles `.open`
+  on `#header-nav`). `NAV_ITEMS`/`SHUL_NAV`/`STORE_NAV` are still the single
+  source of truth for what shows up, per role.
 
 ## Brand assets & two-palette theming
 Real logo files are checked in at `frontend/img/`: `org-logo.png` (the

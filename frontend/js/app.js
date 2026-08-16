@@ -84,17 +84,19 @@ const NAV_ITEMS = [
   { href: '/admin/forms.html', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
   { href: '/admin/emails.html', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
   { href: '/admin/sms.html', label: 'SMS Center', icon: '&#9670;', resource: 'sms' },
+  { href: '/admin/updates.html', label: 'Updates', icon: '&#9670;', resource: 'updates' },
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
 ];
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard.html', label: 'My Applicants' },
   { href: '/shul-portal/upload.html', label: 'Bulk Upload' },
-  { href: '/shul-portal/contract.html', label: 'Contract' },
+  { href: '/shul-portal/updates.html', label: 'Updates' },
 ];
 const STORE_NAV = [
   { href: '/store-portal/dashboard.html', label: 'Overview' },
   { href: '/store-portal/billing.html', label: 'Billing' },
+  { href: '/store-portal/updates.html', label: 'Updates' },
 ];
 
 function renderShell(activeHref, contentHtml) {
@@ -103,34 +105,28 @@ function renderShell(activeHref, contentHtml) {
   let items = NAV_ITEMS;
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
-  const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}" title="${esc(i.label)}">${i.icon ? `<span class="nav-icon">${i.icon}</span>` : ''}<span class="nav-label">${esc(i.label)}</span></a>`).join('');
-  const collapsed = localStorage.getItem('sidebarCollapsed') === '1';
+  const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}" title="${esc(i.label)}" data-href="${i.href}"><span class="nav-label">${esc(i.label)}</span></a>`).join('');
   document.body.innerHTML = `
     <div class="app-shell">
-      <aside class="sidebar${collapsed ? ' collapsed' : ''}" id="sidebar">
-        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" stroke-width="2"/></svg>
-        </button>
-        <div class="brand"><img src="/img/org-logo.png" alt="Organization logo" style="height:36px;width:auto"><div class="brand-name">Kipas Hair BP<br><span style="font-size:11px;color:var(--sidebar-muted);">Platform</span></div></div>
-        <nav>${navHtml}</nav>
-        <div class="user-box">
-          <div class="user-box-detail">${esc(user?.first_name || '')} ${esc(user?.last_name || '')}<br><span style="text-transform:capitalize">${esc((role || '').replace('_', ' '))}</span></div>
+      <header class="app-header" id="app-header">
+        <div class="brand"><img src="/img/org-logo.png" alt="Organization logo"><div class="brand-name">Kipas Hair BP<span>Platform</span></div></div>
+        <button class="header-menu-btn" id="header-menu-btn" aria-label="Toggle menu">&#9776;</button>
+        <nav id="header-nav">${navHtml}</nav>
+        <div class="header-user">
+          <span class="header-user-email">${esc(user?.email || '')}</span>
           <button onclick="Auth.logout()">Sign out</button>
         </div>
-      </aside>
-      <div class="main">
-        <div class="topbar">
-          <button class="btn btn-outline btn-sm" style="display:none" id="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
-          <div></div>
-          <div class="small-muted">${esc(user?.email || '')}</div>
-        </div>
-        <div class="content" id="content">${contentHtml}</div>
-      </div>
+      </header>
+      <div class="content" id="content">${contentHtml}</div>
     </div>`;
-  qs('#sidebar-collapse-btn').addEventListener('click', () => {
-    const isCollapsed = qs('#sidebar').classList.toggle('collapsed');
-    localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
-  });
+  qs('#header-menu-btn').addEventListener('click', () => qs('#header-nav').classList.toggle('open'));
+  if (role === 'shul' || role === 'store') {
+    api('/updates/inbox/unread-count').then(({ count }) => {
+      if (!count) return;
+      const link = document.querySelector('nav a[data-href$="/updates.html"]');
+      if (link) link.querySelector('.nav-label').innerHTML += ` ${badge(String(count), 'active')}`;
+    }).catch(() => {});
+  }
 }
 
 function openModal(title, bodyHtml, footerHtml = '') {
@@ -146,6 +142,32 @@ function openModal(title, bodyHtml, footerHtml = '') {
   document.body.appendChild(el);
 }
 function closeModal() { document.getElementById('ec-modal')?.remove(); }
+
+// Shared "Updates" inbox renderer for the shul/store portal — both call this
+// with their own container id. Unread updates are marked read as soon as
+// they're opened in the detail modal.
+async function loadUpdatesInbox(containerId) {
+  const el = qs('#' + containerId);
+  el.innerHTML = '<p class="small-muted">Loading…</p>';
+  try {
+    const { updates } = await api('/updates/inbox/mine');
+    el.innerHTML = updates.length ? updates.map(u => `<div class="card" style="margin-bottom:10px;cursor:pointer" onclick="openInboxUpdate('${u.recipient_id}')">
+        <div class="flex-between"><strong>${esc(u.title)}</strong>${u.read_at ? '' : badge('new','active')}</div>
+        <p class="small-muted">${fmtDateTime(u.created_at)}</p>
+      </div>`).join('') : '<p class="small-muted">No updates yet.</p>';
+    window._inboxUpdates = updates;
+  } catch (err) { el.innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
+}
+window.openInboxUpdate = async (recipientId) => {
+  const u = (window._inboxUpdates || []).find(x => x.recipient_id === recipientId);
+  if (!u) return;
+  const body = `
+    <p style="white-space:pre-wrap">${esc(u.body)}</p>
+    ${u.attachments.length ? `<p><strong>Attachments:</strong></p><ul>${u.attachments.map(a => `<li><a href="/uploads/updates/${esc(a.path)}" target="_blank">${esc(a.filename)}</a></li>`).join('')}</ul>` : ''}
+  `;
+  openModal(u.title, body);
+  if (!u.read_at) { try { await api(`/updates/inbox/${recipientId}/read`, { method: 'POST' }); } catch {} }
+};
 
 // Fills a <select id="selectId"> with every season plus an "All Seasons"
 // option, selects the currently active season by default, and returns its

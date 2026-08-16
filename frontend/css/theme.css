@@ -18,8 +18,6 @@
   --info: #4a6a7a;
   --radius: 10px;
   --shadow: 0 4px 18px rgba(36, 26, 21, 0.10);
-  --sidebar-w: 250px;
-  --sidebar-w-collapsed: 68px;
   --sidebar-link: #d8c9ac;
   --sidebar-active-1: rgba(201,167,106,.25);
   --sidebar-active-2: rgba(169,119,63,.25);
@@ -80,33 +78,23 @@ td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align:
 tr:hover td { background: var(--brand-panel-2); }
 
 /* App shell */
-.app-shell { display: flex; min-height: 100vh; }
-.sidebar { position: relative; width: var(--sidebar-w); flex-shrink: 0; background: var(--brand-bg); color: var(--text-on-dark); display: flex; flex-direction: column; transition: width .16s ease; }
-.sidebar .brand { padding: 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.08); overflow: hidden; }
-.sidebar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand-gold); }
-.sidebar .brand-name { font-family: Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--brand-gold-light); white-space: nowrap; }
-.sidebar nav { flex: 1; padding: 14px 10px; overflow-y: auto; overflow-x: hidden; }
-.sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13.5px; margin-bottom: 2px; white-space: nowrap; }
-.sidebar nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
-.sidebar nav a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }
-.sidebar .user-box { padding: 14px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12.5px; color: var(--sidebar-muted); overflow: hidden; }
-.sidebar .user-box-detail { white-space: nowrap; }
-.sidebar .user-box button { margin-top: 6px; background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; white-space: nowrap; }
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+.app-header { display: flex; align-items: center; gap: 20px; padding: 0 24px; background: var(--brand-bg); color: var(--text-on-dark); border-bottom: 1px solid rgba(255,255,255,.08); }
+.app-header .brand { display: flex; align-items: center; gap: 10px; padding: 14px 0; flex-shrink: 0; }
+.app-header .brand img { height: 32px; width: auto; }
+.app-header .brand-name { font-family: Georgia, serif; font-size: 14px; line-height: 1.2; color: var(--brand-gold-light); white-space: nowrap; }
+.app-header .brand-name span { display: block; font-size: 11px; color: var(--sidebar-muted); }
+.app-header nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.app-header nav::-webkit-scrollbar { height: 5px; }
+.app-header nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.25); border-radius: 3px; }
+.app-header nav a { display: flex; align-items: center; padding: 10px 12px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
+.app-header nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
+.app-header nav a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }
+.app-header .header-user { display: flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 12.5px; color: var(--sidebar-muted); }
+.app-header .header-user-email { white-space: nowrap; }
+.app-header .header-user button { background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; white-space: nowrap; }
+.header-menu-btn { display: none; flex-shrink: 0; background: none; border: none; color: var(--sidebar-link); font-size: 20px; cursor: pointer; padding: 8px; margin-left: auto; }
 
-.sidebar-collapse-btn { position: absolute; top: 22px; right: -13px; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-panel); border: 1px solid var(--border); color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow); z-index: 5; padding: 0; }
-.sidebar-collapse-btn:hover { color: var(--brand-gold-dark); }
-.sidebar-collapse-btn svg { transition: transform .16s ease; }
-.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
-.sidebar.collapsed .brand { justify-content: center; padding: 20px 0; }
-.sidebar.collapsed .brand-name,
-.sidebar.collapsed .nav-label,
-.sidebar.collapsed .user-box-detail { display: none; }
-.sidebar.collapsed nav a { justify-content: center; padding: 10px 0; }
-.sidebar.collapsed .user-box { text-align: center; padding: 14px 6px; }
-.sidebar.collapsed .sidebar-collapse-btn svg { transform: rotate(180deg); }
-
-.main { flex: 1; min-width: 0; }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; background: #fff; border-bottom: 1px solid var(--border); }
 .content { padding: 26px 28px 60px; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
@@ -143,7 +131,26 @@ tr:hover td { background: var(--brand-panel-2); }
 .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--brand-gold-dark); font-weight: 700; margin: 26px 0 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 .section-title:first-of-type { border-top: none; padding-top: 0; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-@media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } .sidebar { position: fixed; z-index: 50; height: 100vh; transform: translateX(-100%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } .sidebar.collapsed { width: var(--sidebar-w); } .sidebar.collapsed .brand-name, .sidebar.collapsed .nav-label, .sidebar.collapsed .user-box-detail { display: block; } .sidebar.collapsed nav a { justify-content: flex-start; padding: 10px 14px; } .sidebar-collapse-btn { display: none; } .app-shell { flex-direction: column; } #hamburger { display: inline-flex !important; } }
+@media (max-width: 780px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .app-header { flex-wrap: wrap; padding: 10px 16px; }
+  /* Explicit order on every child (not just nav) — mixing an explicit order
+     on one flex item with the default (0) on its siblings sorts by order
+     value first, so a sibling that comes later in the DOM than nav but
+     shares the default order still renders before it, splitting the nav
+     dropdown visually. Numbering all four removes the ambiguity. */
+  .app-header .brand { order: 1; }
+  .header-menu-btn { order: 2; display: inline-flex !important; align-items: center; justify-content: center; }
+  .app-header .header-user { order: 3; }
+  /* flex-basis (set via `flex: 1` on the base rule) wins over `width` in a
+     row-direction flex container — flex: 1 1 100% is what actually forces
+     this onto its own full-width line instead of squeezing into whatever
+     space is left on the brand/hamburger row. */
+  .app-header nav { display: none; flex: 1 1 100%; flex-direction: column; align-items: stretch; order: 4; overflow-x: visible; }
+  .app-header nav.open { display: flex; }
+  .app-header nav a { padding: 12px 14px; white-space: normal; overflow-wrap: break-word; }
+  .app-header .header-user-email { display: none; }
+}
 
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .small-muted { font-size: 12px; color: var(--text-muted); }

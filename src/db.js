@@ -8,7 +8,7 @@ import { generateApplicantExternalId } from './utils/externalId.js';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-for (const sub of ['contracts', 'uploads', 'signatures', 'logos']) {
+for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates']) {
   const p = join(DATA_DIR, sub);
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }
@@ -234,6 +234,34 @@ CREATE TABLE IF NOT EXISTS sms_templates (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_sms_templates_org ON sms_templates(org_id);
+
+-- ===================== Updates =====================
+-- Admin-broadcast updates to specific shuls/stores or whole groups — the
+-- shul/store portal "Updates" section (formerly just a contract-status
+-- viewer). Every recipient gets an email and a portal notification.
+CREATE TABLE IF NOT EXISTS updates (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  attachments_json TEXT DEFAULT '[]', -- [{filename, path, mime_type}]
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_updates_org ON updates(org_id);
+
+CREATE TABLE IF NOT EXISTS update_recipients (
+  id TEXT PRIMARY KEY,
+  update_id TEXT NOT NULL REFERENCES updates(id),
+  entity_type TEXT NOT NULL, -- shul | store
+  entity_id TEXT NOT NULL,
+  email_status TEXT,         -- sent | failed | dry_run
+  email_error TEXT,
+  read_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_update_recipients_update ON update_recipients(update_id);
+CREATE INDEX IF NOT EXISTS idx_update_recipients_entity ON update_recipients(entity_type, entity_id);
 
 -- ===================== Applicants =====================
 CREATE TABLE IF NOT EXISTS applicants (
