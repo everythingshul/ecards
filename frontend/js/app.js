@@ -32,7 +32,7 @@ async function api(path, { method = 'GET', body, isForm = false } = {}) {
     throw new Error(data.error || 'Not authenticated');
   }
   if (res.status === 423) { toast(data.error || 'Account paused', true); throw new Error(data.error); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.data = data; throw err; }
   return data;
 }
 

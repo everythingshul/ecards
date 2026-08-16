@@ -9,6 +9,7 @@ import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '..
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
+import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -225,9 +226,22 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   const jobId = uuid();
-  let success = 0, dupes = 0; const errors = [];
   const forcedShul = req.user.role === 'shul' ? db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.user.shul_id) : null;
 
+  // All-or-nothing: every row must have every currently-required field
+  // (Settings > Required Fields) filled in, or nothing in the sheet is
+  // imported — no partial imports. The single-applicant form's "shul_id"
+  // requirement doesn't apply to sheet rows as-is: a shul-portal upload has
+  // its shul forced (nothing to check), and an admin upload identifies the
+  // shul by name (shul_name column), not id — so remap/drop accordingly.
+  let requiredFields = getRequiredFields(req.user.org_id, 'applicant').filter(f => f !== 'shul_id');
+  if (!forcedShul) requiredFields = [...requiredFields, 'shul_name'];
+  const requiredErrors = validateRequiredFields(rows, requiredFields);
+  if (requiredErrors.length) {
+    return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
+  }
+
+  let success = 0, dupes = 0; const errors = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (!r.first_name || !r.last_name) { errors.push({ row: i + 2, error: 'Missing first_name or last_name' }); continue; }

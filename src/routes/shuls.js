@@ -9,6 +9,7 @@ import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
+import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -361,9 +362,18 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   const jobId = uuid();
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(req.user.org_id);
-  let success = 0, dupes = 0; const errors = [];
   const sendContracts = req.body.send_contracts === 'true' || req.body.send_contracts === true;
 
+  // All-or-nothing: every row must have every currently-required field
+  // (Settings > Required Fields) filled in, or nothing in the sheet is
+  // imported — no partial imports.
+  const requiredFields = getRequiredFields(req.user.org_id, 'shul');
+  const requiredErrors = validateRequiredFields(rows, requiredFields);
+  if (requiredErrors.length) {
+    return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
+  }
+
+  let success = 0, dupes = 0; const errors = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (!r.name_en || !r.gabai_email) { errors.push({ row: i + 2, error: 'Missing name_en or gabai_email' }); continue; }

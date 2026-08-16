@@ -227,7 +227,11 @@ window.runImport = async () => {
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
       (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
     load();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    if (err.data?.errors) {
+      qs('#import-result').innerHTML = `<p style="color:var(--danger)"><strong>${esc(err.message)}</strong></p><ul>${err.data.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>`;
+    } else toast(err.message, true);
+  }
 };
 
 let dupFlagsCache = [];
