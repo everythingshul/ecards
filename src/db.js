@@ -195,6 +195,19 @@ CREATE TABLE IF NOT EXISTS emails_sent (
 );
 CREATE INDEX IF NOT EXISTS idx_emails_sent_org ON emails_sent(org_id, created_at);
 
+-- Admin overrides for system-triggered emails (services/mail.js's
+-- SYSTEM_EMAIL_TEMPLATES). A missing row for a given key means "use the
+-- built-in default" — this table only ever holds the customized ones.
+CREATE TABLE IF NOT EXISTS system_email_templates (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  key TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(org_id, key)
+);
+
 -- Reusable subject/body templates for the admin-composed "Email Builder"
 -- (Email Center > Templates). Body supports {{variable}} placeholders,
 -- substituted at send time.

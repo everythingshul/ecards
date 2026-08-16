@@ -122,31 +122,64 @@ export async function sendMailChecked(orgId, to, subject, bodyHtml, meta = {}) {
   return { emailError };
 }
 
-export const templates = {
-  contractReady: (shulName, signUrl) => ({
-    subject: `Contract ready to sign: ${shulName}`,
-    body: `<p>Shalom,</p><p>Thank you for registering <strong>${shulName}</strong>. Please review and sign your contract to complete onboarding:</p>
-      <p style="text-align:center;margin:28px 0;"><a href="${signUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review & Sign Contract</a></p>
-      <p>If the button doesn't work, copy this link: ${signUrl}</p>`
-  }),
-  accountApproved: (shulName, loginUrl, slots) => ({
-    subject: `You're approved! Set up your account: ${shulName}`,
-    body: `<p>Mazal tov. <strong>${shulName}</strong> has been approved with <strong>${slots} slot(s)</strong> for this season.</p>
+// Every system-triggered email (as opposed to Email Center's manually
+// composed ones) has an editable text here — admins can override subject/body
+// per key from Settings > Auto Emails (system_email_templates table); this
+// object is both the fallback when no override exists AND the starting point
+// shown in that editor. {{var}} placeholders get substituted at send time by
+// renderSystemTemplate() below — `vars` lists exactly which ones are
+// available for a given key so the editor UI can show/validate them.
+export const SYSTEM_EMAIL_TEMPLATES = {
+  contractReady: {
+    label: 'Contract Ready to Sign', vars: ['shulName', 'signUrl'],
+    subject: 'Contract ready to sign: {{shulName}}',
+    body: `<p>Shalom,</p><p>Thank you for registering <strong>{{shulName}}</strong>. Please review and sign your contract to complete onboarding:</p>
+      <p style="text-align:center;margin:28px 0;"><a href="{{signUrl}}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review &amp; Sign Contract</a></p>
+      <p>If the button doesn't work, copy this link: {{signUrl}}</p>`,
+  },
+  accountApproved: {
+    label: 'Shul Approved / Account Setup', vars: ['shulName', 'loginUrl', 'slots'],
+    subject: "You're approved! Set up your account: {{shulName}}",
+    body: `<p>Mazal tov. <strong>{{shulName}}</strong> has been approved with <strong>{{slots}} slot(s)</strong> for this season.</p>
       <p>Create your account password to begin submitting applicants:</p>
-      <p style="text-align:center;margin:28px 0;"><a href="${loginUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Set Up Account</a></p>`
-  }),
-  duplicateHold: (name) => ({
-    subject: `Action required: duplicate record detected for ${name}`,
-    body: `<p>A duplicate record was detected involving <strong>${name}</strong>. Both accounts have been temporarily paused until this is resolved by an administrator.</p>`
-  }),
-  applicantApproved: (name) => ({
-    subject: `Applicant approved: ${name}`,
-    body: `<p><strong>${name}</strong> has been approved and a gift card will be issued.</p>`
-  }),
-  storeSetup: (storeName, portalUrl) => ({
-    subject: `Welcome, ${storeName}`,
-    body: `<p>Your store <strong>${storeName}</strong> has been added as a participating location.</p>
-      <p style="text-align:center;margin:28px 0;"><a href="${portalUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Go to Store Portal</a></p>
-      <p>If the button doesn't work, copy this link: ${portalUrl}</p>`
-  }),
+      <p style="text-align:center;margin:28px 0;"><a href="{{loginUrl}}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Set Up Account</a></p>`,
+  },
+  applicantApproved: {
+    label: 'Applicant Approved', vars: ['name'],
+    subject: 'Applicant approved: {{name}}',
+    body: '<p><strong>{{name}}</strong> has been approved and a gift card will be issued.</p>',
+  },
+  storeSetup: {
+    label: 'Store Welcome', vars: ['storeName', 'portalUrl'],
+    subject: 'Welcome, {{storeName}}',
+    body: `<p>Your store <strong>{{storeName}}</strong> has been added as a participating location.</p>
+      <p style="text-align:center;margin:28px 0;"><a href="{{portalUrl}}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Go to Store Portal</a></p>
+      <p>If the button doesn't work, copy this link: {{portalUrl}}</p>`,
+  },
+  userInvite: {
+    label: 'Internal User Invite', vars: ['role', 'inviteUrl'],
+    subject: "You've been invited",
+    body: `<p>You've been invited as <strong>{{role}}</strong>. Set your password to get started:</p><p><a href="{{inviteUrl}}">{{inviteUrl}}</a></p>`,
+  },
+  passwordReset: {
+    label: 'Password Reset', vars: ['resetUrl'],
+    subject: 'Reset your password',
+    body: `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="{{resetUrl}}">{{resetUrl}}</a></p>`,
+  },
 };
+
+function substitute(text, vars) {
+  return String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
+}
+
+// Renders a system-triggered email: an admin-editable override if one
+// exists for this org+key (Settings > Auto Emails), else the built-in
+// default above. Both paths share the same {{var}} substitution, so an
+// override uses the exact same placeholder vocabulary the default shows.
+export function renderSystemTemplate(orgId, key, vars) {
+  const def = SYSTEM_EMAIL_TEMPLATES[key];
+  if (!def) throw new Error(`Unknown system email template: ${key}`);
+  const override = db.prepare('SELECT subject, body FROM system_email_templates WHERE org_id = ? AND key = ?').get(orgId || DEFAULT_ORG_ID, key);
+  const source = override || def;
+  return { subject: substitute(source.subject, vars), body: substitute(source.body, vars) };
+}

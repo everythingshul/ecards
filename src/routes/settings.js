@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate } from '../services/pdf.js';
+import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -120,6 +121,38 @@ router.put('/signature-box/:kind', requireAdmin, (req, res) => {
   db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
     ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `signature_box_${kind}`, value);
   res.json({ ok: true, box: { x, y, width, height } });
+});
+
+// Auto-email message editor — every key in SYSTEM_EMAIL_TEMPLATES (contract
+// ready, shul approved, applicant approved, store welcome, user invite,
+// password reset), each with either the built-in default or this org's
+// saved override. Only ever returns/accepts the {{var}} placeholder text —
+// the actual substitution happens at send time in renderSystemTemplate().
+router.get('/email-templates', requireAdmin, (req, res) => {
+  const overrides = Object.fromEntries(db.prepare('SELECT key, subject, body FROM system_email_templates WHERE org_id = ?').all(req.user.org_id).map(r => [r.key, r]));
+  const templates = Object.entries(SYSTEM_EMAIL_TEMPLATES).map(([key, def]) => ({
+    key, label: def.label, vars: def.vars,
+    subject: overrides[key]?.subject ?? def.subject, body: overrides[key]?.body ?? def.body,
+    isCustomized: !!overrides[key], defaultSubject: def.subject, defaultBody: def.body,
+  }));
+  res.json({ templates });
+});
+
+router.put('/email-templates/:key', requireAdmin, (req, res) => {
+  const { key } = req.params;
+  if (!SYSTEM_EMAIL_TEMPLATES[key]) return res.status(404).json({ error: 'Unknown template key' });
+  const { subject, body } = req.body || {};
+  if (!subject || !body) return res.status(400).json({ error: 'subject and body are required' });
+  db.prepare(`INSERT INTO system_email_templates (id, org_id, key, subject, body) VALUES (?,?,?,?,?)
+    ON CONFLICT(org_id, key) DO UPDATE SET subject=excluded.subject, body=excluded.body, updated_at=datetime('now')`)
+    .run(uuid(), req.user.org_id, key, subject, body);
+  res.json({ ok: true });
+});
+
+// Revert to the built-in default (just deletes the override row).
+router.delete('/email-templates/:key', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM system_email_templates WHERE org_id = ? AND key = ?').run(req.user.org_id, req.params.key);
+  res.json({ ok: true });
 });
 
 export default router;

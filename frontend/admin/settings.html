@@ -19,6 +19,7 @@ renderShell('/admin/settings.html', `
     <button data-t="seasons">Seasons</button>
     <button data-t="fields">Required Fields</button>
     <button data-t="documents">Documents</button>
+    <button data-t="emails">Auto Emails</button>
   </div>
 
   <div id="panel-org">
@@ -117,11 +118,17 @@ renderShell('/admin/settings.html', `
       </div>
     </div>
   </div>
+
+  <div id="panel-emails" style="display:none">
+    <p class="small-muted">Edit the text of automatic system emails (contract ready, approvals, invites, password reset). <code>{{placeholders}}</code> get filled in with real values when each email actually sends — leave them as-is, just move them where you want.</p>
+    <div id="email-templates-list">Loading…</div>
+  </div>
 `);
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','fields','documents'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  ['org','seasons','fields','documents','emails'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  if (b.dataset.t === 'emails') loadEmailTemplates();
 }));
 
 async function loadOrg() {
@@ -269,6 +276,39 @@ async function loadDocText(entityType) {
 }
 window.saveDocText = async (entityType) => {
   try { await api('/settings', { method: 'PUT', body: { [`document_template_text_${entityType}`]: qs(`#doc-text-${entityType}`).value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
+async function loadEmailTemplates() {
+  const { templates } = await api('/settings/email-templates');
+  qs('#email-templates-list').innerHTML = templates.map(t => `<div class="card" style="margin-bottom:10px">
+      <div class="flex-between">
+        <strong>${esc(t.label)}</strong>
+        ${t.isCustomized ? badge('customized', 'active') : badge('default', 'inactive')}
+      </div>
+      <p class="small-muted" style="margin-top:6px">Available: ${t.vars.map(v => `<code>{{${esc(v)}}}</code>`).join(' ')}</p>
+      <button class="btn btn-sm btn-outline" onclick="openEditEmailTemplate('${t.key}')">Edit</button>
+      ${t.isCustomized ? `<button class="btn btn-sm btn-outline" onclick="resetEmailTemplate('${t.key}')">Reset to Default</button>` : ''}
+    </div>`).join('');
+  emailTemplatesCache = templates;
+}
+let emailTemplatesCache = [];
+window.openEditEmailTemplate = (key) => {
+  const t = emailTemplatesCache.find(x => x.key === key);
+  if (!t) return;
+  const body = `
+    <label>Subject</label><input id="et-subject" value="${esc(t.subject)}">
+    <label>Body (HTML)</label><textarea id="et-body" rows="10">${esc(t.body)}</textarea>
+    <p class="small-muted" style="margin-top:10px">Available placeholders: ${t.vars.map(v => `<code>{{${esc(v)}}}</code>`).join(' ')}</p>
+  `;
+  openModal(t.label, body, `<button class="btn btn-primary btn-sm" onclick="saveEmailTemplate('${key}')">Save</button>`);
+};
+window.saveEmailTemplate = async (key) => {
+  const body = { subject: qs('#et-subject').value, body: qs('#et-body').value };
+  try { await api(`/settings/email-templates/${key}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadEmailTemplates(); } catch (err) { toast(err.message, true); }
+};
+window.resetEmailTemplate = async (key) => {
+  if (!confirm('Revert this email to the built-in default text?')) return;
+  try { await api(`/settings/email-templates/${key}`, { method: 'DELETE' }); toast('Reset'); loadEmailTemplates(); } catch (err) { toast(err.message, true); }
 };
 
 loadOrg(); loadZipRestriction(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();

@@ -5,7 +5,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
-import { sendMailChecked, templates } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
@@ -248,7 +248,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   db.prepare(`UPDATE shuls SET status='approved', slots_allocated=?, portal_user_id=?, updated_at=datetime('now') WHERE id=?`)
     .run(slots, user.id, shul.id);
   const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${user.invite_token}`;
-  const tmpl = templates.accountApproved(shul.name_en, loginUrl, slots);
+  const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] shul approval email failed:', emailError);
   logAudit(req.user.org_id, req.user.id, 'approve', 'shul', shul.id, shul, { slots_allocated: slots }, req.ip);
@@ -270,7 +270,7 @@ router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
   const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
   db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
   const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
-  const tmpl = templates.accountApproved(shul.name_en, loginUrl, shul.slots_allocated);
+  const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: shul.slots_allocated });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] shul welcome resend failed:', emailError);
   res.json({ ok: true, emailError });
@@ -300,7 +300,7 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
   const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
   const to = req.body.email || shul.gabai_email;
-  const tmpl = templates.contractReady(shul.name_en, signUrl);
+  const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
   const { emailError } = await sendMailChecked(req.user.org_id, to, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] contract email failed:', emailError);
   logAudit(req.user.org_id, req.user.id, 'send_contract', 'shul', shul.id, null, { to }, req.ip);
@@ -425,7 +425,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
           .run(uuid(), shul.id, shul.season_id, pdfPath, token, expires);
         db.prepare(`UPDATE shuls SET status='contract_sent' WHERE id=?`).run(shul.id);
         const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
-        const tmpl = templates.contractReady(shul.name_en, signUrl);
+        const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
         const { emailError } = await sendMailChecked(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body);
         if (emailError) { console.error('[mail] mass-upload contract email failed for', shul.gabai_email, emailError); errors.push({ row: i + 2, error: `Shul created but contract email failed: ${emailError}` }); }
       }

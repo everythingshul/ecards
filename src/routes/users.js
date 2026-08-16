@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
-import { sendMailChecked } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
@@ -46,7 +46,8 @@ router.post('/', async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', normalizePhone(phone || ''), role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
-  const { emailError } = await sendMailChecked(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
+  const tmpl = renderSystemTemplate(req.user.org_id, 'userInvite', { role: role.replace('_', ' '), inviteUrl });
+  const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] user invite email failed:', emailError);
   res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id), emailError });
 });

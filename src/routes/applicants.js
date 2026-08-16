@@ -4,7 +4,7 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
-import { sendMailChecked, templates } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
@@ -242,7 +242,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     .run(req.user.id, amount, applicant.id);
   let emailError = null;
   if (applicant.email) {
-    const tmpl = templates.applicantApproved(`${applicant.first_name} ${applicant.last_name}`);
+    const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
     ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body));
     if (emailError) console.error('[mail] applicant approval email failed:', emailError);
   }
