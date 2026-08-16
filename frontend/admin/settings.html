@@ -35,6 +35,13 @@ renderShell('/admin/settings.html', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveOrg()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Application Restrictions</h3>
+      <label>Allowed Zip Codes <span class="small-muted">(comma-separated, leave blank to accept any zip code)</span></label>
+      <textarea id="org-allowed_zips" rows="3" placeholder="e.g. 11201, 11211, 11213"></textarea>
+      <p class="small-muted">Applicants outside these zip codes are declined automatically at submission. The submitting shul is never told this happened or shown which applicants were declined this way.</p>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveZipRestriction()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Full System Export</h3>
       <p class="small-muted">Download everything: every shul, applicant, card, transaction, store, billing record, task, and note, as one Excel workbook with a separate sheet per table.</p>
       <button class="btn btn-sm btn-primary" onclick="downloadFullExport()">Download Full System Export (.xlsx)</button>
@@ -126,6 +133,13 @@ async function loadOrg() {
   qs('#org-support_phone').value = o.support_phone || '';
   qs('#org-address').value = o.address || '';
 }
+async function loadZipRestriction() {
+  const { settings } = await api('/settings');
+  qs('#org-allowed_zips').value = settings.allowed_zip_codes || '';
+}
+window.saveZipRestriction = async () => {
+  try { await api('/settings', { method: 'PUT', body: { allowed_zip_codes: qs('#org-allowed_zips').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
 window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
 window.saveOrg = async () => {
   const body = {
@@ -236,7 +250,7 @@ window.saveDocText = async (entityType) => {
   try { await api('/settings', { method: 'PUT', body: { [`document_template_text_${entityType}`]: qs(`#doc-text-${entityType}`).value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
-loadOrg(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

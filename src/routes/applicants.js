@@ -31,6 +31,28 @@ function seasonCapacityError(seasonId) {
   return null;
 }
 
+// Shuls must never learn that one of their applicants was rejected or
+// flagged as a possible duplicate — from their side it should just look
+// like a normal pending/approved application. Applies to both the zip-code
+// auto-rejection below and any other rejection reason.
+function maskForShul(records, role) {
+  if (role !== 'shul') return records;
+  const mask = (r) => ({ ...r, approval_status: r.approval_status === 'rejected' ? 'pending' : r.approval_status, duplicate_status: null, duplicate_of_applicant_id: null, is_paused: 0 });
+  return Array.isArray(records) ? records.map(mask) : mask(records);
+}
+
+// If the org has restricted accepted zips (Settings > Organization >
+// Allowed Zip Codes), an applicant outside that list is auto-rejected
+// silently at submission time — the submission still appears to succeed
+// normally so the submitting shul is never told why (or that) it happened.
+function isZipAllowed(orgId, zip) {
+  const setting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'allowed_zip_codes'`).get(orgId);
+  if (!setting || !setting.value.trim()) return true;
+  const allowed = setting.value.split(',').map(z => z.trim()).filter(Boolean);
+  if (!allowed.length) return true;
+  return allowed.includes(String(zip || '').trim());
+}
+
 // Shul-portal users only ever see/act on their own shul's applicants; regardless
 // of any assignment rows, force shul_id = req.user.shul_id for that role.
 function scopeWhere(req) {
@@ -63,7 +85,7 @@ router.get('/', (req, res) => {
   const total = db.prepare(`SELECT COUNT(*) c FROM applicants a ${where}`).get(...params).c;
   const offset = (Math.max(1, +page) - 1) * +pageSize;
   const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
-  res.json({ applicants: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize });
+  res.json({ applicants: maskForShul(redact(rows, req.permission.hidden_fields), req.user.role), total, page: +page, pageSize: +pageSize });
 });
 
 // Full-detail CSV export — every field, no pagination, respects the same
@@ -89,10 +111,13 @@ router.get('/:id', (req, res) => {
   const applicant = db.prepare('SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id=a.shul_id WHERE a.id = ? AND a.org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'shul' && applicant.shul_id !== req.user.shul_id) return res.status(403).json({ error: 'Not your applicant' });
-  const notes = db.prepare('SELECT n.*, u.first_name, u.last_name FROM applicant_notes n LEFT JOIN users u ON u.id=n.user_id WHERE applicant_id = ? ORDER BY n.created_at DESC').all(applicant.id);
+  // Internal admin notes and duplicate flags may reference rejection/duplicate
+  // reasons directly, so a shul-portal viewer gets neither, on top of the
+  // approval_status/duplicate_status masking below.
+  const notes = req.user.role === 'shul' ? [] : db.prepare('SELECT n.*, u.first_name, u.last_name FROM applicant_notes n LEFT JOIN users u ON u.id=n.user_id WHERE applicant_id = ? ORDER BY n.created_at DESC').all(applicant.id);
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
-  const flags = db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
-  res.json({ applicant: redact(applicant, req.permission.hidden_fields), notes, cards, flags });
+  const flags = req.user.role === 'shul' ? [] : db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
+  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role), notes, cards, flags });
 });
 
 // Same idea as shuls' /other-seasons: each season's applicant is its own
@@ -127,15 +152,18 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (capError) return res.status(400).json({ error: capError });
 
   const id = uuid();
+  // Zip-restricted applicants are auto-rejected silently — the submission
+  // still appears to succeed normally so the submitting shul is never told.
+  const initialStatus = isZipAllowed(req.user.org_id, b.zip) ? 'pending' : 'rejected';
   db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?)`)
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?, ?)`)
     .run(id, req.user.org_id, shulId, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
       b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, b.comments || '',
-      req.user.role === 'shul' ? 'shul_upload' : 'admin');
+      req.user.role === 'shul' ? 'shul_upload' : 'admin', initialStatus);
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
   const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
-  res.status(201).json({ applicant, duplicate: !!flag });
+  res.status(201).json({ applicant: maskForShul(applicant, req.user.role), duplicate: req.user.role === 'shul' ? false : !!flag });
 });
 
 router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
@@ -255,15 +283,18 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
     if (capError) { errors.push({ row: i + 2, error: capError }); continue; }
     try {
       const id = uuid();
+      // Zip-restricted rows are auto-rejected silently — the upload still
+      // reports as a normal success so the submitting shul is never told.
+      const initialStatus = isZipAllowed(req.user.org_id, r.zip) ? 'pending' : 'rejected';
       db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-          address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload')`)
+          address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source, approval_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload', ?)`)
         .run(id, req.user.org_id, shul.id, shul.season_id, generateApplicantExternalId(db), r.first_name, r.last_name, r.marital_status || '', normalizePhone(r.home_phone || ''), normalizePhone(r.husband_cell || ''), normalizePhone(r.wife_cell || ''), r.email || '',
           r.address || '', r.city || '', r.state || '', r.zip || '', r.preferred_contact_method || '', r.preferred_number || '', +r.num_children || 0,
-          /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '');
+          /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '', initialStatus);
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
-      if (flag) dupes++; else success++;
+      if (flag && req.user.role !== 'shul') dupes++; else success++;
     } catch (e) {
       errors.push({ row: i + 2, error: e.message });
     }
