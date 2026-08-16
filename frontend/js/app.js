@@ -189,12 +189,43 @@ function openModal(title, bodyHtml, footerHtml = '') {
   el.className = 'modal-backdrop';
   el.id = 'ec-modal';
   el.innerHTML = `<div class="modal">
-    <div class="modal-header"><h3 style="margin:0">${esc(title)}</h3><button onclick="closeModal()">&times;</button></div>
+    <div class="modal-header" style="cursor:move"><h3 style="margin:0">${esc(title)}</h3><button onclick="closeModal()">&times;</button></div>
     <div class="modal-body">${bodyHtml}</div>
     ${footerHtml ? `<div class="modal-footer">${footerHtml}</div>` : ''}
   </div>`;
   el.addEventListener('click', (e) => { if (e.target === el) closeModal(); });
   document.body.appendChild(el);
+  attachModalDrag(el.querySelector('.modal-header'), el.querySelector('.modal'));
+}
+
+// Drags the modal box by its header. The backdrop centers the box with flex,
+// so a drag switches it to fixed positioning at its current on-screen spot
+// (rather than fighting the centering) and moves it from there. The
+// mousemove/mouseup listeners live only for the duration of one drag
+// gesture (added on mousedown, removed on mouseup) so closing the modal
+// mid-drag can't leave a stray document-level listener behind.
+function attachModalDrag(header, box) {
+  let startX, startY, startLeft, startTop;
+  function onMove(e) {
+    box.style.left = (startLeft + e.clientX - startX) + 'px';
+    box.style.top = (startTop + e.clientY - startY) + 'px';
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    const rect = box.getBoundingClientRect();
+    box.style.position = 'fixed';
+    box.style.margin = '0';
+    box.style.left = rect.left + 'px';
+    box.style.top = rect.top + 'px';
+    startX = e.clientX; startY = e.clientY; startLeft = rect.left; startTop = rect.top;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
 }
 function closeModal() { document.getElementById('ec-modal')?.remove(); }
 
