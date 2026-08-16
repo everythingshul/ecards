@@ -149,6 +149,20 @@ tr:hover td { background: var(--brand-panel-2); }
 .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .checkbox-row input { width: auto; }
 
+/* Shared header/footer nav injected by renderPublicFooter() (frontend/js/app.js)
+   onto every non-homepage public page — the homepage (index.html) renders its
+   own equivalent directly since it already has a full custom header/hero. */
+.public-nav-strip { display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 14px 20px; background: var(--brand-bg); }
+.public-nav-strip a { color: #e3cf9e; font-size: 13px; font-weight: 600; text-decoration: none; }
+.public-nav-strip a:hover { color: var(--brand-gold-light); text-decoration: underline; }
+.public-footer-strip { text-align: center; padding: 30px 20px; }
+.public-footer-strip .foot-links { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+.public-footer-strip .foot-links a { color: var(--text-muted); font-weight: 600; font-size: 12.5px; text-decoration: none; }
+.public-footer-strip .foot-links a:hover { color: var(--brand-gold-dark); }
+.powered-by { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; text-decoration: none; }
+.powered-by img { height: 15px; width: auto; }
+.powered-by:hover { color: var(--brand-gold-dark); }
+
 .public-wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
 .public-header { text-align: center; margin-bottom: 28px; }
 .public-header .dot { width: 44px; height: 44px; border-radius: 50%; background: var(--brand-bg); display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }

@@ -693,9 +693,36 @@ window.sendQuickEmail = async (entityType, entityId, containerId, defaultPhone, 
   } catch (err) { toast(err.message, true); }
 };
 
-// Kept as a no-op call site for public-facing pages (login/apply/sign-*/form)
-// that still call it — there is no footer mark to render anymore.
-function renderPublicFooter() {}
+// Injects the same admin-configured header/footer nav that the homepage
+// renders directly, onto every other public-facing page (login, apply
+// forms, FAQ, contact, sign-*, forms, invite/reset flows). Prepends a slim
+// nav strip and appends a footer with the org's footer buttons + the
+// everythingshul mark. Both fall back to the same defaults as the homepage
+// when the admin hasn't customized them, so a fresh org looks right without
+// any setup, and both are just extra flex/flow children — safe to add to
+// any page's <body> regardless of that page's own layout.
+async function renderPublicFooter() {
+  try {
+    const { content } = await api('/orgs/resolve');
+    const headerBtns = content?.headerButtons?.length ? content.headerButtons : [{ label: 'Sign In', url: '/login' }];
+    const footerBtns = content?.footerButtons?.length ? content.footerButtons : [
+      { label: 'Register a Shul', url: '/apply' }, { label: 'Apply as a Store', url: '/apply-store' },
+      { label: 'Ezras Habayis Application', url: '/apply-ezras-habayis' }, { label: 'FAQ', url: '/faq' },
+      { label: 'Contact Us', url: '/contact' }, { label: 'Sign In', url: '/login' },
+    ];
+
+    const nav = document.createElement('nav');
+    nav.className = 'public-nav-strip';
+    nav.innerHTML = headerBtns.map(b => `<a href="${esc(b.url)}">${esc(b.label)}</a>`).join('');
+    document.body.insertBefore(nav, document.body.firstChild);
+
+    const foot = document.createElement('footer');
+    foot.className = 'public-footer-strip';
+    foot.innerHTML = `<div class="foot-links">${footerBtns.map(b => `<a href="${esc(b.url)}">${esc(b.label)}</a>`).join('')}</div>
+      <a class="powered-by" href="https://everythingshul.com" target="_blank" rel="noopener">Powered By <img src="/img/everythingshul-logo.png" alt="everythingshul"></a>`;
+    document.body.appendChild(foot);
+  } catch { /* best-effort — the page underneath still works without it */ }
+}
 
 // Polls a list endpoint's row count (for whatever filters/search/page the
 // caller's own load() would currently use) and, if it changed, shows a

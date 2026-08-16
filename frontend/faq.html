@@ -46,6 +46,7 @@
         ? items.map(f => `<div class="faq-item"><h3>${esc(f.question)}</h3><p>${esc(f.answer)}</p></div>`).join('')
         : '<p style="color:#c9bda3;text-align:center">No questions have been posted yet.</p>';
     }).catch(() => { qs('#faq-list').innerHTML = '<p style="color:#c9bda3;text-align:center">Unable to load FAQs right now.</p>'; });
+    renderPublicFooter();
   </script>
 </body>
 </html>

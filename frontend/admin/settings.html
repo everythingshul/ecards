@@ -143,6 +143,24 @@ renderShell('/admin/settings', `
 
   <div id="panel-content" style="display:none">
     <div class="card">
+      <h3>Hero Section</h3>
+      <p class="small-muted">The large banner at the top of the homepage.</p>
+      <label>Eyebrow Text <span class="small-muted">(small text above the headline; leave blank to use the organization name)</span></label>
+      <input id="content-hero-eyebrow" placeholder="e.g. Kipas Hair BP Platform">
+      <label>Headline <span class="small-muted">(leave blank to use the organization name)</span></label>
+      <input id="content-hero-heading" placeholder="e.g. Kipas Hair BP Platform">
+      <label style="margin-top:14px">Buttons <span class="small-muted">(leave empty to use the default set)</span></label>
+      <div id="hero-buttons-list"></div>
+      <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addContentButton('hero')">+ Add Button</button>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveHeroSection()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Schedule Section</h3>
+      <label>Heading <span class="small-muted">(leave blank for the default)</span></label>
+      <input id="content-schedule-heading" placeholder="e.g. When applications are open">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveScheduleHeading()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Header Buttons</h3>
       <p class="small-muted">Shown at the top of the public homepage. Leave empty to use the default ("Sign In").</p>
       <div id="header-buttons-list"></div>
@@ -158,6 +176,8 @@ renderShell('/admin/settings', `
     </div>
     <div class="card" style="margin-top:16px">
       <h3>About Section</h3>
+      <label>Heading <span class="small-muted">(leave blank for the default)</span></label>
+      <input id="content-about-heading" placeholder="e.g. About">
       <label>About Text <span class="small-muted">(leave blank to use the default mission statement)</span></label>
       <textarea id="content-about" rows="4"></textarea>
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveAboutText()">Save</button>
@@ -231,14 +251,16 @@ window.savePopup = async () => {
 window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
 
 // ============================= Site Content =============================
-let headerButtonsDraft = [], footerButtonsDraft = [], faqItemsDraft = [];
+const CONTENT_BUTTON_SETTING_KEY = { header: 'header_nav_buttons', footer: 'footer_nav_buttons', hero: 'cta_buttons' };
+let buttonDrafts = { header: [], footer: [], hero: [] };
+let faqItemsDraft = [];
 function wireButtonInputs(kind) {
-  const draft = kind === 'header' ? headerButtonsDraft : footerButtonsDraft;
+  const draft = buttonDrafts[kind];
   qsa(`#${kind}-buttons-list .cb-label`).forEach(el => el.addEventListener('input', () => { draft[+el.dataset.idx].label = el.value; }));
   qsa(`#${kind}-buttons-list .cb-url`).forEach(el => el.addEventListener('input', () => { draft[+el.dataset.idx].url = el.value; }));
 }
 function renderContentButtons(kind) {
-  const draft = kind === 'header' ? headerButtonsDraft : footerButtonsDraft;
+  const draft = buttonDrafts[kind];
   qs(`#${kind}-buttons-list`).innerHTML = draft.length ? draft.map((b, i) => `<div style="display:flex;gap:8px;align-items:center;margin:8px 0">
       <input placeholder="Label" value="${esc(b.label||'')}" style="flex:1" class="cb-label" data-idx="${i}">
       <input placeholder="/url or https://…" value="${esc(b.url||'')}" style="flex:1" class="cb-url" data-idx="${i}">
@@ -247,16 +269,30 @@ function renderContentButtons(kind) {
   wireButtonInputs(kind);
 }
 window.addContentButton = (kind) => {
-  (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).push({ label: '', url: '' });
+  buttonDrafts[kind].push({ label: '', url: '' });
   renderContentButtons(kind);
 };
 window.removeContentButton = (kind, i) => {
-  (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).splice(i, 1);
+  buttonDrafts[kind].splice(i, 1);
   renderContentButtons(kind);
 };
 window.saveContentButtons = async (kind) => {
-  const draft = (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).filter(b => b.label && b.url);
-  try { await api('/settings', { method: 'PUT', body: { [`${kind}_nav_buttons`]: JSON.stringify(draft) } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+  const draft = buttonDrafts[kind].filter(b => b.label && b.url);
+  try { await api('/settings', { method: 'PUT', body: { [CONTENT_BUTTON_SETTING_KEY[kind]]: JSON.stringify(draft) } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+window.saveHeroSection = async () => {
+  const draft = buttonDrafts.hero.filter(b => b.label && b.url);
+  try {
+    await api('/settings', { method: 'PUT', body: {
+      cta_buttons: JSON.stringify(draft),
+      homepage_hero_eyebrow: qs('#content-hero-eyebrow').value,
+      homepage_hero_heading: qs('#content-hero-heading').value,
+    } });
+    toast('Saved');
+  } catch (err) { toast(err.message, true); }
+};
+window.saveScheduleHeading = async () => {
+  try { await api('/settings', { method: 'PUT', body: { homepage_schedule_heading: qs('#content-schedule-heading').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
 function renderFaqItems() {
@@ -276,7 +312,10 @@ window.saveFaqItems = async () => {
 };
 
 window.saveAboutText = async () => {
-  try { await api('/settings', { method: 'PUT', body: { homepage_about_text: qs('#content-about').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+  try {
+    await api('/settings', { method: 'PUT', body: { homepage_about_text: qs('#content-about').value, homepage_about_heading: qs('#content-about-heading').value } });
+    toast('Saved');
+  } catch (err) { toast(err.message, true); }
 };
 
 async function loadContactSubmissions() {
@@ -293,12 +332,18 @@ async function loadContactSubmissions() {
 async function loadContent() {
   const { settings } = await api('/settings');
   const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
-  headerButtonsDraft = parseList(settings.header_nav_buttons);
-  footerButtonsDraft = parseList(settings.footer_nav_buttons);
+  buttonDrafts.header = parseList(settings.header_nav_buttons);
+  buttonDrafts.footer = parseList(settings.footer_nav_buttons);
+  buttonDrafts.hero = parseList(settings.cta_buttons);
   faqItemsDraft = parseList(settings.faq_items);
+  qs('#content-hero-eyebrow').value = settings.homepage_hero_eyebrow || '';
+  qs('#content-hero-heading').value = settings.homepage_hero_heading || '';
+  qs('#content-schedule-heading').value = settings.homepage_schedule_heading || '';
+  qs('#content-about-heading').value = settings.homepage_about_heading || '';
   qs('#content-about').value = settings.homepage_about_text || '';
   renderContentButtons('header');
   renderContentButtons('footer');
+  renderContentButtons('hero');
   renderFaqItems();
   loadContactSubmissions();
 }

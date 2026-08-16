@@ -42,6 +42,7 @@ qs('#contact-form').addEventListener('submit', async (e) => {
     qs('#contact-form').closest('.card').innerHTML = '<p style="text-align:center;padding:10px 0">Thanks — your message has been sent. We\'ll be in touch.</p>';
   } catch (err) { toast(err.message, true); }
 });
+renderPublicFooter();
 </script>
 </body>
 </html>

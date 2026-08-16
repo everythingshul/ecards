@@ -71,9 +71,9 @@
   </header>
 
   <div class="hero">
-    <span class="eyebrow">Kipas Hair BP Platform</span>
+    <span class="eyebrow" id="hero-eyebrow">Kipas Hair BP Platform</span>
     <h1 id="org-name">Kipas Hair BP Platform</h1>
-    <div class="cta-row">
+    <div class="cta-row" id="cta-buttons">
       <a href="/apply" class="btn btn-primary">Register Your Shul</a>
       <a href="/apply-store" class="btn btn-outline">Apply as a Participating Store</a>
       <a href="/apply-ezras-habayis" class="btn btn-outline">Ezras Habayis Application</a>
@@ -85,7 +85,7 @@
     <div class="band-inner">
       <div class="section-head">
         <span class="eyebrow-sm">Schedule</span>
-        <h2>When applications are open</h2>
+        <h2 id="schedule-heading">When applications are open</h2>
       </div>
       <div class="schedule-grid" id="schedule-grid">
         <div class="schedule-card"><p class="small-muted">Loading…</p></div>
@@ -96,7 +96,7 @@
   <section class="band">
     <div class="band-inner about-wrap">
       <div class="quote-mark">&ldquo;</div>
-      <h2>About</h2>
+      <h2 id="about-heading">About</h2>
       <p id="about-body">We exist to make it simple, dignified, and reliable for shuls to help their families before Yom Tov. Every shul that signs on gets a clear process, every applicant gets a fair and timely answer, and every card is tracked from issuance to the register, so generosity never gets lost in paperwork.</p>
       <div class="about-contact" id="about-contact"></div>
     </div>
@@ -146,11 +146,21 @@
       { label: 'Contact Us', url: '/contact' },
       { label: 'Sign In', url: '/login' },
     ];
+    const DEFAULT_CTA_BUTTONS = [
+      { label: 'Register Your Shul', url: '/apply' },
+      { label: 'Apply as a Participating Store', url: '/apply-store' },
+      { label: 'Ezras Habayis Application', url: '/apply-ezras-habayis' },
+      { label: 'Sign In', url: '/login' },
+    ];
     const DEFAULT_ABOUT_TEXT = "We exist to make it simple, dignified, and reliable for shuls to help their families before Yom Tov. Every shul that signs on gets a clear process, every applicant gets a fair and timely answer, and every card is tracked from issuance to the register, so generosity never gets lost in paperwork.";
 
     api('/orgs/resolve').then(({ org, popup, content }) => {
       if (!org) return;
-      if (org.name) { document.getElementById('org-name').textContent = org.name; document.getElementById('org-name-nav').textContent = org.name; document.getElementById('page-title').textContent = org.name; }
+      if (org.name) { document.getElementById('org-name-nav').textContent = org.name; document.getElementById('page-title').textContent = org.name; }
+      document.getElementById('org-name').textContent = content?.heroHeading || org.name || 'Kipas Hair BP Platform';
+      qs('#hero-eyebrow').textContent = content?.heroEyebrow || org.name || 'Kipas Hair BP Platform';
+      qs('#schedule-heading').textContent = content?.scheduleHeading || 'When applications are open';
+      qs('#about-heading').textContent = content?.aboutHeading || 'About';
       const contactBits = [];
       if (org.support_email) contactBits.push(`<a href="mailto:${esc(org.support_email)}">${esc(org.support_email)}</a>`);
       if (org.support_phone) contactBits.push(`<a href="tel:${esc(org.support_phone)}">${esc(org.support_phone)}</a>`);
@@ -161,6 +171,8 @@
       qs('#header-buttons').innerHTML = headerBtns.map(b => `<a href="${esc(b.url)}" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">${esc(b.label)}</a>`).join('');
       const footerBtns = content?.footerButtons?.length ? content.footerButtons : DEFAULT_FOOTER_BUTTONS;
       qs('#footer-buttons').innerHTML = footerBtns.map(b => `<a href="${esc(b.url)}">${esc(b.label)}</a>`).join('');
+      const ctaBtns = content?.ctaButtons?.length ? content.ctaButtons : DEFAULT_CTA_BUTTONS;
+      qs('#cta-buttons').innerHTML = ctaBtns.map((b, i) => `<a href="${esc(b.url)}" class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'}">${esc(b.label)}</a>`).join('');
 
       if (popup?.enabled && popup.message) {
         const el = document.createElement('div');
