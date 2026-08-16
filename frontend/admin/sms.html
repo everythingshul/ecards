@@ -57,7 +57,15 @@ qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
 }));
 
 api('/sms/config').then(({ mockMode }) => {
-  if (mockMode) qs('#mock-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px"><strong>Mock mode:</strong> SMS_API_BASE / SMS_API_KEY are not configured yet, so messages are logged here but not actually sent. Set those env vars to go live.</div>`;
+  if (mockMode) qs('#mock-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px">
+    <strong>SMS isn't turned on yet — messages are only being logged here, not actually sent.</strong>
+    <p class="small-muted" style="margin-top:8px">To activate it:</p>
+    <ol class="small-muted" style="margin:4px 0 0;padding-left:20px;line-height:1.7">
+      <li>Log into your SimpleSender account and go to <strong>Developer &gt; Docs &amp; Keys</strong> to get your Base URL and API Key.</li>
+      <li>Go to your Render dashboard &gt; this service &gt; <strong>Environment</strong>, and add two variables: <code>SMS_API_BASE</code> (the base URL) and <code>SMS_API_KEY</code> (the API key).</li>
+      <li>Render will redeploy automatically once those are saved — after that, this banner disappears and messages send for real.</li>
+    </ol>
+  </div>`;
 }).catch(() => {});
 
 let state = { search: '', status: '', page: 1, pageSize: 25 };

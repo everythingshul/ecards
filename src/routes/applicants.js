@@ -5,6 +5,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
+import { sendSmsChecked } from '../services/sms.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
@@ -153,6 +154,47 @@ router.get('/:id', (req, res) => {
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
   const flags = req.user.role === 'shul' ? [] : db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
   res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role), notes, cards, flags });
+});
+
+// Admin-only quick-contact: send a one-off SMS/email straight from an
+// applicant's detail view, and see the full history of both — not just
+// what was sent *about* this applicant (related_entity_type/id) but
+// anything ever sent to their phone numbers/email, in case a message went
+// out through the general SMS/Email Center compose flow rather than from
+// this modal.
+router.get('/:id/messages', requireAdmin, (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const phones = [applicant.home_phone, applicant.husband_cell, applicant.wife_cell].filter(Boolean);
+  const phonePlaceholders = phones.length ? phones.map(() => '?').join(',') : "''";
+  const sms = db.prepare(`SELECT * FROM sms_messages WHERE org_id = ? AND ((related_entity_type='applicant' AND related_entity_id=?) OR phone IN (${phonePlaceholders})) ORDER BY created_at DESC`)
+    .all(req.user.org_id, applicant.id, ...phones);
+  const emails = applicant.email
+    ? db.prepare(`SELECT * FROM emails_sent WHERE org_id = ? AND ((related_entity_type='applicant' AND related_entity_id=?) OR to_email=?) ORDER BY created_at DESC`).all(req.user.org_id, applicant.id, applicant.email)
+    : db.prepare(`SELECT * FROM emails_sent WHERE org_id = ? AND related_entity_type='applicant' AND related_entity_id=? ORDER BY created_at DESC`).all(req.user.org_id, applicant.id);
+  res.json({ sms, emails });
+});
+
+router.post('/:id/send-sms', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const { to, body } = req.body || {};
+  const phone = to || applicant.husband_cell || applicant.wife_cell || applicant.home_phone;
+  if (!phone) return res.status(400).json({ error: 'No phone number on file for this applicant' });
+  if (!body) return res.status(400).json({ error: 'Message body is required' });
+  const { emailError } = await sendSmsChecked(req.user.org_id, phone, body, { relatedEntityType: 'applicant', relatedEntityId: applicant.id, sentBy: req.user.id });
+  res.json({ ok: !emailError, emailError });
+});
+
+router.post('/:id/send-email', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const { to, subject, body } = req.body || {};
+  const email = to || applicant.email;
+  if (!email) return res.status(400).json({ error: 'No email on file for this applicant' });
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
+  const { emailError } = await sendMailChecked(req.user.org_id, email, subject, body, { relatedEntityType: 'applicant', relatedEntityId: applicant.id, sentBy: req.user.id });
+  res.json({ ok: !emailError, emailError });
 });
 
 // Same idea as shuls' /other-seasons: each season's applicant is its own

@@ -598,6 +598,70 @@ window.retractDocumentSignature = async (docId, entityType, entityId, containerI
 };
 window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 
+// Shared SMS+Email history/quick-send tab for applicant & shul detail modals.
+// entityType is 'applicant' or 'shul' — the route prefix is just that plus 's'.
+async function loadMessagesTab(entityType, entityId, containerId, defaultPhone, defaultEmail) {
+  const container = qs('#' + containerId);
+  container.innerHTML = '<p class="small-muted">Loading…</p>';
+  const prefix = `/${entityType}s/${entityId}`;
+  const safePhone = esc(defaultPhone || '').replace(/'/g, "\\'");
+  const safeEmail = esc(defaultEmail || '').replace(/'/g, "\\'");
+  try {
+    const { sms, emails } = await api(`${prefix}/messages`);
+    container.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <strong>Send SMS</strong>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+          <div style="flex:1;min-width:140px"><label style="margin-top:0">To</label><input id="msg-sms-to-${entityId}" value="${esc(defaultPhone || '')}" placeholder="phone number"></div>
+        </div>
+        <label>Message</label><textarea id="msg-sms-body-${entityId}" rows="2" placeholder="Type a message…"></textarea>
+        <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="sendQuickSms('${entityType}','${entityId}','${containerId}','${safePhone}','${safeEmail}')">Send SMS</button>
+      </div>
+      <div style="margin-bottom:16px">${sms.length ? sms.map(m => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div class="flex-between"><strong>${esc(m.phone)}</strong>${badge(m.status, m.status)}</div>
+          <div>${esc(m.body || '')}</div>
+          <div class="small-muted">${fmtDateTime(m.created_at)}${m.error_message ? ' · ' + esc(m.error_message) : ''}</div>
+        </div>`).join('') : '<p class="small-muted">No SMS messages yet.</p>'}</div>
+      <div class="divider"></div>
+      <div class="card" style="margin:14px 0">
+        <strong>Send Email</strong>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+          <div style="flex:1;min-width:160px"><label style="margin-top:0">To</label><input id="msg-email-to-${entityId}" value="${esc(defaultEmail || '')}" placeholder="email address"></div>
+        </div>
+        <label>Subject</label><input id="msg-email-subject-${entityId}" placeholder="Subject">
+        <label>Message</label><textarea id="msg-email-body-${entityId}" rows="3" placeholder="Type a message…"></textarea>
+        <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="sendQuickEmail('${entityType}','${entityId}','${containerId}','${safePhone}','${safeEmail}')">Send Email</button>
+      </div>
+      <div>${emails.length ? emails.map(m => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div class="flex-between"><strong>${esc(m.to_email)}</strong>${badge(m.status, m.status)}</div>
+          <div>${esc(m.subject || '')}</div>
+          <div class="small-muted">${fmtDateTime(m.created_at)}${m.error_message ? ' · ' + esc(m.error_message) : ''}</div>
+        </div>`).join('') : '<p class="small-muted">No emails sent yet.</p>'}</div>
+    `;
+  } catch (err) { container.innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
+}
+window.sendQuickSms = async (entityType, entityId, containerId, defaultPhone, defaultEmail) => {
+  const to = qs(`#msg-sms-to-${entityId}`).value.trim();
+  const body = qs(`#msg-sms-body-${entityId}`).value.trim();
+  if (!body) return toast('Enter a message', true);
+  try {
+    const r = await api(`/${entityType}s/${entityId}/send-sms`, { method: 'POST', body: { to, body } });
+    toast(r.emailError ? `SMS failed: ${r.emailError}` : 'SMS sent', !!r.emailError);
+    loadMessagesTab(entityType, entityId, containerId, defaultPhone, defaultEmail);
+  } catch (err) { toast(err.message, true); }
+};
+window.sendQuickEmail = async (entityType, entityId, containerId, defaultPhone, defaultEmail) => {
+  const to = qs(`#msg-email-to-${entityId}`).value.trim();
+  const subject = qs(`#msg-email-subject-${entityId}`).value.trim();
+  const body = qs(`#msg-email-body-${entityId}`).value.trim();
+  if (!subject || !body) return toast('Enter a subject and message', true);
+  try {
+    const r = await api(`/${entityType}s/${entityId}/send-email`, { method: 'POST', body: { to, subject, body } });
+    toast(r.emailError ? `Email failed: ${r.emailError}` : 'Email sent', !!r.emailError);
+    loadMessagesTab(entityType, entityId, containerId, defaultPhone, defaultEmail);
+  } catch (err) { toast(err.message, true); }
+};
+
 // Kept as a no-op call site for public-facing pages (login/apply/sign-*/form)
 // that still call it — there is no footer mark to render anymore.
 function renderPublicFooter() {}

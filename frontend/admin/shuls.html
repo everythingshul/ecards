@@ -93,6 +93,7 @@ async function openShul(id) {
       <div class="tabs" id="stabs">
         <button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button>
         <button data-t="contract">Contract</button><button data-t="applicants">Applicants (${applicants.length})</button>
+        <button data-t="messages">Messages</button>
       </div>
       <div id="tab-info">
         <div class="grid-2">
@@ -118,6 +119,9 @@ async function openShul(id) {
       <div id="tab-applicants" style="display:none">
         ${applicants.length ? `<table><thead><tr><th>Name</th><th>Status</th></tr></thead><tbody>${applicants.map(a=>`<tr><td>${esc(a.first_name)} ${esc(a.last_name)}</td><td>${badge(a.approval_status, a.approval_status)}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No applicants submitted yet.</p>'}
       </div>
+      <div id="tab-messages" style="display:none">
+        <div id="tab-messages-list"><p class="small-muted">Loading…</p></div>
+      </div>
     `;
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Shul', '/shuls/${id}/other-seasons', 'openShul')">View Other Seasons</button>
@@ -128,8 +132,9 @@ async function openShul(id) {
     openModal(shul.name_en, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','notes','contract','applicants'].forEach(t => qs('#tab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','notes','contract','applicants','messages'].forEach(t => qs('#tab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
+    loadMessagesTab('shul', id, 'tab-messages-list', shul.gabai_cell || shul.ruv_phone || '', shul.gabai_email || '');
   } catch (err) { toast(err.message, true); }
 }
 

@@ -148,7 +148,7 @@ async function openApplicant(id) {
   try {
     const { applicant: a, notes, cards, flags } = await api(`/applicants/${id}`);
     const body = `
-      <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button></div>
+      <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button><button data-t="messages">Messages</button></div>
       <div id="atab-info">
         <div class="grid-2">
           <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>
@@ -190,6 +190,9 @@ async function openApplicant(id) {
       </div>
       <div id="atab-documents" style="display:none">
         <div id="atab-documents-list"><p class="small-muted">Loading…</p></div>
+      </div>
+      <div id="atab-messages" style="display:none">
+        <div id="atab-messages-list"><p class="small-muted">Loading…</p></div>
       </div>`;
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Applicant', '/applicants/${id}/other-seasons', 'openApplicant')">View Other Seasons</button>
@@ -199,9 +202,10 @@ async function openApplicant(id) {
     openModal(`${a.first_name} ${a.last_name}`, body, footer);
     qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','notes','cards','documents'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','notes','cards','documents','messages'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
     loadDocumentsTab('applicant', id, 'atab-documents-list', a.email || '');
+    loadMessagesTab('applicant', id, 'atab-messages-list', a.husband_cell || a.wife_cell || a.home_phone || '', a.email || '');
   } catch (err) { toast(err.message, true); }
 }
 

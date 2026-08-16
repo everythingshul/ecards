@@ -6,6 +6,7 @@ import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
+import { sendSmsChecked } from '../services/sms.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
@@ -175,6 +176,45 @@ router.get('/:id', (req, res) => {
   const applicants = db.prepare('SELECT id, first_name, last_name, approval_status FROM applicants WHERE shul_id = ?').all(shul.id);
   const flags = db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='shul' AND (entity_id = ? OR matched_entity_id = ?) AND status='open'`).all(shul.id, shul.id);
   res.json({ shul: redact(shul, req.permission.hidden_fields), notes, contract, applicants, flags });
+});
+
+// Admin-only quick-contact: send a one-off SMS/email straight from a shul's
+// detail view, and see the full history of both — matched by either
+// related_entity_type/id tagging or the shul's own phone/email, so messages
+// sent through the general SMS/Email Center compose flow still show up here.
+router.get('/:id/messages', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const phones = [shul.gabai_cell, shul.ruv_phone].filter(Boolean);
+  const phonePlaceholders = phones.length ? phones.map(() => '?').join(',') : "''";
+  const sms = db.prepare(`SELECT * FROM sms_messages WHERE org_id = ? AND ((related_entity_type='shul' AND related_entity_id=?) OR phone IN (${phonePlaceholders})) ORDER BY created_at DESC`)
+    .all(req.user.org_id, shul.id, ...phones);
+  const emails = shul.gabai_email
+    ? db.prepare(`SELECT * FROM emails_sent WHERE org_id = ? AND ((related_entity_type='shul' AND related_entity_id=?) OR to_email=?) ORDER BY created_at DESC`).all(req.user.org_id, shul.id, shul.gabai_email)
+    : db.prepare(`SELECT * FROM emails_sent WHERE org_id = ? AND related_entity_type='shul' AND related_entity_id=? ORDER BY created_at DESC`).all(req.user.org_id, shul.id);
+  res.json({ sms, emails });
+});
+
+router.post('/:id/send-sms', requireAdmin, async (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const { to, body } = req.body || {};
+  const phone = to || shul.gabai_cell || shul.ruv_phone;
+  if (!phone) return res.status(400).json({ error: 'No phone number on file for this shul' });
+  if (!body) return res.status(400).json({ error: 'Message body is required' });
+  const { emailError } = await sendSmsChecked(req.user.org_id, phone, body, { relatedEntityType: 'shul', relatedEntityId: shul.id, sentBy: req.user.id });
+  res.json({ ok: !emailError, emailError });
+});
+
+router.post('/:id/send-email', requireAdmin, async (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const { to, subject, body } = req.body || {};
+  const email = to || shul.gabai_email;
+  if (!email) return res.status(400).json({ error: 'No email on file for this shul' });
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
+  const { emailError } = await sendMailChecked(req.user.org_id, email, subject, body, { relatedEntityType: 'shul', relatedEntityId: shul.id, sentBy: req.user.id });
+  res.json({ ok: !emailError, emailError });
 });
 
 // Each season's application is its own independent shul record (spec: "treat
