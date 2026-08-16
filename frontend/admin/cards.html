@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/cards.html', `
+renderShell('/admin/cards', `
   <div class="flex-between"><h2>Cards & Transactions</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-sync-all">Sync All Now</button><button class="btn btn-outline btn-sm" id="btn-export-cards">Export Cards CSV</button><button class="btn btn-outline btn-sm" id="btn-export-txns">Export Transactions CSV</button></div></div>
   <p class="small-muted">Cards auto-sync with disccardpromos every 15 minutes in the background. Use Sync All Now for an immediate refresh.</p>
   <div id="mock-banner"></div>

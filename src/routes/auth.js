@@ -49,7 +49,7 @@ router.post('/forgot-password', async (req, res) => {
     const token = uuid();
     const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
-    const resetUrl = `${process.env.APP_URL || ''}/reset-password.html?token=${token}`;
+    const resetUrl = `${process.env.APP_URL || ''}/reset-password?token=${token}`;
     const tmpl = renderSystemTemplate(user.org_id, 'passwordReset', { resetUrl });
     const { emailError } = await sendMailChecked(user.org_id, user.email, tmpl.subject, tmpl.body);
     if (emailError) console.error('[mail] password reset email failed:', emailError);

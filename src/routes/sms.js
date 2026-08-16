@@ -7,16 +7,31 @@ import { sendCsv } from '../services/csv.js';
 const router = Router();
 
 // ============================= Inbound webhook (public) =============================
-// No auth — this is what you'd point the SMS provider's inbound-message
-// webhook at once one is configured. Accepts a few common field name
-// variants since the real provider hasn't been picked yet; normalizes to
-// {from, body} before logging. Always responds 200 so providers don't retry.
+// No auth — this is what you point the provider's inbound-message webhook at
+// (SimpleSender: Developer > Docs & Keys > Webhooks). Accepts several common
+// field-name variants, including one level of nesting (some providers wrap
+// the message under `data`/`message`/`payload`), and normalizes to
+// {from, body} before logging.
+//
+// Never silently drops a payload we can't parse: an unrecognized shape still
+// gets logged to the console (full raw body, so a real hit from the
+// provider tells us exactly what field names to add) and stored to
+// sms_messages as a 'received' row with a placeholder body, so at minimum
+// the Inbox tab shows *that* something arrived even before we know how to
+// read it. Always responds 200 so the provider doesn't retry.
 router.post('/webhook/inbound', (req, res) => {
   const b = req.body || {};
-  const from = b.from || b.From || b.sender || b.msisdn;
-  const body = b.body || b.Body || b.text || b.message;
-  if (from && body) {
+  const nested = b.data || b.message || b.payload || {};
+  const from = b.from || b.From || b.sender || b.msisdn || b.phone || b.source
+    || nested.from || nested.From || nested.sender || nested.msisdn || nested.phone;
+  const body = b.body || b.Body || b.text || b.message || b.content
+    || nested.body || nested.Body || nested.text || nested.content;
+  if (from && typeof body === 'string') {
     try { logInboundSms(null, from, body); } catch (e) { console.error('[sms] failed to log inbound message:', e.message); }
+  } else {
+    console.warn('[sms] inbound webhook hit with an unrecognized payload shape — logging raw body for review:', JSON.stringify(b));
+    try { logInboundSms(null, from || '(unknown sender)', body || `Unrecognized webhook payload — raw: ${JSON.stringify(b).slice(0, 500)}`); }
+    catch (e) { console.error('[sms] failed to log unrecognized inbound payload:', e.message); }
   }
   res.json({ ok: true });
 });

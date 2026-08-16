@@ -5,10 +5,10 @@ const Auth = {
   token() { return localStorage.getItem('ec_token'); },
   user() { try { return JSON.parse(localStorage.getItem('ec_user') || 'null'); } catch { return null; } },
   set(token, user) { localStorage.setItem('ec_token', token); localStorage.setItem('ec_user', JSON.stringify(user)); },
-  logout() { localStorage.removeItem('ec_token'); localStorage.removeItem('ec_user'); location.href = '/login.html'; },
-  requireAuth() { if (!this.token()) location.href = '/login.html'; },
+  logout() { localStorage.removeItem('ec_token'); localStorage.removeItem('ec_user'); location.href = '/login'; },
+  requireAuth() { if (!this.token()) location.href = '/login'; },
   // Bounces away immediately if the signed-in role isn't one of `roles` —
-  // e.g. a shul-portal login typing /admin/dashboard.html into the address
+  // e.g. a shul-portal login typing /admin/dashboard into the address
   // bar. This is a UX guard only: the role read here comes from localStorage
   // and every real data endpoint independently re-checks the actual role
   // server-side from the JWT on every request (see middleware/auth.js), so
@@ -19,9 +19,9 @@ const Auth = {
     const user = this.user();
     if (!user) return this.logout();
     if (!roles.includes(user.role)) {
-      if (user.role === 'shul') location.href = '/shul-portal/dashboard.html';
-      else if (user.role === 'store') location.href = '/store-portal/dashboard.html';
-      else location.href = '/admin/dashboard.html';
+      if (user.role === 'shul') location.href = '/shul-portal/dashboard';
+      else if (user.role === 'store') location.href = '/store-portal/dashboard';
+      else location.href = '/admin/dashboard';
     }
   },
   requireAdmin() { this.requireRole('staff', 'org_admin', 'super_admin'); },
@@ -93,29 +93,29 @@ function qs(sel) { return document.querySelector(sel); }
 function qsa(sel) { return Array.from(document.querySelectorAll(sel)); }
 
 const NAV_ITEMS = [
-  { href: '/admin/dashboard.html', label: 'Dashboard', icon: '&#9670;', resource: 'dashboard' },
-  { href: '/admin/shuls.html', label: 'Shuls', icon: '&#9670;', resource: 'shuls' },
-  { href: '/admin/applicants.html', label: 'Applicants', icon: '&#9670;', resource: 'applicants' },
-  { href: '/admin/cards.html', label: 'Cards & Transactions', icon: '&#9670;', resource: 'cards' },
-  { href: '/admin/stores.html', label: 'Stores', icon: '&#9670;', resource: 'stores' },
-  { href: '/admin/tasks.html', label: 'Tasks', icon: '&#9670;', resource: 'tasks' },
-  { href: '/admin/forms.html', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
-  { href: '/admin/emails.html', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
-  { href: '/admin/sms.html', label: 'SMS Center', icon: '&#9670;', resource: 'sms' },
-  { href: '/admin/updates.html', label: 'Updates', icon: '&#9670;', resource: 'updates' },
-  { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
-  { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
-  { href: '/admin/audit.html', label: 'Recent Actions', icon: '&#9670;', resource: 'audit', roles: ['super_admin'] },
+  { href: '/admin/dashboard', label: 'Dashboard', icon: '&#9670;', resource: 'dashboard' },
+  { href: '/admin/shuls', label: 'Shuls', icon: '&#9670;', resource: 'shuls' },
+  { href: '/admin/applicants', label: 'Applicants', icon: '&#9670;', resource: 'applicants' },
+  { href: '/admin/cards', label: 'Cards & Transactions', icon: '&#9670;', resource: 'cards' },
+  { href: '/admin/stores', label: 'Stores', icon: '&#9670;', resource: 'stores' },
+  { href: '/admin/tasks', label: 'Tasks', icon: '&#9670;', resource: 'tasks' },
+  { href: '/admin/forms', label: 'Form Builder', icon: '&#9670;', resource: 'forms' },
+  { href: '/admin/emails', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
+  { href: '/admin/sms', label: 'SMS Center', icon: '&#9670;', resource: 'sms' },
+  { href: '/admin/updates', label: 'Updates', icon: '&#9670;', resource: 'updates' },
+  { href: '/admin/users', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
+  { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resource: 'settings' },
+  { href: '/admin/audit', label: 'Recent Actions', icon: '&#9670;', resource: 'audit', roles: ['super_admin'] },
 ];
 const SHUL_NAV = [
-  { href: '/shul-portal/dashboard.html', label: 'My Applicants' },
-  { href: '/shul-portal/upload.html', label: 'Bulk Upload' },
-  { href: '/shul-portal/updates.html', label: 'Updates' },
+  { href: '/shul-portal/dashboard', label: 'My Applicants' },
+  { href: '/shul-portal/upload', label: 'Bulk Upload' },
+  { href: '/shul-portal/updates', label: 'Updates' },
 ];
 const STORE_NAV = [
-  { href: '/store-portal/dashboard.html', label: 'Overview' },
-  { href: '/store-portal/billing.html', label: 'Billing' },
-  { href: '/store-portal/updates.html', label: 'Updates' },
+  { href: '/store-portal/dashboard', label: 'Overview' },
+  { href: '/store-portal/billing', label: 'Billing' },
+  { href: '/store-portal/updates', label: 'Updates' },
 ];
 
 function renderShell(activeHref, contentHtml) {
@@ -146,7 +146,7 @@ function renderShell(activeHref, contentHtml) {
   if (role === 'shul' || role === 'store') {
     api('/updates/inbox/unread-count').then(({ count }) => {
       if (!count) return;
-      const link = document.querySelector('nav a[data-href$="/updates.html"]');
+      const link = document.querySelector('nav a[data-href$="/updates"]');
       if (link) link.querySelector('.nav-label').innerHTML += ` ${badge(String(count), 'active')}`;
       layoutNavOverflow();
     }).catch(() => {});
@@ -515,8 +515,8 @@ function renderCompareTable(fields, a, b) {
 async function storeLandingUrl(user) {
   try {
     const { store } = await api(`/stores/${user.store_id}`);
-    return (store.onboarding_step || 0) >= 3 ? '/store-portal/dashboard.html' : '/store-portal/onboarding.html';
-  } catch { return '/store-portal/dashboard.html'; }
+    return (store.onboarding_step || 0) >= 3 ? '/store-portal/dashboard' : '/store-portal/onboarding';
+  } catch { return '/store-portal/dashboard'; }
 }
 
 // Authenticated PDF view (opens in a new tab instead of forcing a download) —

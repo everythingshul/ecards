@@ -288,7 +288,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   }
   db.prepare(`UPDATE shuls SET status='approved', slots_allocated=?, portal_user_id=?, updated_at=datetime('now') WHERE id=?`)
     .run(slots, user.id, shul.id);
-  const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${user.invite_token}`;
+  const loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${user.invite_token}`;
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] shul approval email failed:', emailError);
@@ -310,7 +310,7 @@ router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
   const token = uuid();
   const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
   db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
-  const loginUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
+  const loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: shul.slots_allocated });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] shul welcome resend failed:', emailError);
@@ -353,7 +353,7 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   db.prepare(`INSERT INTO contracts (id, shul_id, season_id, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,?,?,'sent',?,?,datetime('now'))`).run(id, shul.id, shul.season_id, pdfPath, token, expires);
   db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
-  const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
+  const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
   const to = req.body.email || shul.gabai_email;
   const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
   const { emailError } = await sendMailChecked(req.user.org_id, to, tmpl.subject, tmpl.body);
@@ -479,7 +479,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         db.prepare(`INSERT INTO contracts (id, shul_id, season_id, pdf_path, status, sign_token, sign_token_expires, sent_at) VALUES (?,?,?,?,'sent',?,?,datetime('now'))`)
           .run(uuid(), shul.id, shul.season_id, pdfPath, token, expires);
         db.prepare(`UPDATE shuls SET status='contract_sent' WHERE id=?`).run(shul.id);
-        const signUrl = `${process.env.APP_URL || ''}/sign-contract.html?token=${token}`;
+        const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
         const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
         const { emailError } = await sendMailChecked(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body);
         if (emailError) { console.error('[mail] mass-upload contract email failed for', shul.gabai_email, emailError); errors.push({ row: i + 2, error: `Shul created but contract email failed: ${emailError}` }); }

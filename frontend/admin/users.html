@@ -18,7 +18,7 @@ const HIDABLE_FIELDS = {
   applicants: ['first_name','last_name','home_phone','husband_cell','wife_cell','email','address','card_amount','comments'],
 };
 
-renderShell('/admin/users.html', `
+renderShell('/admin/users', `
   <div class="flex-between"><h2>Users & Permissions</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Invite User</button></div>
   <p class="small-muted">Control which pages each internal user can see, whether they can edit/export, and which individual fields (e.g. applicant names) are hidden from them.</p>
   <div class="card" style="padding:0;overflow-x:auto">

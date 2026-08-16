@@ -28,7 +28,7 @@ const u = Auth.user();
     const { store: s } = await api(`/stores/${u.store_id}`);
     store = s;
     step = Math.min(3, (s.onboarding_step || 0) + 1);
-    if (s.onboarding_step >= 3) { location.href = '/store-portal/dashboard.html'; return; }
+    if (s.onboarding_step >= 3) { location.href = '/store-portal/dashboard'; return; }
     render();
   } catch (err) { qs('#wrap').innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
 })();
@@ -83,7 +83,7 @@ function attachHandlers() {
     try { const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, info, agree_terms: true } }); store = s; step = 3; render(); } catch (err) { toast(err.message, true); }
   });
   if (step === 3) qs('#finish-btn').addEventListener('click', async () => {
-    try { await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 3 } }); location.href = '/store-portal/dashboard.html'; } catch (err) { toast(err.message, true); }
+    try { await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 3 } }); location.href = '/store-portal/dashboard'; } catch (err) { toast(err.message, true); }
   });
 }
 </script>

@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/applicants.html', `
+renderShell('/admin/applicants', `
   <div class="flex-between">
     <h2>Applicants</h2>
     <div class="pill-row">
@@ -152,12 +152,14 @@ async function openApplicant(id) {
       <div id="atab-info">
         <div class="grid-2">
           <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>
-          <div><strong>Shul</strong><br>${esc(a.shul_name||'')}</div>
-        </div>
-        <div class="grid-2">
           <div><strong>Status</strong><br>${badge(a.approval_status, a.approval_status)} ${a.is_paused ? badge('paused','paused') : ''}</div>
         </div>
         <div class="divider"></div>
+        <div class="grid-2">
+          <div><label>First Name</label><input id="e-first_name" value="${esc(a.first_name||'')}"></div>
+          <div><label>Last Name</label><input id="e-last_name" value="${esc(a.last_name||'')}"></div>
+        </div>
+        <label>Shul</label><input id="e-shul-search" placeholder="Search shuls by name…" autocomplete="off"><input type="hidden" id="e-shul_id">
         <div class="grid-2">
           <div><label>Marital Status</label><select id="e-marital"><option ${a.marital_status==='single'?'selected':''}>single</option><option ${a.marital_status==='married'?'selected':''}>married</option><option ${a.marital_status==='widowed'?'selected':''}>widowed</option><option ${a.marital_status==='divorced'?'selected':''}>divorced</option></select></div>
           <div><label>Children</label><input id="e-children" type="number" value="${a.num_children??0}"></div>
@@ -176,6 +178,7 @@ async function openApplicant(id) {
         </div>
         <label>Address</label><input id="e-address" value="${esc(a.address||'')}">
         <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(a.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(a.state||'')}"></div></div>
+        <label>Zip</label><input id="e-zip" value="${esc(a.zip||'')}" style="max-width:160px">
         <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-yomtov" ${a.home_for_yomtov?'checked':''}><label style="margin:0">Home for Yom Tov</label></div>
         <label>Card Amount ($)</label><input id="e-card" type="number" step="0.01" value="${a.card_amount ?? ''}">
         <label>Comments</label><textarea id="e-comments" rows="3">${esc(a.comments||'')}</textarea>
@@ -186,7 +189,7 @@ async function openApplicant(id) {
         <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
       </div>
       <div id="atab-cards" style="display:none">
-        ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards.html?card=${c.id}">View transactions</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
+        ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards?card=${c.id}">View transactions</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
       </div>
       <div id="atab-documents" style="display:none">
         <div id="atab-documents-list"><p class="small-muted">Loading…</p></div>
@@ -200,6 +203,7 @@ async function openApplicant(id) {
       ${a.is_paused ? '' : (a.approval_status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectApplicant('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveApplicant('${id}')">Approve</button>` : '')}
       <button class="btn btn-primary btn-sm" onclick="saveApplicant('${id}')">Save</button>`;
     openModal(`${a.first_name} ${a.last_name}`, body, footer);
+    attachShulSearchSelect('e-shul-search', 'e-shul_id', a.shul_name || '');
     qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
       ['info','notes','cards','documents','messages'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
@@ -211,12 +215,18 @@ async function openApplicant(id) {
 
 window.saveApplicant = async (id) => {
   const body = {
+    first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value,
     marital_status: qs('#e-marital').value, num_children: +qs('#e-children').value, home_phone: qs('#e-home_phone').value,
     email: qs('#e-email').value, husband_cell: qs('#e-husband_cell').value, wife_cell: qs('#e-wife_cell').value,
     preferred_contact_method: qs('#e-pcm').value, preferred_number: qs('#e-pn').value, address: qs('#e-address').value,
-    city: qs('#e-city').value, state: qs('#e-state').value, home_for_yomtov: qs('#e-yomtov').checked,
+    city: qs('#e-city').value, state: qs('#e-state').value, zip: qs('#e-zip').value, home_for_yomtov: qs('#e-yomtov').checked,
     card_amount: qs('#e-card').value === '' ? null : +qs('#e-card').value, comments: qs('#e-comments').value,
   };
+  // Only reassign the shul if the admin actually picked a new one from the
+  // dropdown — the hidden field stays empty otherwise, and sending an empty
+  // shul_id would wipe the applicant's existing shul assignment.
+  const newShulId = qs('#e-shul_id').value;
+  if (newShulId) body.shul_id = newShulId;
   try { await api(`/applicants/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.approveApplicant = async (id) => {

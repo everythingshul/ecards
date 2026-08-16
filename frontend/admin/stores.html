@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/stores.html', `
+renderShell('/admin/stores', `
   <div class="flex-between"><h2>Participating Stores</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button><button class="btn btn-primary btn-sm" id="btn-new">+ Add Store</button></div></div>
   <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select><select id="f-source"><option value="">All sources</option><option value="application">Self-Applied</option><option value="admin">Admin Added</option></select></div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -58,6 +58,7 @@ async function openStore(id) {
         <p class="small-muted">Source: ${s.source === 'application' ? 'Self-applied' : 'Added by admin'} · Onboarding: ${(s.onboarding_step||0) >= 3 ? 'Complete' : (s.portal_user_id ? `Step ${s.onboarding_step||0} of 3` : 'Not yet invited to portal')}</p>
         <label>Address</label><input id="e-address" value="${esc(s.address||'')}">
         <div class="grid-2"><div><label>City</label><input id="e-city" value="${esc(s.city||'')}"></div><div><label>State</label><input id="e-state" value="${esc(s.state||'')}"></div></div>
+        <label>Zip</label><input id="e-zip" value="${esc(s.zip||'')}" style="max-width:160px">
         <label>Phone</label><input id="e-phone" value="${esc(s.phone||'')}">
         <div class="divider"></div>
         <div class="grid-2">
@@ -104,7 +105,7 @@ async function openStore(id) {
 }
 
 window.saveStore = async (id) => {
-  const fields = ['name','address','city','state','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments'];
+  const fields = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments'];
   const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
   body.setup_status = qs('#e-status').value; body.has_provider_account = qs('#e-has_account').checked;
   try { await api(`/stores/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }

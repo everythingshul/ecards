@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/sms.html', `
+renderShell('/admin/sms', `
   <div class="flex-between"><h2>SMS Center</h2><button class="btn btn-primary btn-sm" id="btn-compose">Send Message</button></div>
   <div id="mock-banner"></div>
   <div class="tabs" id="stabs">
@@ -35,7 +35,9 @@ renderShell('/admin/sms.html', `
   </div>
 
   <div id="panel-inbox" style="display:none">
-    <p class="small-muted">Incoming messages, received via the provider's inbound webhook once one is configured (<code>POST /api/sms/webhook/inbound</code>).</p>
+    <p class="small-muted">Incoming messages appear here once SimpleSender is sending them to your inbound webhook. In the SimpleSender dashboard, go to <strong>Developer &gt; Webhooks</strong> and set the inbound-message webhook URL to:</p>
+    <p><code id="webhook-url" style="user-select:all"></code></p>
+    <p class="small-muted">If that's already set and messages still aren't showing, an unrecognized payload from the provider is being logged (with the raw data) to this Inbox anyway so it's visible for review — check for a row with an unfamiliar "From" value.</p>
     <div class="card" style="padding:0;overflow-x:auto">
       <table><thead><tr><th>From</th><th>Message</th><th>Received</th></tr></thead>
       <tbody id="tbody-inbox"><tr><td colspan="3" class="empty-state">Loading…</td></tr></tbody></table>
@@ -55,6 +57,8 @@ qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.t === 'templates') loadTemplates();
   if (b.dataset.t === 'inbox') loadInbox();
 }));
+
+qs('#webhook-url').textContent = window.location.origin + '/api/sms/webhook/inbound';
 
 api('/sms/config').then(({ mockMode }) => {
   if (mockMode) qs('#mock-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px">

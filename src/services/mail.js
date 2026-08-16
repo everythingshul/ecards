@@ -44,20 +44,20 @@ function brandFor() {
 function assetUrl(path) { return `${process.env.APP_URL || ''}${path}`; }
 
 function wrap(bodyHtml, brand) {
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#f3ede2;font-family:Georgia,'Times New Roman',serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3ede2;padding:32px 0;">
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#ece3d3;font-family:Georgia,'Times New Roman',serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#ece3d3;padding:40px 16px;">
     <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5dcc8;">
-        <tr><td style="background:${brand.color};padding:22px 32px;text-align:center;">
-          <img src="${assetUrl('/img/org-logo.png')}" alt="${brand.name}" height="36" style="height:36px;width:auto;max-width:260px;">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 18px rgba(36,26,21,.10);">
+        <tr><td style="background:${brand.color};padding:30px 36px;text-align:center;">
+          <img src="${assetUrl('/img/org-logo.png')}" alt="${brand.name}" height="40" style="height:40px;width:auto;max-width:280px;">
         </td></tr>
-        <tr><td style="padding:32px;color:#2a231d;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
-        <tr><td style="background:#f3ede2;padding:20px 32px;color:#8a7c63;font-size:12px;border-top:1px solid #e5dcc8;text-align:center;">
-          <p style="margin:0 0 12px;">This is an automated message from ${brand.name}.</p>
-          <p style="margin:0;">
-            <img src="${assetUrl('/img/everythingshul-logo.png')}" alt="everythingshul" height="16" style="height:16px;width:auto;vertical-align:middle;margin-right:6px;">
-            <span style="vertical-align:middle;">Powered by everythingshul</span>
-          </p>
+        <tr><td style="height:3px;background:${brand.accent};line-height:0;font-size:0;">&nbsp;</td></tr>
+        <tr><td style="padding:40px 40px 32px;color:#2a231d;font-size:15.5px;line-height:1.7;">${bodyHtml}</td></tr>
+        <tr><td style="padding:0 40px;"><div style="border-top:1px solid #ece3d3;"></div></td></tr>
+        <tr><td style="padding:22px 40px 28px;text-align:center;">
+          <a href="https://everythingshul.com" style="text-decoration:none;color:#8a7c63;font-size:12px;">Powered By
+            <img src="${assetUrl('/img/everythingshul-logo.png')}" alt="everythingshul" height="16" style="height:16px;width:auto;vertical-align:middle;margin-left:6px;">
+          </a>
         </td></tr>
       </table>
     </td></tr>

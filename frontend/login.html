@@ -26,7 +26,7 @@
       <label>Password</label><input type="password" name="password" required>
       <div style="margin-top:20px"><button class="btn btn-primary" style="width:100%">Sign In</button></div>
     </form>
-    <p class="small-muted" style="text-align:center;margin-top:14px"><a href="/forgot-password.html">Forgot password?</a></p>
+    <p class="small-muted" style="text-align:center;margin-top:14px"><a href="/forgot-password">Forgot password?</a></p>
   </div>
 </div>
 </div>
@@ -39,9 +39,9 @@ qs('#login-form').addEventListener('submit', async (e) => {
   try {
     const { token, user } = await api('/auth/login', { method: 'POST', body: data });
     Auth.set(token, user);
-    if (user.role === 'shul') location.href = '/shul-portal/dashboard.html';
+    if (user.role === 'shul') location.href = '/shul-portal/dashboard';
     else if (user.role === 'store') location.href = await storeLandingUrl(user);
-    else location.href = '/admin/dashboard.html';
+    else location.href = '/admin/dashboard';
   } catch (err) { toast(err.message, true); }
 });
 </script>

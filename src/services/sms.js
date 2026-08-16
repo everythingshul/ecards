@@ -41,8 +41,16 @@ export async function sendSmsChecked(orgId, to, body, meta = {}) {
         body: JSON.stringify({ to: String(to).replace(/\D/g, ''), message: body }),
       });
       const resBody = await res.json().catch(() => ({}));
-      if (!res.ok) { status = 'failed'; error = resBody?.error || resBody?.message || `SMS send failed (${res.status})`; }
-      else if (resBody?.status && !['queued', 'sent'].includes(resBody.status)) { status = 'failed'; error = `Unexpected provider status: ${resBody.status}`; }
+      // A 2xx response is treated as success by default — SimpleSender's
+      // documented success-status wording ("queued") isn't the only value
+      // seen in practice, and requiring an exact allowlist match previously
+      // caused real, successfully-sent messages to be logged as "failed"
+      // whenever the provider used different wording. Only an explicit
+      // failure signal in the body (or a non-2xx HTTP status) counts as a
+      // real failure now.
+      if (!res.ok || resBody?.status === 'failed' || resBody?.success === false || resBody?.error) {
+        status = 'failed'; error = resBody?.error || resBody?.message || `SMS send failed (${res.status})`;
+      }
     } catch (e) {
       status = 'failed'; error = e.message;
     }

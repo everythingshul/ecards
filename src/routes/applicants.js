@@ -262,8 +262,15 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
   if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
   if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
-  // card_amount is admin-only (spec #5: "amount of money to give them on the card (admin sets)").
-  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount') : EDITABLE_FIELDS;
+  if (b.shul_id !== undefined) {
+    const targetShul = db.prepare('SELECT id FROM shuls WHERE id = ? AND org_id = ?').get(b.shul_id, req.user.org_id);
+    if (!targetShul) return res.status(400).json({ error: 'Shul not found' });
+  }
+  // card_amount and reassigning which shul an applicant belongs to are
+  // admin-only (spec #5 for card_amount; shul_id because a shul reassigning
+  // its own applicants to a different shul would be a data-integrity/scope
+  // violation, not a legitimate self-service edit).
+  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount') : [...EDITABLE_FIELDS, 'shul_id'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
     const vals = sets.map(f => f === 'home_for_yomtov' ? (b[f] ? 1 : 0) : b[f]);

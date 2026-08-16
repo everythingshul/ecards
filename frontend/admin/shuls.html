@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/shuls.html', `
+renderShell('/admin/shuls', `
   <div class="flex-between">
     <h2>Shuls</h2>
     <div class="pill-row">
@@ -32,7 +32,7 @@ renderShell('/admin/shuls.html', `
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
       <thead><tr>
-        <th data-sort="name_en">Shul</th><th>City / State</th><th>Rav</th><th>Gabai</th>
+        <th data-sort="name_en">Shul</th><th>State / City</th><th>Rav</th><th>Gabai</th>
         <th data-sort="status">Status</th><th data-sort="slots_allocated">Slots</th><th>Applicants</th><th data-sort="created_at">Submitted</th><th></th>
       </tr></thead>
       <tbody id="tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody>
@@ -59,7 +59,7 @@ function changePage(d) { state.page += d; load(); }
 function rowHtml(s) {
   return `<tr onclick="openShul('${s.id}')" style="cursor:pointer">
     <td><strong>${esc(s.name_en)}</strong>${s.name_he ? `<br><span dir="rtl" class="small-muted">${esc(s.name_he)}</span>` : ''}${s.is_paused ? ' ' + badge('paused','paused') : ''}</td>
-    <td>${esc(s.city)}, ${esc(s.state)}</td>
+    <td>${esc(s.state)}, ${esc(s.city)}</td>
     <td>${esc(s.ruv_first_name)} ${esc(s.ruv_last_name)}<br><span class="small-muted">${esc(s.ruv_phone)}</span></td>
     <td>${esc(s.gabai_first_name)} ${esc(s.gabai_last_name)}<br><span class="small-muted">${esc(s.gabai_cell)}</span></td>
     <td>${badge(s.status, s.status)}</td>
@@ -97,16 +97,49 @@ async function openShul(id) {
       </div>
       <div id="tab-info">
         <div class="grid-2">
-          <div><strong>Address</strong><br>${esc(shul.address)}<br>${esc(shul.city)}, ${esc(shul.state)} ${esc(shul.zip)}</div>
           <div><strong>Status</strong><br>${badge(shul.status, shul.status)} ${shul.is_paused ? badge('paused','paused') : ''}</div>
+          <div><label>Slots Allocated</label><input id="e-slots_allocated" type="number" value="${shul.slots_allocated ?? 0}"></div>
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><strong>Rav</strong><br>${esc(shul.ruv_first_name)} ${esc(shul.ruv_last_name)}<br>${esc(shul.ruv_phone)}<br>${esc(shul.ruv_address||'')} ${esc(shul.ruv_city||'')}</div>
-          <div><strong>Gabai</strong><br>${esc(shul.gabai_first_name)} ${esc(shul.gabai_last_name)}<br>${esc(shul.gabai_cell)} · ${esc(shul.gabai_email)}<br>${esc(shul.gabai_address||'')} ${esc(shul.gabai_city||'')}</div>
+          <div><label>Shul Name (English)</label><input id="e-name_en" value="${esc(shul.name_en||'')}"></div>
+          <div><label>Shul Name (Hebrew)</label><input id="e-name_he" value="${esc(shul.name_he||'')}" dir="rtl"></div>
         </div>
+        <label>Address</label><input id="e-address" value="${esc(shul.address||'')}">
+        <div class="grid-2">
+          <div><label>City</label><input id="e-city" value="${esc(shul.city||'')}"></div>
+          <div><label>State</label><input id="e-state" value="${esc(shul.state||'')}"></div>
+        </div>
+        <label>Zip</label><input id="e-zip" value="${esc(shul.zip||'')}" style="max-width:160px">
         <div class="divider"></div>
-        <label>Slots Allocated</label><input id="edit-slots" type="number" value="${shul.slots_allocated ?? 0}" style="max-width:140px">
+        <strong>Rav</strong>
+        <div class="grid-2">
+          <div><label>First Name</label><input id="e-ruv_first_name" value="${esc(shul.ruv_first_name||'')}"></div>
+          <div><label>Last Name</label><input id="e-ruv_last_name" value="${esc(shul.ruv_last_name||'')}"></div>
+        </div>
+        <label>Phone</label><input id="e-ruv_phone" value="${esc(shul.ruv_phone||'')}">
+        <label>Address</label><input id="e-ruv_address" value="${esc(shul.ruv_address||'')}">
+        <div class="grid-2">
+          <div><label>City</label><input id="e-ruv_city" value="${esc(shul.ruv_city||'')}"></div>
+          <div><label>State</label><input id="e-ruv_state" value="${esc(shul.ruv_state||'')}"></div>
+        </div>
+        <label>Zip</label><input id="e-ruv_zip" value="${esc(shul.ruv_zip||'')}" style="max-width:160px">
+        <div class="divider"></div>
+        <strong>Gabai</strong>
+        <div class="grid-2">
+          <div><label>First Name</label><input id="e-gabai_first_name" value="${esc(shul.gabai_first_name||'')}"></div>
+          <div><label>Last Name</label><input id="e-gabai_last_name" value="${esc(shul.gabai_last_name||'')}"></div>
+        </div>
+        <div class="grid-2">
+          <div><label>Cell</label><input id="e-gabai_cell" value="${esc(shul.gabai_cell||'')}"></div>
+          <div><label>Email</label><input id="e-gabai_email" value="${esc(shul.gabai_email||'')}"></div>
+        </div>
+        <label>Address</label><input id="e-gabai_address" value="${esc(shul.gabai_address||'')}">
+        <div class="grid-2">
+          <div><label>City</label><input id="e-gabai_city" value="${esc(shul.gabai_city||'')}"></div>
+          <div><label>State</label><input id="e-gabai_state" value="${esc(shul.gabai_state||'')}"></div>
+        </div>
+        <label>Zip</label><input id="e-gabai_zip" value="${esc(shul.gabai_zip||'')}" style="max-width:160px">
         ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from the Shuls > Duplicates review.</div>` : ''}
       </div>
       <div id="tab-notes" style="display:none">
@@ -139,7 +172,11 @@ async function openShul(id) {
 }
 
 window.saveShul = async (id) => {
-  try { await api(`/shuls/${id}`, { method: 'PUT', body: { slots_allocated: +qs('#edit-slots').value } }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+  const fields = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
+    'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
+  const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
+  body.slots_allocated = +qs('#e-slots_allocated').value;
+  try { await api(`/shuls/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.addShulNote = async (id) => {
   const note = qs('#new-note').value.trim(); if (!note) return;

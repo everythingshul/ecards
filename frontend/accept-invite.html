@@ -36,9 +36,9 @@ qs('#form').addEventListener('submit', async (e) => {
   try {
     const { token: authToken, user } = await api('/auth/accept-invite', { method: 'POST', body: { token, password: qs('#password').value } });
     Auth.set(authToken, user);
-    if (user.role === 'shul') location.href = '/shul-portal/dashboard.html';
+    if (user.role === 'shul') location.href = '/shul-portal/dashboard';
     else if (user.role === 'store') location.href = await storeLandingUrl(user);
-    else location.href = '/admin/dashboard.html';
+    else location.href = '/admin/dashboard';
   } catch (err) { toast(err.message, true); }
 });
 </script>

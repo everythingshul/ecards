@@ -51,6 +51,9 @@
   .home-footer .foot-links { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
   .home-footer .foot-links a { color: #b8a688; font-weight: 600; font-size: 12.5px; text-decoration: none; }
   .home-footer .foot-links a:hover { color: var(--brand-gold-light); }
+  .powered-by { display: inline-flex; align-items: center; gap: 6px; margin-top: 22px; color: #8a7c63; font-size: 12px; text-decoration: none; }
+  .powered-by img { height: 15px; width: auto; }
+  .powered-by:hover { color: #b8a688; }
 
   .popup-backdrop { position: fixed; inset: 0; background: rgba(36,26,21,.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 999; }
   .popup-box { background: #fff; border-radius: 12px; max-width: 420px; width: 100%; padding: 28px 26px; text-align: center; box-shadow: var(--shadow); }
@@ -64,17 +67,17 @@
       <img src="/img/org-logo.png" alt="Organization logo" style="height:42px;width:auto">
       <div class="brand-text"><strong id="org-name-nav">Kipas Hair BP</strong><span>Platform</span></div>
     </div>
-    <a href="/login.html" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
+    <a href="/login" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
   </header>
 
   <div class="hero">
     <span class="eyebrow">Kipas Hair BP Platform</span>
     <h1 id="org-name">Kipas Hair BP Platform</h1>
     <div class="cta-row">
-      <a href="/apply.html" class="btn btn-primary">Register Your Shul</a>
-      <a href="/apply-store.html" class="btn btn-outline">Apply as a Participating Store</a>
-      <a href="/apply-ezras-habayis.html" class="btn btn-outline">Ezras Habayis Application</a>
-      <a href="/login.html" class="btn btn-outline">Sign In</a>
+      <a href="/apply" class="btn btn-primary">Register Your Shul</a>
+      <a href="/apply-store" class="btn btn-outline">Apply as a Participating Store</a>
+      <a href="/apply-ezras-habayis" class="btn btn-outline">Ezras Habayis Application</a>
+      <a href="/login" class="btn btn-outline">Sign In</a>
     </div>
   </div>
 
@@ -101,11 +104,12 @@
 
   <footer class="home-footer">
     <div class="foot-links">
-      <a href="/apply.html">Register a Shul</a>
-      <a href="/apply-store.html">Apply as a Store</a>
-      <a href="/apply-ezras-habayis.html">Ezras Habayis Application</a>
-      <a href="/login.html">Sign In</a>
+      <a href="/apply">Register a Shul</a>
+      <a href="/apply-store">Apply as a Store</a>
+      <a href="/apply-ezras-habayis">Ezras Habayis Application</a>
+      <a href="/login">Sign In</a>
     </div>
+    <a class="powered-by" href="https://everythingshul.com" target="_blank" rel="noopener">Powered By <img src="/img/everythingshul-logo.png" alt="everythingshul"></a>
   </footer>
 
   <div id="popup-container"></div>
@@ -147,7 +151,7 @@
       qs('#about-contact').innerHTML = contactBits.length ? contactBits.join(' &nbsp;·&nbsp; ') : '';
 
       // Once per browser tab session, not once per page load — an admin-set
-      // popup shouldn't nag someone clicking between apply.html and back.
+      // popup shouldn't nag someone clicking between apply and back.
       if (popup?.enabled && popup.message && !sessionStorage.getItem('ec_popup_seen')) {
         sessionStorage.setItem('ec_popup_seen', '1');
         const el = document.createElement('div');

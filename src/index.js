@@ -101,6 +101,18 @@ app.use('/uploads/contracts', express.static(join(process.env.DATA_DIR || join(p
 app.use('/uploads/logos', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'logos')));
 app.use('/uploads/updates', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'updates')));
 
+// Canonicalize old .html links/bookmarks to the extensionless URL (301, so
+// search engines and browsers update their stored copy) — everything on the
+// site now links extensionless (see the fallback below), but pre-existing
+// bookmarks, emails already sent with a .html link, or anyone typing the old
+// URL by hand should still land on a working, canonical page rather than a
+// dead link. index.html is exempt: "/" is already its canonical form.
+app.get(/^\/(?!api\/|uploads\/).*\.html$/, (req, res, next) => {
+  if (req.path === '/index.html') return next();
+  const clean = req.path.slice(0, -'.html'.length) || '/';
+  res.redirect(301, clean + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''));
+});
+
 app.use(express.static(FRONTEND_DIR));
 
 app.get('/', (req, res) => res.sendFile(join(FRONTEND_DIR, 'index.html')));

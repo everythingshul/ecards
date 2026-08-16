@@ -81,7 +81,7 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   db.prepare(`UPDATE documents SET status='sent', sign_token=?, sign_token_expires=?, sent_at=datetime('now') WHERE id=?`)
     .run(token, expires, document.id);
 
-  const signUrl = `${process.env.APP_URL || ''}/sign-document.html?token=${token}`;
+  const signUrl = `${process.env.APP_URL || ''}/sign-document?token=${token}`;
   const subject = `${document.title || 'Document'} ready to sign: ${entity.displayName}`;
   const body = `<p>Shalom,</p><p>Please review and sign the following document: <strong>${document.title || 'Agreement'}</strong>.</p>
     <p style="text-align:center;margin:28px 0;"><a href="${signUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review & Sign</a></p>

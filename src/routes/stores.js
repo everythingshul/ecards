@@ -146,7 +146,7 @@ router.post('/:id/invite', requireAdmin, async (req, res) => {
       .run(uid, req.user.org_id, email, store.manager_name || store.name, store.id, token, expires);
   }
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
-  const portalUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
+  const portalUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
   const tmpl = renderSystemTemplate(req.user.org_id, 'storeSetup', { storeName: store.name, portalUrl });
   const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] store invite email failed:', emailError);

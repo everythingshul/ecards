@@ -12,7 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-renderShell('/admin/forms.html', `
+renderShell('/admin/forms', `
   <div class="flex-between"><h2>Form Builder</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Form</button></div>
   <p class="small-muted">Build custom forms and set them public, limited to a group of shuls, or a single shul/applicant.</p>
   <div id="forms-list"></div>
@@ -21,7 +21,7 @@ renderShell('/admin/forms.html', `
 let fieldDraft = [];
 let formsCache = [];
 
-const DEFAULT_FORM_PREVIEW = { 'shul-application': '/apply.html', 'store-application': '/apply-store.html', 'ezras-habayis-application': '/apply-ezras-habayis.html' };
+const DEFAULT_FORM_PREVIEW = { 'shul-application': '/apply', 'store-application': '/apply-store', 'ezras-habayis-application': '/apply-ezras-habayis' };
 function scheduleStatus(f) {
   const now = new Date();
   if (!f.is_active) return badge('inactive', 'rejected');
@@ -39,7 +39,7 @@ async function load() {
           <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
         <div class="pill-row">
           ${scheduleStatus(f)}
-          <a class="btn btn-sm btn-outline" href="${DEFAULT_FORM_PREVIEW[f.slug] || '/form.html?slug=' + esc(f.slug)}" target="_blank">Preview Link</a>
+          <a class="btn btn-sm btn-outline" href="${DEFAULT_FORM_PREVIEW[f.slug] || '/form?slug=' + esc(f.slug)}" target="_blank">Preview Link</a>
           <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>

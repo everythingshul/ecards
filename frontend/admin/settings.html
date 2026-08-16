@@ -13,7 +13,7 @@
 <script>
 Auth.requireAdmin();
 const isSuperAdmin = Auth.user()?.role === 'super_admin';
-renderShell('/admin/settings.html', `
+renderShell('/admin/settings', `
   <h2>Settings</h2>
   <div class="tabs">
     <button class="active" data-t="org">Organization</button>
