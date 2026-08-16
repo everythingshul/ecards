@@ -37,17 +37,27 @@ function brandFor() {
   };
 }
 
+// Absolute URLs only — email clients render this HTML with no origin of
+// their own to resolve a relative /img/... path against, unlike the site
+// itself. APP_URL is already required elsewhere for the same reason (sign
+// links, invite links).
+function assetUrl(path) { return `${process.env.APP_URL || ''}${path}`; }
+
 function wrap(bodyHtml, brand) {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3ede2;font-family:Georgia,'Times New Roman',serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3ede2;padding:32px 0;">
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5dcc8;">
-        <tr><td style="background:${brand.color};padding:24px 32px;">
-          <span style="color:${brand.accent};font-size:20px;font-weight:bold;letter-spacing:.5px;">${brand.name}</span>
+        <tr><td style="background:${brand.color};padding:22px 32px;text-align:center;">
+          <img src="${assetUrl('/img/org-logo.png')}" alt="${brand.name}" height="36" style="height:36px;width:auto;max-width:260px;">
         </td></tr>
         <tr><td style="padding:32px;color:#2a231d;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
-        <tr><td style="background:#f3ede2;padding:18px 32px;color:#8a7c63;font-size:12px;border-top:1px solid #e5dcc8;text-align:center;">
-          This is an automated message from ${brand.name}.
+        <tr><td style="background:#f3ede2;padding:20px 32px;color:#8a7c63;font-size:12px;border-top:1px solid #e5dcc8;text-align:center;">
+          <p style="margin:0 0 12px;">This is an automated message from ${brand.name}.</p>
+          <p style="margin:0;">
+            <img src="${assetUrl('/img/everythingshul-logo.png')}" alt="everythingshul" height="16" style="height:16px;width:auto;vertical-align:middle;margin-right:6px;">
+            <span style="vertical-align:middle;">Powered by everythingshul</span>
+          </p>
         </td></tr>
       </table>
     </td></tr>

@@ -38,8 +38,14 @@ const FRONTEND_DIR = join(__dirname, '..', 'frontend');
 // and inline onclick= handlers throughout (no build step, no nonce
 // plumbing), so helmet's default CSP would break the entire frontend. A real
 // CSP here is a follow-up that needs those pages restructured first, not
-// something to silently half-enable.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+// something to silently half-enable. crossOriginResourcePolicy is off too:
+// helmet's default (same-origin) blocks the org logo / update attachment
+// images under /img and /uploads/* from loading at all inside an email
+// client (a different origin by definition) — it would silently break the
+// branded email template and inline update images. These files are already
+// served with no auth check (the URL itself is the only gate), so relaxing
+// this adds no real exposure, just stops blocking legitimate embedding.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: false }));
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || process.env.APP_URL || '*', credentials: true }));
 app.use(express.json({ limit: '15mb' })); // e-signature PNGs are base64 in JSON bodies
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
