@@ -51,12 +51,13 @@ renderShell('/admin/sms', `
   </div>
 `);
 
-qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
-  qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['sent','inbox','templates'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
-  if (b.dataset.t === 'templates') loadTemplates();
-  if (b.dataset.t === 'inbox') loadInbox();
-}));
+function showSmsTab(t) {
+  qsa('#stabs button').forEach(b => { b.classList.toggle('active', b.dataset.t === t); });
+  ['sent','inbox','templates'].forEach(p => qs('#panel-'+p).style.display = p === t ? 'block' : 'none');
+  if (t === 'templates') loadTemplates();
+  if (t === 'inbox') { loadInbox(); api('/sms/inbox/mark-seen', { method: 'POST' }).catch(() => {}); }
+}
+qsa('#stabs button').forEach(b => b.addEventListener('click', () => showSmsTab(b.dataset.t)));
 
 qs('#webhook-url').textContent = window.location.origin + '/api/sms/webhook/inbound';
 
@@ -193,7 +194,8 @@ window.sendComposedSms = async () => {
   } catch (err) { toast(err.message, true); }
 };
 
-loadSent();
+const startTab = new URLSearchParams(location.search).get('tab');
+if (startTab === 'inbox') showSmsTab('inbox'); else loadSent();
 </script>
 </body>
 </html>

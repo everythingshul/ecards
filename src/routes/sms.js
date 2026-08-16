@@ -40,6 +40,29 @@ router.use(auth, requireAdmin); // internal team feature — staff/org_admin/sup
 
 router.get('/config', (req, res) => res.json({ mockMode: isSmsMockMode() }));
 
+// Inbound messages have no per-recipient row the way Updates does (any admin
+// can read them, there's no fixed audience), so "unread" here means "since
+// this admin last opened the Inbox tab" — a per-user timestamp in the
+// generic user_preferences table rather than a dedicated read-tracking table.
+// Stored/compared in SQLite's own datetime('now') format ('YYYY-MM-DD
+// HH:MM:SS') rather than ISO ('...THH:MM:SS.sssZ') — the two sort
+// differently as plain text (space < 'T' lexicographically), so comparing
+// an ISO string against created_at would silently misclassify same-day
+// messages as already-seen.
+function sqliteNow() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
+router.get('/inbox/unread-count', (req, res) => {
+  const pref = db.prepare(`SELECT value FROM user_preferences WHERE user_id = ? AND key = 'sms_inbox_seen_at'`).get(req.user.id);
+  const seenAt = pref ? JSON.parse(pref.value) : '1970-01-01 00:00:00';
+  const c = db.prepare(`SELECT COUNT(*) c FROM sms_messages WHERE org_id = ? AND direction = 'inbound' AND created_at > ?`).get(req.user.org_id, seenAt);
+  res.json({ count: c.c });
+});
+router.post('/inbox/mark-seen', (req, res) => {
+  db.prepare(`INSERT INTO user_preferences (user_id, key, value) VALUES (?, 'sms_inbox_seen_at', ?)
+    ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`)
+    .run(req.user.id, JSON.stringify(sqliteNow()));
+  res.json({ ok: true });
+});
+
 // ============================= Message log =============================
 router.get('/', (req, res) => {
   const { search, status, direction, page = 1, pageSize = 50 } = req.query;

@@ -16,6 +16,10 @@ renderShell('/admin/dashboard', `
   <div class="flex-between"><h2>Dashboard</h2></div>
   <div class="stat-grid" id="stats"><div class="small-muted">Loading…</div></div>
   <div id="capacity-banner"></div>
+  <div class="card" id="sms-notif-panel" style="display:none;margin-bottom:16px;border-color:var(--brand-gold-dark)">
+    <div class="flex-between"><h3 style="margin:0">New Messages</h3><a href="/admin/sms?tab=inbox" class="btn btn-sm btn-outline">Open Inbox</a></div>
+    <p class="small-muted" id="sms-notif-text" style="margin-top:4px"></p>
+  </div>
   <div class="card" id="dup-panel" style="display:none;margin-bottom:16px">
     <div class="flex-between"><h3 style="margin:0">Open Duplicate Flags</h3><a href="/admin/shuls?dup=1" class="btn btn-sm btn-outline">Review</a></div>
     <p class="small-muted" id="dup-text"></p>
@@ -26,10 +30,16 @@ renderShell('/admin/dashboard', `
     <div id="top-stores" style="margin-top:10px"></div>
   </div>
   <div class="card">
-    <div class="flex-between"><h3 style="margin:0">My Open Tasks</h3><a href="/admin/tasks" class="btn btn-sm btn-outline">View All Tasks</a></div>
+    <div class="flex-between"><h3 style="margin:0" id="my-tasks-heading">My Open Tasks</h3><a href="/admin/tasks" class="btn btn-sm btn-outline">View All Tasks</a></div>
     <div id="my-tasks" style="margin-top:10px"></div>
   </div>
 `);
+
+api('/sms/inbox/unread-count').then(({ count }) => {
+  if (!count) return;
+  qs('#sms-notif-panel').style.display = 'block';
+  qs('#sms-notif-text').textContent = `${count} new incoming message${count === 1 ? '' : 's'} since you last checked the Inbox.`;
+}).catch(() => {});
 
 api('/seasons/active').then(({ season }) => {
   if (!season || season.max_accepted_applicants == null) return;
@@ -69,6 +79,8 @@ api('/seasons/active').then(({ season }) => {
   try {
     const { tasks } = await api('/tasks?assigned_to=me&status=open&pageSize=8');
     const today = new Date().toISOString().slice(0, 10);
+    const overdueCount = tasks.filter(t => t.due_date && t.due_date < today).length;
+    qs('#my-tasks-heading').innerHTML = `My Open Tasks${tasks.length ? ` ${badge(String(tasks.length), overdueCount ? 'rejected' : 'active')}` : ''}`;
     qs('#my-tasks').innerHTML = tasks.length ? tasks.map(t => {
       const overdue = t.due_date && t.due_date < today;
       const dueLabel = t.due_date ? `<span style="${overdue ? 'color:var(--danger);font-weight:600' : 'color:var(--text-muted)'}">${fmtDate(t.due_date)}${overdue ? ' (overdue)' : ''}</span>` : '';
