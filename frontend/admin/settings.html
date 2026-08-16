@@ -45,6 +45,14 @@ renderShell('/admin/settings.html', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveZipRestriction()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Homepage Popup</h3>
+      <p class="small-muted">Shows once per visit on the public homepage. Turn it off and the homepage looks exactly as if it were never there.</p>
+      <div class="checkbox-row"><input type="checkbox" id="popup-enabled"><label style="margin:0">Show popup on homepage</label></div>
+      <label style="margin-top:14px">Message</label>
+      <textarea id="popup-message" rows="4" placeholder="e.g. Applications for this season close August 30th."></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="savePopup()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Full System Export</h3>
       <p class="small-muted">Download everything: every shul, applicant, card, transaction, store, billing record, task, and note, as one Excel workbook with a separate sheet per table.</p>
       <button class="btn btn-sm btn-primary" onclick="downloadFullExport()">Download Full System Export (.xlsx)</button>
@@ -161,6 +169,14 @@ async function loadZipRestriction() {
 }
 window.saveZipRestriction = async () => {
   try { await api('/settings', { method: 'PUT', body: { allowed_zip_codes: qs('#org-allowed_zips').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadPopup() {
+  const { settings } = await api('/settings');
+  qs('#popup-enabled').checked = settings.homepage_popup_enabled === '1';
+  qs('#popup-message').value = settings.homepage_popup_message || '';
+}
+window.savePopup = async () => {
+  try { await api('/settings', { method: 'PUT', body: { homepage_popup_enabled: qs('#popup-enabled').checked ? '1' : '0', homepage_popup_message: qs('#popup-message').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
 window.saveOrg = async () => {
@@ -340,7 +356,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>
