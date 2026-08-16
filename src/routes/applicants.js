@@ -76,7 +76,7 @@ function maskForShul(records, role) {
 // Allowed Zip Codes), an applicant outside that list is auto-rejected
 // silently at submission time — the submission still appears to succeed
 // normally so the submitting shul is never told why (or that) it happened.
-function isZipAllowed(orgId, zip) {
+export function isZipAllowed(orgId, zip) {
   const setting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'allowed_zip_codes'`).get(orgId);
   if (!setting || !setting.value.trim()) return true;
   const allowed = setting.value.split(',').map(z => z.trim()).filter(Boolean);

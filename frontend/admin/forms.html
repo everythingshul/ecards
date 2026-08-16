@@ -19,15 +19,18 @@ renderShell('/admin/forms.html', `
 `);
 
 let fieldDraft = [];
+let formsCache = [];
 
 async function load() {
   const { forms } = await api('/forms');
+  formsCache = forms;
   qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
       <div class="flex-between">
         <div><strong>${esc(f.name)}</strong> <span class="small-muted">/${esc(f.slug)}</span><br><span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${f.schema_json.length} field(s)</span></div>
         <div class="pill-row">
           ${f.is_active ? badge('active','active') : badge('inactive','rejected')}
           <a class="btn btn-sm btn-outline" href="${f.type === 'shul_application' ? '/apply.html' : '/form.html?slug=' + esc(f.slug)}" target="_blank">Preview Link</a>
+          <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>
       </div>
@@ -38,16 +41,33 @@ window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { 
 qs('#btn-new').addEventListener('click', () => {
   fieldDraft = [{ key: 'first_name', label: 'First Name', type: 'text', required: true }];
   openModal('New Form', formBody(), `<button class="btn btn-primary btn-sm" onclick="createForm()">Create Form</button>`);
+  renderFields();
 });
 
-function formBody() {
+window.openEditForm = (id) => {
+  const f = formsCache.find(x => x.id === id);
+  if (!f) return;
+  fieldDraft = JSON.parse(JSON.stringify(f.schema_json));
+  openModal('Edit Form', formBody({ name: f.name, type: f.type, visibility: f.visibility, slug: f.slug, editing: true }), `<button class="btn btn-primary btn-sm" onclick="saveEditForm('${id}')">Save</button>`);
+  renderFields();
+};
+window.saveEditForm = async (id) => {
+  const body = { name: qs('#f-name').value, visibility: qs('#f-visibility').value, schema: fieldDraft };
+  try { await api(`/forms/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+function formBody(existing = null) {
+  const typeLabel = { shul_application: 'Shul Application', store_application: 'Store Application', applicant_application: 'Applicant Application' };
   return `
-    <label>Form Name *</label><input id="f-name">
+    <label>Form Name *</label><input id="f-name" value="${existing ? esc(existing.name) : ''}">
     <div class="grid-2">
-      <div><label>Type</label><select id="f-type"><option value="shul_application">Shul Application</option><option value="applicant_application">Applicant Application</option></select></div>
-      <div><label>Visibility</label><select id="f-visibility"><option value="public">Public</option><option value="group">Group of Shuls</option><option value="individual">Individual Shul</option></select></div>
+      <div><label>Type</label>${existing?.editing
+        ? `<input value="${esc(typeLabel[existing.type] || existing.type)}" disabled>`
+        : `<select id="f-type"><option value="shul_application">Shul Application</option><option value="store_application">Store Application</option><option value="applicant_application">Applicant Application</option></select>`}
+      </div>
+      <div><label>Visibility</label><select id="f-visibility"><option value="public" ${existing?.visibility==='public'?'selected':''}>Public (anyone with the link)</option><option value="group" ${existing?.visibility==='group'?'selected':''}>Group of Shuls</option><option value="individual" ${existing?.visibility==='individual'?'selected':''}>Individual Shul</option></select></div>
     </div>
-    <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026">
+    <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026" value="${existing ? esc(existing.slug) : ''}" ${existing?.editing ? 'disabled' : ''}>
     <div class="divider"></div>
     <div class="flex-between"><h4 style="margin:0">Fields</h4><button type="button" class="btn btn-sm btn-outline" onclick="addField()">+ Add Field</button></div>
     <div id="field-list"></div>
@@ -70,7 +90,6 @@ function renderFields() {
 }
 window.addField = () => { fieldDraft.push({ key: '', label: '', type: 'text', required: false }); renderFields(); };
 window.removeField = (i) => { fieldDraft.splice(i, 1); renderFields(); };
-setTimeout(renderFields, 0);
 
 window.createForm = async () => {
   const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft };
