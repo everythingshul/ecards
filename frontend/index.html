@@ -111,10 +111,10 @@
 
   <script src="/js/app.js"></script>
   <script>
-    const SCHEDULE_FORMS = [
-      { slug: 'shul-application', label: 'Shul Registration' },
-      { slug: 'store-application', label: 'Store Application' },
-      { slug: 'ezras-habayis-application', label: 'Ezras Habayis Application' },
+    const DEFAULT_SCHEDULE_ITEMS = [
+      { formSlug: 'shul-application', label: 'Shul Registration' },
+      { formSlug: 'store-application', label: 'Store Application' },
+      { formSlug: 'ezras-habayis-application', label: 'Ezras Habayis Application' },
     ];
 
     function windowStatus(form) {
@@ -125,17 +125,19 @@
       return { label: 'Open now', cls: 'active' };
     }
 
-    Promise.all(SCHEDULE_FORMS.map(f => api(`/forms/public/${f.slug}`).then(r => ({ ...f, form: r.form })).catch(() => null)))
-      .then(results => {
-        const cards = results.filter(Boolean).map(({ label, form }) => {
-          const status = windowStatus(form);
-          const window = form.opens_at || form.closes_at
-            ? `${form.opens_at ? 'Opens ' + fmtDate(form.opens_at) : ''}${form.opens_at && form.closes_at ? ' · ' : ''}${form.closes_at ? 'Closes ' + fmtDate(form.closes_at) : ''}`
-            : 'No set window — always open';
-          return `<div class="schedule-card"><h3>${esc(label)}</h3>${badge(status.label, status.cls)}<div class="window">${esc(window)}</div></div>`;
+    function renderSchedule(items) {
+      Promise.all(items.map(f => api(`/forms/public/${f.formSlug}`).then(r => ({ ...f, form: r.form })).catch(() => null)))
+        .then(results => {
+          const cards = results.filter(Boolean).map(({ label, form }) => {
+            const status = windowStatus(form);
+            const window = form.opens_at || form.closes_at
+              ? `${form.opens_at ? 'Opens ' + fmtDate(form.opens_at) : ''}${form.opens_at && form.closes_at ? ' · ' : ''}${form.closes_at ? 'Closes ' + fmtDate(form.closes_at) : ''}`
+              : 'No set window — always open';
+            return `<div class="schedule-card"><h3>${esc(label)}</h3>${badge(status.label, status.cls)}<div class="window">${esc(window)}</div></div>`;
+          });
+          qs('#schedule-grid').innerHTML = cards.length ? cards.join('') : '<div class="schedule-card"><p class="small-muted">No schedule information available.</p></div>';
         });
-        qs('#schedule-grid').innerHTML = cards.length ? cards.join('') : '<div class="schedule-card"><p class="small-muted">No schedule information available.</p></div>';
-      });
+    }
 
     const DEFAULT_HEADER_BUTTONS = [{ label: 'Sign In', url: '/login' }];
     const DEFAULT_FOOTER_BUTTONS = [
@@ -160,6 +162,7 @@
       document.getElementById('org-name').textContent = content?.heroHeading || org.name || 'Kipas Hair BP Platform';
       qs('#hero-eyebrow').textContent = content?.heroEyebrow || org.name || 'Kipas Hair BP Platform';
       qs('#schedule-heading').textContent = content?.scheduleHeading || 'When applications are open';
+      renderSchedule(content?.scheduleItems?.length ? content.scheduleItems : DEFAULT_SCHEDULE_ITEMS);
       qs('#about-heading').textContent = content?.aboutHeading || 'About';
       const contactBits = [];
       if (org.support_email) contactBits.push(`<a href="mailto:${esc(org.support_email)}">${esc(org.support_email)}</a>`);

@@ -11,7 +11,7 @@ router.get('/resolve', (req, res) => {
   const org = db.prepare('SELECT id, name, logo_url, primary_color, accent_color, support_email, support_phone, address FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
   const rows = db.prepare(`SELECT key, value FROM settings WHERE org_id = ? AND key IN
     ('homepage_popup_enabled','homepage_popup_message','header_nav_buttons','footer_nav_buttons','cta_buttons',
-     'homepage_about_text','faq_items','homepage_hero_eyebrow','homepage_hero_heading','homepage_schedule_heading','homepage_about_heading')`).all(DEFAULT_ORG_ID);
+     'homepage_about_text','faq_items','homepage_hero_eyebrow','homepage_hero_heading','homepage_schedule_heading','homepage_about_heading','schedule_items')`).all(DEFAULT_ORG_ID);
   const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
   const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
   res.json({
@@ -27,6 +27,7 @@ router.get('/resolve', (req, res) => {
       heroHeading: s.homepage_hero_heading || '',
       scheduleHeading: s.homepage_schedule_heading || '',
       aboutHeading: s.homepage_about_heading || '',
+      scheduleItems: parseList(s.schedule_items),
     },
   });
 });

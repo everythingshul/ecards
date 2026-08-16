@@ -156,9 +156,13 @@ renderShell('/admin/settings', `
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Schedule Section</h3>
+      <p class="small-muted">The "When applications are open" cards on the homepage. Each card shows the open/close window of the form it's linked to.</p>
       <label>Heading <span class="small-muted">(leave blank for the default)</span></label>
       <input id="content-schedule-heading" placeholder="e.g. When applications are open">
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveScheduleHeading()">Save</button>
+      <label style="margin-top:14px">Cards</label>
+      <div id="schedule-items-list"></div>
+      <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addScheduleItem()">+ Add Card</button>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveScheduleSection()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Header Buttons</h3>
@@ -252,8 +256,33 @@ window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-b
 
 // ============================= Site Content =============================
 const CONTENT_BUTTON_SETTING_KEY = { header: 'header_nav_buttons', footer: 'footer_nav_buttons', hero: 'cta_buttons' };
+// Mirrors the fallback values in frontend/index.html — shown here so the admin
+// edits/removes what's actually live instead of starting from a blank slate.
+const DEFAULT_HEADER_BUTTONS = [{ label: 'Sign In', url: '/login' }];
+const DEFAULT_FOOTER_BUTTONS = [
+  { label: 'Register a Shul', url: '/apply' },
+  { label: 'Apply as a Store', url: '/apply-store' },
+  { label: 'Ezras Habayis Application', url: '/apply-ezras-habayis' },
+  { label: 'FAQ', url: '/faq' },
+  { label: 'Contact Us', url: '/contact' },
+  { label: 'Sign In', url: '/login' },
+];
+const DEFAULT_CTA_BUTTONS = [
+  { label: 'Register Your Shul', url: '/apply' },
+  { label: 'Apply as a Participating Store', url: '/apply-store' },
+  { label: 'Ezras Habayis Application', url: '/apply-ezras-habayis' },
+  { label: 'Sign In', url: '/login' },
+];
+const DEFAULT_ABOUT_TEXT = "We exist to make it simple, dignified, and reliable for shuls to help their families before Yom Tov. Every shul that signs on gets a clear process, every applicant gets a fair and timely answer, and every card is tracked from issuance to the register, so generosity never gets lost in paperwork.";
+const DEFAULT_SCHEDULE_ITEMS = [
+  { formSlug: 'shul-application', label: 'Shul Registration' },
+  { formSlug: 'store-application', label: 'Store Application' },
+  { formSlug: 'ezras-habayis-application', label: 'Ezras Habayis Application' },
+];
 let buttonDrafts = { header: [], footer: [], hero: [] };
 let faqItemsDraft = [];
+let scheduleItemsDraft = [];
+let allFormsForSchedule = [];
 function wireButtonInputs(kind) {
   const draft = buttonDrafts[kind];
   qsa(`#${kind}-buttons-list .cb-label`).forEach(el => el.addEventListener('input', () => { draft[+el.dataset.idx].label = el.value; }));
@@ -265,7 +294,7 @@ function renderContentButtons(kind) {
       <input placeholder="Label" value="${esc(b.label||'')}" style="flex:1" class="cb-label" data-idx="${i}">
       <input placeholder="/url or https://…" value="${esc(b.url||'')}" style="flex:1" class="cb-url" data-idx="${i}">
       <button type="button" class="btn btn-sm btn-outline" onclick="removeContentButton('${kind}',${i})">Remove</button>
-    </div>`).join('') : '<p class="small-muted">Using the default set.</p>';
+    </div>`).join('') : '<p class="small-muted">No buttons — none will show on the site.</p>';
   wireButtonInputs(kind);
 }
 window.addContentButton = (kind) => {
@@ -291,8 +320,33 @@ window.saveHeroSection = async () => {
     toast('Saved');
   } catch (err) { toast(err.message, true); }
 };
-window.saveScheduleHeading = async () => {
-  try { await api('/settings', { method: 'PUT', body: { homepage_schedule_heading: qs('#content-schedule-heading').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+function renderScheduleItems() {
+  const options = allFormsForSchedule.map(f => `<option value="${esc(f.slug)}">${esc(f.name)}</option>`).join('');
+  qs('#schedule-items-list').innerHTML = scheduleItemsDraft.length ? scheduleItemsDraft.map((it, i) => `<div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <input placeholder="Card label" value="${esc(it.label||'')}" style="flex:1" class="si-label" data-idx="${i}">
+      <select class="si-slug" data-idx="${i}" style="flex:1">${options}</select>
+      <button type="button" class="btn btn-sm btn-outline" onclick="removeScheduleItem(${i})">Remove</button>
+    </div>`).join('') : '<p class="small-muted">No cards — the schedule section will be empty.</p>';
+  qsa('.si-label').forEach(el => el.addEventListener('input', () => { scheduleItemsDraft[+el.dataset.idx].label = el.value; }));
+  qsa('.si-slug').forEach(el => { el.value = scheduleItemsDraft[+el.dataset.idx].formSlug || ''; el.addEventListener('change', () => { scheduleItemsDraft[+el.dataset.idx].formSlug = el.value; }); });
+}
+window.addScheduleItem = () => {
+  scheduleItemsDraft.push({ label: '', formSlug: allFormsForSchedule[0]?.slug || '' });
+  renderScheduleItems();
+};
+window.removeScheduleItem = (i) => {
+  scheduleItemsDraft.splice(i, 1);
+  renderScheduleItems();
+};
+window.saveScheduleSection = async () => {
+  const draft = scheduleItemsDraft.filter(it => it.label && it.formSlug);
+  try {
+    await api('/settings', { method: 'PUT', body: {
+      homepage_schedule_heading: qs('#content-schedule-heading').value,
+      schedule_items: JSON.stringify(draft),
+    } });
+    toast('Saved');
+  } catch (err) { toast(err.message, true); }
 };
 
 function renderFaqItems() {
@@ -330,20 +384,25 @@ async function loadContactSubmissions() {
 }
 
 async function loadContent() {
-  const { settings } = await api('/settings');
+  const [{ settings }, { forms }] = await Promise.all([api('/settings'), api('/forms')]);
   const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
-  buttonDrafts.header = parseList(settings.header_nav_buttons);
-  buttonDrafts.footer = parseList(settings.footer_nav_buttons);
-  buttonDrafts.hero = parseList(settings.cta_buttons);
+  const listOrDefault = (v, fallback) => { const p = parseList(v); return p.length ? p : fallback.map(b => ({ ...b })); };
+  const orgName = qs('#org-name').value || 'Kipas Hair BP Platform';
+  buttonDrafts.header = listOrDefault(settings.header_nav_buttons, DEFAULT_HEADER_BUTTONS);
+  buttonDrafts.footer = listOrDefault(settings.footer_nav_buttons, DEFAULT_FOOTER_BUTTONS);
+  buttonDrafts.hero = listOrDefault(settings.cta_buttons, DEFAULT_CTA_BUTTONS);
   faqItemsDraft = parseList(settings.faq_items);
-  qs('#content-hero-eyebrow').value = settings.homepage_hero_eyebrow || '';
-  qs('#content-hero-heading').value = settings.homepage_hero_heading || '';
-  qs('#content-schedule-heading').value = settings.homepage_schedule_heading || '';
-  qs('#content-about-heading').value = settings.homepage_about_heading || '';
-  qs('#content-about').value = settings.homepage_about_text || '';
+  allFormsForSchedule = forms.filter(f => f.is_active).map(f => ({ slug: f.slug, name: f.name }));
+  scheduleItemsDraft = listOrDefault(settings.schedule_items, DEFAULT_SCHEDULE_ITEMS);
+  qs('#content-hero-eyebrow').value = settings.homepage_hero_eyebrow || orgName;
+  qs('#content-hero-heading').value = settings.homepage_hero_heading || orgName;
+  qs('#content-schedule-heading').value = settings.homepage_schedule_heading || 'When applications are open';
+  qs('#content-about-heading').value = settings.homepage_about_heading || 'About';
+  qs('#content-about').value = settings.homepage_about_text || DEFAULT_ABOUT_TEXT;
   renderContentButtons('header');
   renderContentButtons('footer');
   renderContentButtons('hero');
+  renderScheduleItems();
   renderFaqItems();
   loadContactSubmissions();
 }
