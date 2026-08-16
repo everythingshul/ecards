@@ -470,6 +470,16 @@ CREATE TABLE IF NOT EXISTS settings (
   PRIMARY KEY (org_id, key)
 );
 
+-- Public "Contact Us" form submissions.
+CREATE TABLE IF NOT EXISTS contact_submissions (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ===================== To-Do / Tasks =====================
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,

@@ -21,6 +21,7 @@ renderShell('/admin/settings', `
     <button data-t="fields">Required Fields</button>
     <button data-t="documents">Documents</button>
     <button data-t="emails">Auto Emails</button>
+    <button data-t="content">Site Content</button>
     ${isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
   </div>
 
@@ -134,6 +135,41 @@ renderShell('/admin/settings', `
     <div id="email-templates-list">Loading…</div>
   </div>
 
+  <div id="panel-content" style="display:none">
+    <div class="card">
+      <h3>Header Buttons</h3>
+      <p class="small-muted">Shown at the top of the public homepage. Leave empty to use the default ("Sign In").</p>
+      <div id="header-buttons-list"></div>
+      <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addContentButton('header')">+ Add Button</button>
+      <button class="btn btn-sm btn-primary" style="margin-top:10px;margin-left:8px" onclick="saveContentButtons('header')">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Footer Buttons</h3>
+      <p class="small-muted">Shown at the bottom of the public homepage. Leave empty to use the default set.</p>
+      <div id="footer-buttons-list"></div>
+      <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addContentButton('footer')">+ Add Button</button>
+      <button class="btn btn-sm btn-primary" style="margin-top:10px;margin-left:8px" onclick="saveContentButtons('footer')">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>About Section</h3>
+      <label>About Text <span class="small-muted">(leave blank to use the default mission statement)</span></label>
+      <textarea id="content-about" rows="4"></textarea>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveAboutText()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="flex-between"><h3 style="margin:0">FAQ</h3><a href="/faq" target="_blank" class="btn btn-sm btn-outline">View Public Page</a></div>
+      <p class="small-muted">Shown at <code>/faq</code>.</p>
+      <div id="faq-items-list"></div>
+      <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addFaqItem()">+ Add Question</button>
+      <button class="btn btn-sm btn-primary" style="margin-top:10px;margin-left:8px" onclick="saveFaqItems()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="flex-between"><h3 style="margin:0">Contact Form Submissions</h3><a href="/contact" target="_blank" class="btn btn-sm btn-outline">View Public Page</a></div>
+      <p class="small-muted">Every submission also emails your Support Email address (Organization tab), if one is set.</p>
+      <div id="contact-submissions-list" style="margin-top:10px">Loading…</div>
+    </div>
+  </div>
+
   ${isSuperAdmin ? `
   <div id="panel-backups" style="display:none">
     <div class="card">
@@ -149,8 +185,9 @@ renderShell('/admin/settings', `
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','fields','documents','emails','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
+  ['org','seasons','fields','documents','emails','content','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
   if (b.dataset.t === 'emails') loadEmailTemplates();
+  if (b.dataset.t === 'content') loadContent();
   if (b.dataset.t === 'backups') loadBackups();
 }));
 
@@ -179,6 +216,79 @@ window.savePopup = async () => {
   try { await api('/settings', { method: 'PUT', body: { homepage_popup_enabled: qs('#popup-enabled').checked ? '1' : '0', homepage_popup_message: qs('#popup-message').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
+
+// ============================= Site Content =============================
+let headerButtonsDraft = [], footerButtonsDraft = [], faqItemsDraft = [];
+function wireButtonInputs(kind) {
+  const draft = kind === 'header' ? headerButtonsDraft : footerButtonsDraft;
+  qsa(`#${kind}-buttons-list .cb-label`).forEach(el => el.addEventListener('input', () => { draft[+el.dataset.idx].label = el.value; }));
+  qsa(`#${kind}-buttons-list .cb-url`).forEach(el => el.addEventListener('input', () => { draft[+el.dataset.idx].url = el.value; }));
+}
+function renderContentButtons(kind) {
+  const draft = kind === 'header' ? headerButtonsDraft : footerButtonsDraft;
+  qs(`#${kind}-buttons-list`).innerHTML = draft.length ? draft.map((b, i) => `<div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <input placeholder="Label" value="${esc(b.label||'')}" style="flex:1" class="cb-label" data-idx="${i}">
+      <input placeholder="/url or https://…" value="${esc(b.url||'')}" style="flex:1" class="cb-url" data-idx="${i}">
+      <button type="button" class="btn btn-sm btn-outline" onclick="removeContentButton('${kind}',${i})">Remove</button>
+    </div>`).join('') : '<p class="small-muted">Using the default set.</p>';
+  wireButtonInputs(kind);
+}
+window.addContentButton = (kind) => {
+  (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).push({ label: '', url: '' });
+  renderContentButtons(kind);
+};
+window.removeContentButton = (kind, i) => {
+  (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).splice(i, 1);
+  renderContentButtons(kind);
+};
+window.saveContentButtons = async (kind) => {
+  const draft = (kind === 'header' ? headerButtonsDraft : footerButtonsDraft).filter(b => b.label && b.url);
+  try { await api('/settings', { method: 'PUT', body: { [`${kind}_nav_buttons`]: JSON.stringify(draft) } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
+function renderFaqItems() {
+  qs('#faq-items-list').innerHTML = faqItemsDraft.length ? faqItemsDraft.map((f, i) => `<div class="card" style="margin:8px 0;padding:12px">
+      <label style="margin-top:0">Question</label><input class="faq-q" data-idx="${i}" value="${esc(f.question||'')}">
+      <label>Answer</label><textarea class="faq-a" data-idx="${i}" rows="2">${esc(f.answer||'')}</textarea>
+      <button type="button" class="btn btn-sm btn-outline" style="margin-top:6px" onclick="removeFaqItem(${i})">Remove</button>
+    </div>`).join('') : '<p class="small-muted">No questions yet.</p>';
+  qsa('.faq-q').forEach(el => el.addEventListener('input', () => { faqItemsDraft[+el.dataset.idx].question = el.value; }));
+  qsa('.faq-a').forEach(el => el.addEventListener('input', () => { faqItemsDraft[+el.dataset.idx].answer = el.value; }));
+}
+window.addFaqItem = () => { faqItemsDraft.push({ question: '', answer: '' }); renderFaqItems(); };
+window.removeFaqItem = (i) => { faqItemsDraft.splice(i, 1); renderFaqItems(); };
+window.saveFaqItems = async () => {
+  const draft = faqItemsDraft.filter(f => f.question && f.answer);
+  try { await api('/settings', { method: 'PUT', body: { faq_items: JSON.stringify(draft) } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
+window.saveAboutText = async () => {
+  try { await api('/settings', { method: 'PUT', body: { homepage_about_text: qs('#content-about').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+
+async function loadContactSubmissions() {
+  try {
+    const { submissions } = await api('/contact');
+    qs('#contact-submissions-list').innerHTML = submissions.length ? submissions.map(s => `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div class="flex-between"><strong>${esc(s.name)}</strong><span class="small-muted">${fmtDateTime(s.created_at)}</span></div>
+        <div class="small-muted">${esc(s.email)}</div>
+        <p style="margin-top:6px;white-space:pre-wrap">${esc(s.message)}</p>
+      </div>`).join('') : '<p class="small-muted">No submissions yet.</p>';
+  } catch (err) { qs('#contact-submissions-list').innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
+}
+
+async function loadContent() {
+  const { settings } = await api('/settings');
+  const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
+  headerButtonsDraft = parseList(settings.header_nav_buttons);
+  footerButtonsDraft = parseList(settings.footer_nav_buttons);
+  faqItemsDraft = parseList(settings.faq_items);
+  qs('#content-about').value = settings.homepage_about_text || '';
+  renderContentButtons('header');
+  renderContentButtons('footer');
+  renderFaqItems();
+  loadContactSubmissions();
+}
 window.saveOrg = async () => {
   const body = {
     name: qs('#org-name').value, primary_color: qs('#org-primary_color').value, accent_color: qs('#org-accent_color').value,

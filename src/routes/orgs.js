@@ -9,9 +9,20 @@ const router = Router();
 // Single-org platform, so this always resolves to the one organization.
 router.get('/resolve', (req, res) => {
   const org = db.prepare('SELECT id, name, logo_url, primary_color, accent_color, support_email, support_phone, address FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
-  const rows = db.prepare(`SELECT key, value FROM settings WHERE org_id = ? AND key IN ('homepage_popup_enabled','homepage_popup_message')`).all(DEFAULT_ORG_ID);
+  const rows = db.prepare(`SELECT key, value FROM settings WHERE org_id = ? AND key IN
+    ('homepage_popup_enabled','homepage_popup_message','header_nav_buttons','footer_nav_buttons','homepage_about_text','faq_items')`).all(DEFAULT_ORG_ID);
   const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
-  res.json({ org, popup: { enabled: s.homepage_popup_enabled === '1', message: s.homepage_popup_message || '' } });
+  const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
+  res.json({
+    org,
+    popup: { enabled: s.homepage_popup_enabled === '1', message: s.homepage_popup_message || '' },
+    content: {
+      headerButtons: parseList(s.header_nav_buttons),
+      footerButtons: parseList(s.footer_nav_buttons),
+      aboutText: s.homepage_about_text || '',
+      faqItems: parseList(s.faq_items),
+    },
+  });
 });
 
 router.use(auth, requireAdmin);

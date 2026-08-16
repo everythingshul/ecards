@@ -67,7 +67,7 @@
       <img src="/img/org-logo.png" alt="Organization logo" style="height:42px;width:auto">
       <div class="brand-text"><strong id="org-name-nav">Kipas Hair BP</strong><span>Platform</span></div>
     </div>
-    <a href="/login" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">Sign In</a>
+    <nav id="header-buttons" style="display:flex;align-items:center;gap:14px"></nav>
   </header>
 
   <div class="hero">
@@ -103,12 +103,7 @@
   </section>
 
   <footer class="home-footer">
-    <div class="foot-links">
-      <a href="/apply">Register a Shul</a>
-      <a href="/apply-store">Apply as a Store</a>
-      <a href="/apply-ezras-habayis">Ezras Habayis Application</a>
-      <a href="/login">Sign In</a>
-    </div>
+    <div class="foot-links" id="footer-buttons"></div>
     <a class="powered-by" href="https://everythingshul.com" target="_blank" rel="noopener">Powered By <img src="/img/everythingshul-logo.png" alt="everythingshul"></a>
   </footer>
 
@@ -142,13 +137,30 @@
         qs('#schedule-grid').innerHTML = cards.length ? cards.join('') : '<div class="schedule-card"><p class="small-muted">No schedule information available.</p></div>';
       });
 
-    api('/orgs/resolve').then(({ org, popup }) => {
+    const DEFAULT_HEADER_BUTTONS = [{ label: 'Sign In', url: '/login' }];
+    const DEFAULT_FOOTER_BUTTONS = [
+      { label: 'Register a Shul', url: '/apply' },
+      { label: 'Apply as a Store', url: '/apply-store' },
+      { label: 'Ezras Habayis Application', url: '/apply-ezras-habayis' },
+      { label: 'FAQ', url: '/faq' },
+      { label: 'Contact Us', url: '/contact' },
+      { label: 'Sign In', url: '/login' },
+    ];
+    const DEFAULT_ABOUT_TEXT = "We exist to make it simple, dignified, and reliable for shuls to help their families before Yom Tov. Every shul that signs on gets a clear process, every applicant gets a fair and timely answer, and every card is tracked from issuance to the register, so generosity never gets lost in paperwork.";
+
+    api('/orgs/resolve').then(({ org, popup, content }) => {
       if (!org) return;
       if (org.name) { document.getElementById('org-name').textContent = org.name; document.getElementById('org-name-nav').textContent = org.name; document.getElementById('page-title').textContent = org.name; }
       const contactBits = [];
       if (org.support_email) contactBits.push(`<a href="mailto:${esc(org.support_email)}">${esc(org.support_email)}</a>`);
       if (org.support_phone) contactBits.push(`<a href="tel:${esc(org.support_phone)}">${esc(org.support_phone)}</a>`);
       qs('#about-contact').innerHTML = contactBits.length ? contactBits.join(' &nbsp;·&nbsp; ') : '';
+      qs('#about-body').textContent = content?.aboutText || DEFAULT_ABOUT_TEXT;
+
+      const headerBtns = content?.headerButtons?.length ? content.headerButtons : DEFAULT_HEADER_BUTTONS;
+      qs('#header-buttons').innerHTML = headerBtns.map(b => `<a href="${esc(b.url)}" class="btn btn-outline btn-sm" style="color:#e3cf9e;border-color:#e3cf9e;">${esc(b.label)}</a>`).join('');
+      const footerBtns = content?.footerButtons?.length ? content.footerButtons : DEFAULT_FOOTER_BUTTONS;
+      qs('#footer-buttons').innerHTML = footerBtns.map(b => `<a href="${esc(b.url)}">${esc(b.label)}</a>`).join('');
 
       if (popup?.enabled && popup.message) {
         const el = document.createElement('div');
