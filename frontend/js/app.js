@@ -602,6 +602,38 @@ window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 // that still call it — there is no footer mark to render anymore.
 function renderPublicFooter() {}
 
+// Polls a list endpoint's row count (for whatever filters/search/page the
+// caller's own load() would currently use) and, if it changed, shows a
+// small dismiss-to-refresh banner instead of silently rewriting the table.
+// This is the whole point: another admin adding/removing a record must
+// never yank anyone else's scroll position, open filters, or row selection
+// out from under them — so nothing on screen changes until the viewer
+// actually clicks the banner, which just calls their page's own load().
+// Paused while the tab is hidden (nothing to disrupt if no one's looking).
+function attachLiveRefresh(bannerContainerId, fetchTotal, loadFn, intervalMs = 15000) {
+  let knownTotal = null;
+  let bannerShown = false;
+  async function check() {
+    if (bannerShown || document.hidden) return;
+    try {
+      const total = await fetchTotal();
+      if (knownTotal === null) { knownTotal = total; return; }
+      if (total !== knownTotal) {
+        bannerShown = true;
+        const container = document.getElementById(bannerContainerId);
+        if (!container) return;
+        const banner = document.createElement('div');
+        banner.className = 'card';
+        banner.style.cssText = 'margin-bottom:14px;background:var(--brand-panel-2);cursor:pointer;text-align:center;padding:10px 16px;font-size:13px;';
+        banner.textContent = 'New data is available — click to refresh this list';
+        banner.onclick = () => { banner.remove(); bannerShown = false; knownTotal = null; loadFn(); };
+        container.prepend(banner);
+      }
+    } catch { /* transient network hiccup — just try again next tick */ }
+  }
+  setInterval(check, intervalMs);
+}
+
 // Checks a built-in public application form's schedule (opens_at/closes_at,
 // is_active) before letting the caller show its form. Returns true if the
 // form is open for submissions; on false, it has already hidden `formSelector`

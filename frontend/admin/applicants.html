@@ -32,6 +32,7 @@ renderShell('/admin/applicants.html', `
     <select id="f-season"></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
+  <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
       <thead><tr>
@@ -297,6 +298,11 @@ window.compareDup = (flagId) => {
 window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
+attachLiveRefresh('live-banner', async () => {
+  const params = new URLSearchParams({ search: state.search, status: state.status, marital_status: state.marital_status, home_for_yomtov: state.home_for_yomtov, season_id: state.season_id, pageSize: 1 });
+  const { total } = await api('/applicants?' + params);
+  return total;
+}, load);
 api('/seasons/active').then(({ season }) => {
   if (!season || season.max_accepted_applicants == null) return;
   qs('#cap-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${season.is_full ? 'border-color:var(--danger)' : ''}">

@@ -28,6 +28,7 @@ renderShell('/admin/shuls.html', `
     <select id="f-season"></select>
     <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
   </div>
+  <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
       <thead><tr>
@@ -248,6 +249,11 @@ window.compareDup = (flagId) => {
 window.resolveDup = async (id, action) => { try { await api(`/shuls/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
+attachLiveRefresh('live-banner', async () => {
+  const params = new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id, pageSize: 1 });
+  const { total } = await api('/shuls?' + params);
+  return total;
+}, load);
 </script>
 </body>
 </html>
