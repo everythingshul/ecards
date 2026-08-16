@@ -18,8 +18,8 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 
 const CONFIG = {
   apiKey: process.env.BREVO_API_KEY || '',
-  senderEmail: process.env.EMAIL_DEFAULT_SENDER || 'noreply@everythingshul.com',
-  senderName: process.env.EMAIL_DEFAULT_SENDER_NAME || 'everythingshul',
+  senderEmail: process.env.EMAIL_DEFAULT_SENDER || 'noreply@example.com',
+  senderName: process.env.EMAIL_DEFAULT_SENDER_NAME || "Kipas Hair BP Platform",
 };
 
 export function initMail() {
@@ -47,9 +47,7 @@ function wrap(bodyHtml, brand) {
         </td></tr>
         <tr><td style="padding:32px;color:#2a231d;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
         <tr><td style="background:#f3ede2;padding:18px 32px;color:#8a7c63;font-size:12px;border-top:1px solid #e5dcc8;text-align:center;">
-          This is an automated message from ${brand.name}.<br><br>
-          <span style="color:#a8987a;">Powered by</span>
-          <a href="https://everythingshul.com" style="color:#a8987a;text-decoration:none;">${process.env.APP_URL ? `<img src="${process.env.APP_URL}/img/everythingshul-logo.png" alt="everythingshul.com" height="18" style="vertical-align:middle;margin-left:4px;">` : 'everythingshul.com'}</a>
+          This is an automated message from ${brand.name}.
         </td></tr>
       </table>
     </td></tr>

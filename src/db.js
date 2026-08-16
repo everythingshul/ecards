@@ -3,6 +3,7 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
+import { normalizePhone } from './utils/phone.js';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -451,6 +452,29 @@ safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_step INTEGER DEFAULT 0`);
 safeAlter(`ALTER TABLE stores ADD COLUMN onboarding_completed_at TEXT`);
 safeAlter(`ALTER TABLE stores ADD COLUMN agreed_terms_at TEXT`);
 
+// One-time normalization of pre-existing phone numbers to the canonical
+// 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
+// re-running it on already-normalized numbers is a no-op — so it's safe to
+// leave running on every boot rather than tracking a "have we run this" flag.
+function normalizePhoneColumn(table, column) {
+  const rows = db.prepare(`SELECT id, ${column} AS val FROM ${table} WHERE ${column} IS NOT NULL AND ${column} != ''`).all();
+  const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
+  for (const row of rows) {
+    const normalized = normalizePhone(row.val);
+    if (normalized !== row.val) update.run(normalized, row.id);
+  }
+}
+normalizePhoneColumn('shuls', 'ruv_phone');
+normalizePhoneColumn('shuls', 'gabai_cell');
+normalizePhoneColumn('applicants', 'home_phone');
+normalizePhoneColumn('applicants', 'husband_cell');
+normalizePhoneColumn('applicants', 'wife_cell');
+normalizePhoneColumn('stores', 'phone');
+normalizePhoneColumn('stores', 'manager_phone');
+normalizePhoneColumn('stores', 'owner_phone');
+normalizePhoneColumn('users', 'phone');
+normalizePhoneColumn('organizations', 'support_phone');
+
 // ---------------------------------------------------------------------------
 // Seed a default organization + super admin on first boot so the app is usable
 // immediately. Idempotent.
@@ -461,7 +485,7 @@ if (orgCount === 0) {
   defaultOrgId = randomUUID();
   db.prepare(`INSERT INTO organizations (id, name, subdomain, primary_color, accent_color, support_email)
     VALUES (?, ?, ?, ?, ?, ?)`).run(
-    defaultOrgId, 'Shmachas Rechag - Kupat Ha\'ir', 'ecards', '#241a15', '#c9a76a', process.env.SUPPORT_EMAIL || 'admin@everythingshul.com'
+    defaultOrgId, 'Shmachas Rechag - Kupat Ha\'ir', 'ecards', '#241a15', '#c9a76a', process.env.SUPPORT_EMAIL || ''
   );
   const seasonId = randomUUID();
   db.prepare(`INSERT INTO seasons (id, org_id, name, is_active, default_card_amount) VALUES (?,?,?,1,0)`)

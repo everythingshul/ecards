@@ -8,6 +8,7 @@ import { generateContractPdf, stampSignature, getSignatureBox } from '../service
 import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -21,6 +22,8 @@ const REQUIRED_SHUL_FIELDS = ['name_en', 'address', 'city', 'state', 'zip', 'ruv
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
   const b = req.body || {};
+  if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
+  if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
   for (const f of REQUIRED_SHUL_FIELDS) {
     if (!b[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
   }
@@ -167,6 +170,8 @@ router.get('/:id', (req, res) => {
 
 router.post('/', requireAdmin, (req, res) => {
   const b = req.body || {};
+  if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
+  if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
   for (const f of REQUIRED_SHUL_FIELDS) if (!b[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
   const id = uuid();
   const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(req.user.org_id);
@@ -185,6 +190,8 @@ router.put('/:id', requireAdmin, (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
+  if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
+  if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
   const fields = ['name_en','name_he','address','city','state','zip','lat','lng','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
     'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip','slots_allocated'];
   const sets = fields.filter(f => b[f] !== undefined);
@@ -352,8 +359,8 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
           status, source, slots_allocated)
         VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, 'submitted','mass_upload', ?)`)
         .run(id, req.user.org_id, season?.id || null, r.name_en, r.name_he || '', r.address || '', r.city || '', r.state || '', r.zip || '',
-          r.ruv_first_name || '', r.ruv_last_name || '', r.ruv_phone || '', r.ruv_address || '', r.ruv_city || '', r.ruv_state || '', r.ruv_zip || '',
-          r.gabai_first_name || '', r.gabai_last_name || '', r.gabai_cell || '', r.gabai_email, r.gabai_address || '', r.gabai_city || '', r.gabai_state || '', r.gabai_zip || '',
+          r.ruv_first_name || '', r.ruv_last_name || '', normalizePhone(r.ruv_phone || ''), r.ruv_address || '', r.ruv_city || '', r.ruv_state || '', r.ruv_zip || '',
+          r.gabai_first_name || '', r.gabai_last_name || '', normalizePhone(r.gabai_cell || ''), r.gabai_email, r.gabai_address || '', r.gabai_city || '', r.gabai_state || '', r.gabai_zip || '',
           Number(r.slots_allocated) || 0);
       const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'shul', shul);

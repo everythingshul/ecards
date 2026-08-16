@@ -18,12 +18,19 @@ const Auth = {
 
 async function api(path, { method = 'GET', body, isForm = false } = {}) {
   const headers = {};
+  const hadToken = !!Auth.token();
   if (Auth.token()) headers['Authorization'] = `Bearer ${Auth.token()}`;
   if (!isForm) headers['Content-Type'] = 'application/json';
   const res = await fetch(API_BASE + path, { method, headers, body: isForm ? body : (body ? JSON.stringify(body) : undefined) });
   let data = {};
   try { data = await res.json(); } catch {}
-  if (res.status === 401) { Auth.logout(); throw new Error('Session expired'); }
+  // A 401 with no token attached (e.g. a failed /auth/login) is a real
+  // credentials/permission error, not a stale session — surface the actual
+  // server message instead of forcing a confusing "session expired" logout.
+  if (res.status === 401) {
+    if (hadToken) { Auth.logout(); throw new Error('Session expired'); }
+    throw new Error(data.error || 'Not authenticated');
+  }
   if (res.status === 423) { toast(data.error || 'Account paused', true); throw new Error(data.error); }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -373,15 +380,9 @@ window.voidDocument = async (docId, entityType, entityId, containerId, defaultEm
 };
 window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 
-// Shared footer for public-facing pages (login/apply/sign-*/form) — every
-// page carries the "Powered by everythingshul" mark linking to
-// everythingshul.com, matching the treatment on every outbound email.
-function renderPublicFooter() {
-  const el = document.createElement('footer');
-  el.className = 'site-footer';
-  el.innerHTML = `<div class="site-footer-inner">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener"><img src="/img/everythingshul-logo.png" alt="everythingshul.com"></a></div>`;
-  document.body.appendChild(el);
-}
+// Kept as a no-op call site for public-facing pages (login/apply/sign-*/form)
+// that still call it — there is no footer mark to render anymore.
+function renderPublicFooter() {}
 
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.
 function initSignaturePad(canvasId) {

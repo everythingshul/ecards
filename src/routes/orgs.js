@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.put('/me', (req, res) => {
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
   if (!org) return res.status(404).json({ error: 'Not found' });
   const f = req.body || {};
+  if (f.support_phone !== undefined) f.support_phone = normalizePhone(f.support_phone);
   db.prepare(`UPDATE organizations SET name=COALESCE(?,name), logo_url=COALESCE(?,logo_url),
     primary_color=COALESCE(?,primary_color), accent_color=COALESCE(?,accent_color),
     support_email=COALESCE(?,support_email), support_phone=COALESCE(?,support_phone), address=COALESCE(?,address) WHERE id=?`)

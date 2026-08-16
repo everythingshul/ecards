@@ -3,6 +3,7 @@ import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
 import { sendMailChecked } from '../services/mail.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms', 'users', 'settings'];
@@ -31,7 +32,7 @@ router.post('/', async (req, res) => {
   const token = uuid();
   const expires = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
   db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, phone, role, invite_token, invite_expires, is_active)
-    VALUES (?,?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', phone || '', role, token, expires);
+    VALUES (?,?,?,?,?,?,?,?,?,0)`).run(id, req.user.org_id, String(email).trim().toLowerCase(), first_name, last_name || '', normalizePhone(phone || ''), role, token, expires);
   for (const p of permissions) upsertPermission(id, p);
   const inviteUrl = `${process.env.APP_URL || ''}/accept-invite.html?token=${token}`;
   const { emailError } = await sendMailChecked(req.user.org_id, email, "You've been invited", `<p>You've been invited as <strong>${role.replace('_', ' ')}</strong>. Set your password to get started:</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`);
@@ -44,7 +45,7 @@ router.put('/:id', (req, res) => {
   if (!user) return res.status(404).json({ error: 'Not found' });
   const { first_name, last_name, phone, role, is_active, permissions, assignments } = req.body || {};
   db.prepare(`UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), phone = COALESCE(?, phone), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?`)
-    .run(first_name, last_name, phone, role, is_active === undefined ? undefined : (is_active ? 1 : 0), user.id);
+    .run(first_name, last_name, phone === undefined ? undefined : normalizePhone(phone), role, is_active === undefined ? undefined : (is_active ? 1 : 0), user.id);
   if (Array.isArray(permissions)) {
     for (const p of permissions) upsertPermission(user.id, p);
   }

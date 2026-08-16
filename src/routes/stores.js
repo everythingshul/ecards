@@ -4,6 +4,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMailChecked, templates } from '../services/mail.js';
 import { sendCsv } from '../services/csv.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 
@@ -18,8 +19,8 @@ router.post('/apply', (req, res) => {
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
       owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
-    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', b.phone || '',
-      b.manager_name || '', b.manager_phone || '', b.manager_email || '', b.owner_name || '', b.owner_phone || '', b.owner_email,
+    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
+      b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email,
       b.comments || '', b.has_provider_account ? 1 : 0);
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
 });
@@ -84,8 +85,8 @@ router.post('/', requireAdmin, (req, res) => {
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
       owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?)`)
-    .run(id, req.user.org_id, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', b.phone || '',
-      b.manager_name || '', b.manager_phone || '', b.manager_email || '', b.owner_name || '', b.owner_phone || '', b.owner_email || '',
+    .run(id, req.user.org_id, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
+      b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email || '',
       b.comments || '', b.setup_status || 'pending', b.has_provider_account ? 1 : 0);
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id) });
 });
@@ -95,6 +96,9 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (!store) return res.status(404).json({ error: 'Not found' });
   const fields = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments','setup_status','has_provider_account','provider_store_id'];
   const b = req.body || {};
+  if (b.phone !== undefined) b.phone = normalizePhone(b.phone);
+  if (b.manager_phone !== undefined) b.manager_phone = normalizePhone(b.manager_phone);
+  if (b.owner_phone !== undefined) b.owner_phone = normalizePhone(b.owner_phone);
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) db.prepare(`UPDATE stores SET ${sets.map(f=>`${f}=?`).join(',')} WHERE id=?`).run(...sets.map(f => f==='has_provider_account' ? (b[f]?1:0) : b[f]), store.id);
   res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
@@ -135,6 +139,9 @@ router.put('/:id/onboarding', (req, res) => {
 
   const { step, info, agree_terms } = req.body || {};
   if (info) {
+    if (info.phone !== undefined) info.phone = normalizePhone(info.phone);
+    if (info.manager_phone !== undefined) info.manager_phone = normalizePhone(info.manager_phone);
+    if (info.owner_phone !== undefined) info.owner_phone = normalizePhone(info.owner_phone);
     const fields = ['name', 'address', 'city', 'state', 'zip', 'phone', 'manager_name', 'manager_phone', 'manager_email', 'owner_name', 'owner_phone', 'owner_email'];
     const sets = fields.filter(f => info[f] !== undefined);
     if (sets.length) db.prepare(`UPDATE stores SET ${sets.map(f => `${f}=?`).join(',')} WHERE id=?`).run(...sets.map(f => info[f]), store.id);

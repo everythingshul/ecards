@@ -5,6 +5,7 @@ import { requirePermission, redact } from '../middleware/permissions.js';
 import * as giftcard from '../services/giftcard.js';
 import { sendCsv } from '../services/csv.js';
 import { syncOneCard, syncAllCards } from '../services/cardSync.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 router.use(auth, requirePermission('cards'));
@@ -82,7 +83,7 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'Activation phone number is required' });
   const result = await giftcard.activateCard(req.user.org_id, { providerCardId: card.provider_card_id, phone });
-  db.prepare(`UPDATE cards SET status='activated', activation_phone=?, activated_at=? WHERE id=?`).run(phone, result.activatedAt, card.id);
+  db.prepare(`UPDATE cards SET status='activated', activation_phone=?, activated_at=? WHERE id=?`).run(normalizePhone(phone), result.activatedAt, card.id);
   db.prepare(`INSERT INTO card_transactions (id, card_id, type, amount, occurred_at) VALUES (?,?,?,0,?)`).run(uuid(), card.id, 'activation', result.activatedAt);
   res.json({ card: db.prepare('SELECT * FROM cards WHERE id = ?').get(card.id) });
 });

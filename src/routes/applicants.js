@@ -7,6 +7,7 @@ import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { sendMailChecked, templates } from '../services/mail.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
+import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -82,6 +83,9 @@ router.get('/:id', (req, res) => {
 
 router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   const b = req.body || {};
+  if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
+  if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
+  if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
   if (!b.first_name || !b.last_name) return res.status(400).json({ error: 'First and last name are required' });
   // Shul-portal users can only ever create applicants under their own shul.
   const shulId = req.user.role === 'shul' ? req.user.shul_id : b.shul_id;
@@ -109,6 +113,9 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'shul' && applicant.shul_id !== req.user.shul_id) return res.status(403).json({ error: 'Not your applicant' });
   const b = req.body || {};
+  if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
+  if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
+  if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
   // card_amount is admin-only (spec #5: "amount of money to give them on the card (admin sets)").
   const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount') : EDITABLE_FIELDS;
   const sets = fields.filter(f => b[f] !== undefined);
@@ -198,7 +205,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
       db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
           address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source)
         VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload')`)
-        .run(id, req.user.org_id, shul.id, shul.season_id, r.first_name, r.last_name, r.marital_status || '', r.home_phone || '', r.husband_cell || '', r.wife_cell || '', r.email || '',
+        .run(id, req.user.org_id, shul.id, shul.season_id, r.first_name, r.last_name, r.marital_status || '', normalizePhone(r.home_phone || ''), normalizePhone(r.husband_cell || ''), normalizePhone(r.wife_cell || ''), r.email || '',
           r.address || '', r.city || '', r.state || '', r.zip || '', r.preferred_contact_method || '', r.preferred_number || '', +r.num_children || 0,
           /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '');
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);

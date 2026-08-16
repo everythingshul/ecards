@@ -229,7 +229,6 @@
   </section>
 
   <footer class="home-footer">
-    <div class="fi">Powered by <a href="https://everythingshul.com" target="_blank" rel="noopener"><img src="/img/everythingshul-logo.png" alt="everythingshul.com" style="height:22px;width:auto;vertical-align:middle;margin-left:5px;position:relative;top:-1px"></a></div>
     <div class="foot-links">
       <a href="/apply.html">Register a Shul</a>
       <a href="/apply-store.html">Apply as a Store</a>
@@ -242,7 +241,7 @@
     api('/orgs/resolve').then(({ org }) => {
       if (!org) return;
       if (org.name) { document.getElementById('org-name').textContent = org.name; document.getElementById('org-name-nav').textContent = org.name; document.getElementById('page-title').textContent = org.name; }
-      document.getElementById('contact-email').innerHTML = org.support_email ? `<a href="mailto:${org.support_email}">${org.support_email}</a>` : 'support@everythingshul.com';
+      document.getElementById('contact-email').innerHTML = org.support_email ? `<a href="mailto:${org.support_email}">${org.support_email}</a>` : 'Contact your administrator';
       document.getElementById('contact-phone').innerHTML = org.support_phone ? `<a href="tel:${org.support_phone}">${org.support_phone}</a>` : 'Contact us by email';
       document.getElementById('contact-address').textContent = org.address || 'Available upon request';
     }).catch(() => {});

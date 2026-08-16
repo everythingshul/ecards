@@ -126,7 +126,7 @@ async function loadOrg() {
   qs('#org-support_phone').value = o.support_phone || '';
   qs('#org-address').value = o.address || '';
 }
-window.downloadFullExport = () => downloadAuthed('/system-export', 'everythingshul-full-export.xlsx');
+window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
 window.saveOrg = async () => {
   const body = {
     name: qs('#org-name').value, primary_color: qs('#org-primary_color').value, accent_color: qs('#org-accent_color').value,
