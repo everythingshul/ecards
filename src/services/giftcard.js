@@ -14,9 +14,14 @@
 // if the real API contract differs once confirmed (or they add an endpoint we
 // need), only this file changes.
 //
-// Their docs host (docs.disccardpromos.com) blocked automated fetching from
-// this build environment, so the exact endpoint paths/payloads below are a
-// best-guess placeholder pending confirmation with their team.
+// CONFIRMED against real API docs (2026-08-16): base https://api.disccardpromos.com,
+// auth header is `Authorization: Token <key>` — NOT Bearer. The "Customers"
+// resource (/org/customers/...) below is fully confirmed. The card-level
+// functions further down (assign/activate/deactivate/status/transactions)
+// are still an unverified best-guess placeholder — their docs host
+// (docs.disccardpromos.com) is blocked by this environment's network egress
+// policy, so those are pending the same kind of confirmation the Customers
+// endpoints just got.
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
@@ -36,7 +41,7 @@ async function call(orgId, path, opts = {}) {
   const res = await fetch(`${cfg.apiBase}${path}`, {
     ...opts,
     headers: {
-      'Authorization': `Bearer ${cfg.apiKey}`,
+      'Authorization': `Token ${cfg.apiKey}`,
       'Content-Type': 'application/json',
       ...(opts.headers || {}),
     },
@@ -105,59 +110,63 @@ export async function listAllTransactions(orgId, { since }) {
 }
 
 // ---------------------------------------------------------------------------
-// Accounts & groups — written at applicant-approval time (routes/applicants.js
-// POST /:id/approve), separate from assignCard() above (which happens later,
-// when an actual card gets handed out). "Account" here means a disccardpromos
-// user/member record — the org confirmed the shape as: look the applicant up
-// by their external_id; if it already exists, just add the current season to
-// it; if it's new, create a fresh account for the current season, filed under
-// a "group" matching the applicant's shul (by English name), creating that
-// group first if it doesn't already exist.
+// Customers — CONFIRMED (2026-08-16). This is disccardpromos's term for what
+// the rest of this app calls an "account": /org/customers/... . Written at
+// applicant-approval time (routes/applicants.js POST /:id/approve), separate
+// from assignCard() below (which happens later, when an actual card gets
+// handed out).
 //
-// Endpoint paths/payloads below are still an unverified best guess, same
-// caveat as the rest of this file (their docs host blocked automated
-// fetching) — the *behavior* (idempotent-by-external_id, group-by-shul-name)
-// is now confirmed by the org, but the exact wire format isn't. Confirm
-// against their team before this runs live for real.
+// Their "group" is NOT a separate resource with its own id — `group_name` is
+// a plain string field directly on the customer record, just sent along on
+// create/update. No find-or-create-group call is needed (this replaces an
+// earlier guess that assumed a dedicated /groups endpoint).
+//
+// Still unconfirmed: how "current season" maps onto their data model —
+// nothing in the Customer resource represents a season directly. The
+// customer's `packages` array (each with its own id/name/amount/rate) is the
+// likely place — one seeded example package was literally named "Vip Grocery
+// 2025" — but which package to attach for a given season, and through which
+// endpoint, needs their Packages docs to confirm. `seasonName` is threaded
+// through below and intentionally unused for now rather than guessed at.
 // ---------------------------------------------------------------------------
 
-// Finds a disccardpromos group by name, creating it if it doesn't exist.
-// Returns { groupId }.
-export async function findOrCreateGroup(orgId, groupName) {
-  if (isMockMode(orgId)) return { groupId: `mock_group_${groupName}` };
-  const found = await call(orgId, `/groups?name=${encodeURIComponent(groupName)}`).catch(() => null);
-  const existing = (found?.groups || found?.data || [])[0];
-  if (existing?.id) return { groupId: existing.id };
-  const created = await call(orgId, '/groups', { method: 'POST', body: JSON.stringify({ name: groupName }) });
-  return { groupId: created.id || created.group_id };
-}
-
-// Looks up an existing disccardpromos account by our applicant's external_id.
-// Returns null if not found (a 404 from the provider) or in mock mode.
-async function findAccountByExternalId(orgId, externalId) {
+// Looks up an existing disccardpromos customer by OUR applicant's
+// external_id. Returns null if not found (a 404 from the provider) or in
+// mock mode.
+export async function findCustomerByExternalId(orgId, externalId) {
   if (isMockMode(orgId)) return null;
   try {
-    return await call(orgId, `/accounts/${encodeURIComponent(externalId)}`);
+    return await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/`);
   } catch (e) {
     if (e.status === 404) return null;
     throw e;
   }
 }
 
-// Idempotent upsert used at applicant-approval time: creates the shul's
-// group first if needed, then either links the existing account to the
-// current season or creates a brand-new one under that group. Returns
-// { created, accountId, groupId }.
-export async function upsertAccountForApproval(orgId, { externalId, firstName, lastName, groupName, seasonName }) {
-  if (isMockMode(orgId)) return { created: true, accountId: `mock_acct_${externalId}`, groupId: `mock_group_${groupName}` };
-  const { groupId } = await findOrCreateGroup(orgId, groupName);
-  const existing = await findAccountByExternalId(orgId, externalId);
-  if (existing) {
-    await call(orgId, `/accounts/${encodeURIComponent(externalId)}/seasons`, { method: 'POST', body: JSON.stringify({ season: seasonName }) });
-    return { created: false, accountId: existing.id || existing.account_id || externalId, groupId };
-  }
-  const created = await call(orgId, '/accounts', { method: 'POST', body: JSON.stringify({
-    external_ref: externalId, first_name: firstName, last_name: lastName, group_id: groupId, season: seasonName,
+export async function createCustomer(orgId, { externalId, firstName, lastName, groupName }) {
+  if (isMockMode(orgId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: groupName };
+  return call(orgId, '/org/customers/', { method: 'POST', body: JSON.stringify({
+    external_id: externalId, first_name: firstName, last_name: lastName, group_name: groupName,
   }) });
-  return { created: true, accountId: created.id || created.account_id, groupId };
+}
+
+export async function updateCustomer(orgId, customerId, patch) {
+  if (isMockMode(orgId)) return { id: customerId, ...patch };
+  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+// Idempotent upsert used at applicant-approval time: an existing customer
+// (matched by external_id) gets its group_name refreshed to the shul's
+// current English name; a new one gets created under that group. Returns
+// { created, accountId }. (seasonName isn't wired to anything yet — see
+// note above.)
+export async function upsertAccountForApproval(orgId, { externalId, firstName, lastName, groupName, seasonName }) {
+  if (isMockMode(orgId)) return { created: true, accountId: `mock_acct_${externalId}` };
+  const existing = await findCustomerByExternalId(orgId, externalId);
+  if (existing) {
+    const updated = await updateCustomer(orgId, existing.id, { group_name: groupName });
+    return { created: false, accountId: updated.id ?? existing.id };
+  }
+  const created = await createCustomer(orgId, { externalId, firstName, lastName, groupName });
+  return { created: true, accountId: created.id };
 }
