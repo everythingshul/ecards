@@ -44,6 +44,23 @@ router.post('/', requireAdmin, (req, res) => {
   res.status(201).json({ season: withCapacity(db.prepare('SELECT * FROM seasons WHERE id = ?').get(id)) });
 });
 
+router.get('/:id/notes', requireAdmin, (req, res) => {
+  const season = db.prepare('SELECT id FROM seasons WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!season) return res.status(404).json({ error: 'Not found' });
+  const notes = db.prepare(`SELECT n.*, u.first_name, u.last_name FROM season_notes n LEFT JOIN users u ON u.id = n.user_id WHERE n.season_id = ? ORDER BY n.created_at DESC`).all(season.id);
+  res.json({ notes });
+});
+
+router.post('/:id/notes', requireAdmin, (req, res) => {
+  const season = db.prepare('SELECT id FROM seasons WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!season) return res.status(404).json({ error: 'Not found' });
+  const { note } = req.body || {};
+  if (!note) return res.status(400).json({ error: 'note is required' });
+  const id = uuid();
+  db.prepare('INSERT INTO season_notes (id, season_id, user_id, note) VALUES (?,?,?,?)').run(id, season.id, req.user.id, note);
+  res.status(201).json({ note: db.prepare('SELECT * FROM season_notes WHERE id = ?').get(id) });
+});
+
 router.put('/:id', requireAdmin, (req, res) => {
   const season = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!season) return res.status(404).json({ error: 'Not found' });

@@ -123,6 +123,14 @@ CREATE TABLE IF NOT EXISTS shul_notes (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS season_notes (
+  id TEXT PRIMARY KEY,
+  season_id TEXT NOT NULL REFERENCES seasons(id),
+  user_id TEXT REFERENCES users(id),
+  note TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS contracts (
   id TEXT PRIMARY KEY,
   shul_id TEXT NOT NULL REFERENCES shuls(id),

@@ -155,7 +155,11 @@ const ALL_APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_ph
 async function loadSeasons() {
   const { seasons } = await api('/seasons');
   qs('#seasons-list').innerHTML = seasons.map(s => `<div class="card" style="margin-bottom:10px">
-      <div class="flex-between"><strong>${esc(s.name)}</strong>${s.is_active ? badge('active','active') : badge('inactive','rejected')}</div>
+      <div class="flex-between"><input value="${esc(s.name)}" style="font-weight:600;max-width:320px" onchange="updateSeason('${s.id}',{name:this.value})">${s.is_active ? badge('active','active') : badge('inactive','rejected')}</div>
+      <div class="grid-2" style="margin-top:10px">
+        <div><label style="margin-top:0">Start Date</label><input type="date" value="${s.start_date||''}" onchange="updateSeason('${s.id}',{start_date:this.value})"></div>
+        <div><label style="margin-top:0">End Date</label><input type="date" value="${s.end_date||''}" onchange="updateSeason('${s.id}',{end_date:this.value})"></div>
+      </div>
       <div class="grid-2" style="margin-top:10px">
         <div><label style="margin-top:0">Default Card Amount</label><input type="number" step="0.01" value="${s.default_card_amount ?? 0}" onchange="updateSeason('${s.id}',{default_card_amount:+this.value})"></div>
         <div><label style="margin-top:0">Season Status</label>${s.is_active ? `<button class="btn btn-sm btn-outline" disabled>This is the active season</button>` : `<button class="btn btn-sm btn-outline" onclick="updateSeason('${s.id}',{is_active:true})">Set as Active Season</button>`}</div>
@@ -164,9 +168,26 @@ async function loadSeasons() {
         <div><label style="margin-top:0">Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input type="number" min="0" value="${s.max_accepted_applicants ?? ''}" placeholder="Unlimited" onchange="updateSeason('${s.id}',{max_accepted_applicants: this.value === '' ? null : +this.value})"></div>
         <div><label style="margin-top:0">Accepted So Far</label><div style="padding:9px 0">${s.accepted_count}${s.max_accepted_applicants != null ? ` of ${s.max_accepted_applicants} (${s.remaining} remaining)${s.is_full ? ' ' + badge('full','rejected') : ''}` : ' (no cap set)'}</div></div>
       </div>
+      <div class="divider"></div>
+      <button class="btn btn-sm btn-outline" onclick="openSeasonNotes('${s.id}','${esc(s.name).replace(/'/g,"\\'")}')">Notes</button>
     </div>`).join('') || '<p class="small-muted">No seasons yet.</p>';
 }
 window.updateSeason = async (id, body) => { try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); loadSeasons(); } catch (err) { toast(err.message, true); } };
+window.openSeasonNotes = async (id, name) => {
+  try {
+    const { notes } = await api(`/seasons/${id}/notes`);
+    const body = `
+      <div style="display:flex;gap:8px"><input id="new-season-note" placeholder="Add a note about this season…"><button class="btn btn-sm btn-primary" onclick="addSeasonNote('${id}','${name.replace(/'/g,"\\'")}')">Add</button></div>
+      <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
+    `;
+    openModal(`${name}: Notes`, body);
+  } catch (err) { toast(err.message, true); }
+};
+window.addSeasonNote = async (id, name) => {
+  const note = qs('#new-season-note').value.trim();
+  if (!note) return;
+  try { await api(`/seasons/${id}/notes`, { method: 'POST', body: { note } }); openSeasonNotes(id, name); } catch (err) { toast(err.message, true); }
+};
 window.openNewSeason = () => {
   const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">
     <label>Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input id="s-cap" type="number" min="0" placeholder="Unlimited">`;

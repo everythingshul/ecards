@@ -103,6 +103,7 @@ router.delete('/:id/permanent', (req, res) => {
   db.prepare('DELETE FROM user_assignments WHERE user_id = ?').run(user.id);
   nullOut('shuls', 'portal_user_id');
   nullOut('shul_notes', 'user_id');
+  nullOut('season_notes', 'user_id');
   nullOut('documents', 'created_by');
   nullOut('emails_sent', 'sent_by');
   nullOut('email_templates', 'created_by');
