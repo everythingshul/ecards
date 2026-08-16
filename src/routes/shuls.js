@@ -304,6 +304,24 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   res.json({ ok: true, contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError });
 });
 
+// Undo a signature — for a signed-in-error or outdated signature, not a
+// rejection. Resets the shul's latest contract back to 'sent' with a fresh
+// signing link so it can be signed again; doesn't email anyone
+// automatically, and deliberately leaves the shul's own status alone (an
+// already-approved shul stays approved) since that's a separate decision.
+router.post('/:id/contract/retract', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const contract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
+  if (!contract || contract.status !== 'signed') return res.status(400).json({ error: 'Only a signed contract can have its signature retracted' });
+  const token = uuid();
+  const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  db.prepare(`UPDATE contracts SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
+    .run(token, expires, contract.id);
+  logAudit(req.user.org_id, req.user.id, 'retract_signature', 'shul', shul.id, contract, null, req.ip);
+  res.json({ ok: true, contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(contract.id) });
+});
+
 router.get('/:id/contract/pdf', (req, res) => {
   const contract = db.prepare(`SELECT c.* FROM contracts c JOIN shuls s ON s.id=c.shul_id WHERE c.shul_id = ? AND s.org_id = ? ORDER BY c.created_at DESC LIMIT 1`).get(req.params.id, req.user.org_id);
   if (!contract) return res.status(404).json({ error: 'No contract on file' });

@@ -99,6 +99,21 @@ router.post('/:id/void', auth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Undo a signature — for a signed-in-error or outdated signature, not a
+// rejection (that's what void is for). Clears the signature and the signed
+// PDF, puts the document back to 'sent' with a fresh signing link so it can
+// be signed again; does not email anyone automatically.
+router.post('/:id/retract', auth, requireAdmin, (req, res) => {
+  const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!document) return res.status(404).json({ error: 'Not found' });
+  if (document.status !== 'signed') return res.status(400).json({ error: 'Only a signed document can have its signature retracted' });
+  const token = uuid();
+  const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  db.prepare(`UPDATE documents SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
+    .run(token, expires, document.id);
+  res.json({ ok: true, document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id) });
+});
+
 router.get('/:id/pdf', auth, requireAdmin, (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });

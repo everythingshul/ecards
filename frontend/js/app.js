@@ -387,6 +387,7 @@ function documentRowHtml(d, entityType, entityId, containerId, defaultEmail) {
     <div style="margin-top:8px;display:flex;gap:8px">
       <button class="btn btn-sm btn-outline" onclick="viewDocumentPdf('${d.id}')">View PDF</button>
       ${canAct ? `<button class="btn btn-sm btn-outline" onclick="voidDocument('${d.id}','${entityType}','${entityId}','${containerId}','${safeEmail}')">Void</button>` : ''}
+      ${d.status === 'signed' ? `<button class="btn btn-sm btn-outline" onclick="retractDocumentSignature('${d.id}','${entityType}','${entityId}','${containerId}','${safeEmail}')">Retract Signature</button>` : ''}
     </div>
   </div>`;
 }
@@ -410,6 +411,10 @@ window.sendDocument = async (docId, inputId, entityType, entityId, containerId, 
 window.voidDocument = async (docId, entityType, entityId, containerId, defaultEmail) => {
   if (!confirm('Void this document?')) return;
   try { await api(`/documents/${docId}/void`, { method: 'POST' }); toast('Voided'); loadDocumentsTab(entityType, entityId, containerId, defaultEmail); } catch (err) { toast(err.message, true); }
+};
+window.retractDocumentSignature = async (docId, entityType, entityId, containerId, defaultEmail) => {
+  if (!confirm('Retract this signature? The document will go back to unsigned and can be signed again.')) return;
+  try { await api(`/documents/${docId}/retract`, { method: 'POST' }); toast('Signature retracted'); loadDocumentsTab(entityType, entityId, containerId, defaultEmail); } catch (err) { toast(err.message, true); }
 };
 window.viewDocumentPdf = (docId) => viewAuthed(`/documents/${docId}/pdf`);
 

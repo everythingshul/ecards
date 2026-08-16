@@ -112,7 +112,7 @@ async function openShul(id) {
         <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
       </div>
       <div id="tab-contract" style="display:none">
-        ${contract ? `<p>Status: ${badge(contract.status, contract.status)}</p>${contract.signed_at ? `<p>Signed by ${esc(contract.signer_name)} on ${fmtDateTime(contract.signed_at)}</p><button class="btn btn-sm btn-outline" onclick="viewAuthed('/shuls/${id}/contract/pdf')">View Signed PDF</button>` : `<button class="btn btn-sm btn-primary" onclick="resendContract('${id}')">Resend Signing Link</button>`}` : `<p class="small-muted">No contract generated yet.</p><button class="btn btn-sm btn-primary" onclick="sendContract('${id}')">Generate & Email Contract</button>`}
+        ${contract ? `<p>Status: ${badge(contract.status, contract.status)}</p>${contract.signed_at ? `<p>Signed by ${esc(contract.signer_name)} on ${fmtDateTime(contract.signed_at)}</p><button class="btn btn-sm btn-outline" onclick="viewAuthed('/shuls/${id}/contract/pdf')">View Signed PDF</button> <button class="btn btn-sm btn-outline" onclick="retractContractSignature('${id}')">Retract Signature</button>` : `<button class="btn btn-sm btn-primary" onclick="resendContract('${id}')">Resend Signing Link</button>`}` : `<p class="small-muted">No contract generated yet.</p><button class="btn btn-sm btn-primary" onclick="sendContract('${id}')">Generate & Email Contract</button>`}
       </div>
       <div id="tab-applicants" style="display:none">
         ${applicants.length ? `<table><thead><tr><th>Name</th><th>Status</th></tr></thead><tbody>${applicants.map(a=>`<tr><td>${esc(a.first_name)} ${esc(a.last_name)}</td><td>${badge(a.approval_status, a.approval_status)}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No applicants submitted yet.</p>'}
@@ -161,6 +161,10 @@ window.sendContract = async (id) => {
 };
 window.resendContract = async (id) => {
   try { const r = await api(`/shuls/${id}/send-contract`, { method: 'POST' }); toast(r.emailError ? `Email failed: ${r.emailError}` : 'Contract re-emailed', !!r.emailError); } catch (err) { toast(err.message, true); }
+};
+window.retractContractSignature = async (id) => {
+  if (!confirm('Retract this signature? The contract will go back to unsigned and can be signed again.')) return;
+  try { await api(`/shuls/${id}/contract/retract`, { method: 'POST' }); toast('Signature retracted'); closeModal(); openShul(id); } catch (err) { toast(err.message, true); }
 };
 
 function openShulForm() {
