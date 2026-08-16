@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { initMail } from './services/mail.js';
 import { sendDueTaskReminders } from './services/reminders.js';
 import { syncAllCards } from './services/cardSync.js';
+import { syncInboundSms } from './services/sms.js';
 import { runBackup } from './services/backup.js';
 import { DEFAULT_ORG_ID } from './db.js';
 
@@ -146,6 +147,13 @@ setTimeout(() => { sendDueTaskReminders().catch(e => console.error('[reminders] 
 const CARD_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 setInterval(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, CARD_SYNC_INTERVAL_MS);
 setTimeout(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, 20 * 1000);
+
+// Automatic inbound-SMS sync — SimpleSender doesn't support webhooks yet, so
+// this polls GET /v1/messages for new incoming replies instead. No-ops
+// instantly in mock mode.
+const SMS_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+setInterval(() => { syncInboundSms(DEFAULT_ORG_ID).catch(e => console.error('[sms] inbound sync failed', e.message)); }, SMS_SYNC_INTERVAL_MS);
+setTimeout(() => { syncInboundSms(DEFAULT_ORG_ID).catch(e => console.error('[sms] inbound sync failed', e.message)); }, 25 * 1000);
 
 // Rotating local DB backups (services/backup.js) — every 4 hours, 12 kept
 // (48 hours of coverage) by default. Runs once shortly after boot too so a

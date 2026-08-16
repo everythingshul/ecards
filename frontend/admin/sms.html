@@ -35,9 +35,9 @@ renderShell('/admin/sms', `
   </div>
 
   <div id="panel-inbox" style="display:none">
-    <p class="small-muted">Incoming messages appear here once SimpleSender is sending them to your inbound webhook. In the SimpleSender dashboard, go to <strong>Developer &gt; Webhooks</strong> and set the inbound-message webhook URL to:</p>
+    <p class="small-muted">SimpleSender doesn't support inbound webhooks yet, so incoming messages are pulled by checking in every 15 minutes automatically. <button type="button" class="btn btn-sm btn-outline" id="btn-sync-inbox" style="margin-left:4px">Check Now</button></p>
+    <p class="small-muted">If your provider adds webhooks later, this Inbox is also ready to receive them directly at:</p>
     <p><code id="webhook-url" style="user-select:all"></code></p>
-    <p class="small-muted">If that's already set and messages still aren't showing, an unrecognized payload from the provider is being logged (with the raw data) to this Inbox anyway so it's visible for review — check for a row with an unfamiliar "From" value.</p>
     <div class="card" style="padding:0;overflow-x:auto">
       <table><thead><tr><th>From</th><th>Message</th><th>Received</th></tr></thead>
       <tbody id="tbody-inbox"><tr><td colspan="3" class="empty-state">Loading…</td></tr></tbody></table>
@@ -58,6 +58,17 @@ function showSmsTab(t) {
   if (t === 'inbox') { loadInbox(); api('/sms/inbox/mark-seen', { method: 'POST' }).catch(() => {}); }
 }
 qsa('#stabs button').forEach(b => b.addEventListener('click', () => showSmsTab(b.dataset.t)));
+
+qs('#btn-sync-inbox').addEventListener('click', async () => {
+  const btn = qs('#btn-sync-inbox'); btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const r = await api('/sms/inbox/sync', { method: 'POST' });
+    if (r.mockMode) toast('SMS isn\'t turned on yet — nothing to check.', true);
+    else toast(`Found ${r.imported} new message(s) (${r.skipped} not classified as inbound, ${r.total} total on the provider)`);
+    loadInbox();
+  } catch (err) { toast(err.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Check Now'; }
+});
 
 qs('#webhook-url').textContent = window.location.origin + '/api/sms/webhook/inbound';
 

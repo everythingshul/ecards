@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { sendSmsChecked, logInboundSms, isSmsMockMode } from '../services/sms.js';
+import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms } from '../services/sms.js';
 import { sendCsv } from '../services/csv.js';
 
 const router = Router();
@@ -61,6 +61,14 @@ router.post('/inbox/mark-seen', (req, res) => {
     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`)
     .run(req.user.id, JSON.stringify(sqliteNow()));
   res.json({ ok: true });
+});
+
+// Pulls new inbound messages from SimpleSender's /v1/messages right now —
+// also runs automatically on a background interval (see index.js), same
+// pattern as the card-transaction sync.
+router.post('/inbox/sync', async (req, res) => {
+  try { res.json({ ...(await syncInboundSms(req.user.org_id)), mockMode: isSmsMockMode() }); }
+  catch (e) { res.status(502).json({ error: `Sync failed: ${e.message}` }); }
 });
 
 // ============================= Message log =============================

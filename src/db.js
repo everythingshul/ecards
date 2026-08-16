@@ -532,6 +532,11 @@ safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
 // whichever season happens to be "active" at the moment they hit submit
 // (which could change out from under a link someone already has open).
 safeAlter(`ALTER TABLE forms ADD COLUMN season_id TEXT REFERENCES seasons(id)`);
+// SimpleSender doesn't support inbound webhooks yet, so inbound SMS is
+// pulled by polling GET /v1/messages instead (see services/sms.js
+// syncInboundSms) — this is how re-polling the same messages is recognized
+// as already-imported instead of creating duplicate rows every sweep.
+safeAlter(`ALTER TABLE sms_messages ADD COLUMN provider_message_id TEXT`);
 safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
 // Points an undone entry at the fresh 'undo' entry that reversed it, so the
 // UI can offer a one-click "Redo" right on that same row instead of making

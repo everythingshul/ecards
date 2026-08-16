@@ -70,3 +70,67 @@ export function logInboundSms(orgId, from, body) {
   db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status) VALUES (?,?,?,?,?,'received')`)
     .run(uuid(), orgId || DEFAULT_ORG_ID, 'inbound', from, body);
 }
+
+// ---------------------------------------------------------------------------
+// Inbound sync via polling GET /v1/messages — SimpleSender doesn't support
+// inbound webhooks yet, so this is the only way to see incoming replies for
+// now (the webhook route above stays in place for whenever they add that).
+//
+// The only confirmed shape of that endpoint's response is
+// `{ messages: [...], total: N }` — no sample message object and no docs
+// were available when this was built. Field names below are therefore a
+// best guess covering the conventions most REST SMS providers use, same
+// spirit as the webhook's field-name matching. Critically, `total` (456 in
+// the one response seen) suggests this returns the FULL message history,
+// sent and received mixed — importing everything blindly would duplicate
+// every outbound send this app already logs at send time in
+// sendSmsChecked(). So a message is only ever imported when it can be
+// confidently classified as inbound via an explicit direction/type field;
+// anything ambiguous is skipped and counted, never guessed into either
+// bucket. If a sync run finds messages but classifies none of them,
+// it logs one sample item's raw JSON so the real field names are visible
+// in the server log the moment this runs against production credentials.
+// ---------------------------------------------------------------------------
+const INBOUND_DIRECTION_VALUES = ['inbound', 'in', 'received', 'incoming', 'mo'];
+const OUTBOUND_DIRECTION_VALUES = ['outbound', 'out', 'sent', 'outgoing', 'mt'];
+
+function classifyDirection(m) {
+  const raw = String(m.direction ?? m.type ?? m.message_type ?? m.messageType ?? '').toLowerCase();
+  if (INBOUND_DIRECTION_VALUES.includes(raw)) return 'inbound';
+  if (OUTBOUND_DIRECTION_VALUES.includes(raw)) return 'outbound';
+  return null;
+}
+
+export async function syncInboundSms(orgId) {
+  if (isSmsMockMode()) return { imported: 0, skipped: 0, total: 0 };
+  const res = await fetch(`${CONFIG.apiBase}/v1/messages`, { headers: { Authorization: `Bearer ${CONFIG.apiKey}` } });
+  if (!res.ok) throw new Error(`SimpleSender /v1/messages failed (${res.status})`);
+  const data = await res.json().catch(() => ({}));
+  const messages = Array.isArray(data.messages) ? data.messages : [];
+
+  let imported = 0, skipped = 0, classified = 0;
+  const insert = db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, provider_message_id) VALUES (?,?,?,?,?,'received',?)`);
+  const findByProviderId = db.prepare(`SELECT 1 FROM sms_messages WHERE org_id = ? AND provider_message_id = ?`);
+  const findByPhoneBody = db.prepare(`SELECT 1 FROM sms_messages WHERE org_id = ? AND direction = 'inbound' AND phone = ? AND body = ? AND created_at > datetime('now', '-2 days')`);
+
+  for (const m of messages) {
+    const direction = classifyDirection(m);
+    if (direction !== 'inbound') { skipped++; continue; }
+    classified++;
+    const phone = m.from || m.sender || m.phone || m.msisdn || m.source;
+    const body = m.body || m.text || m.message || m.content;
+    if (!phone || typeof body !== 'string') { skipped++; continue; }
+    const providerId = m.id != null ? String(m.id) : (m.message_id || m.sid || m.uuid || null);
+    if (providerId) {
+      if (findByProviderId.get(orgId, providerId)) continue;
+    } else if (findByPhoneBody.get(orgId, phone, body)) {
+      continue;
+    }
+    insert.run(uuid(), orgId, 'inbound', phone, body, providerId);
+    imported++;
+  }
+  if (messages.length && classified === 0) {
+    console.warn(`[sms] synced ${messages.length} message(s) from /v1/messages but classified 0 as inbound — sample item for review:`, JSON.stringify(messages[0]));
+  }
+  return { imported, skipped, total: data.total ?? messages.length };
+}
