@@ -20,6 +20,7 @@ renderShell('/admin/applicants.html', `
       <button class="btn btn-outline btn-sm" id="btn-import">Mass Upload</button>
       <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
       <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
+      <button class="btn btn-outline btn-sm" id="btn-columns">Customize Columns</button>
       <button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button>
     </div>
   </div>
@@ -35,12 +36,8 @@ renderShell('/admin/applicants.html', `
   <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table id="tbl">
-      <thead><tr>
-        <th style="width:34px"><input type="checkbox" id="chk-all"></th>
-        <th data-sort="external_id">ID</th><th data-sort="last_name">Name</th><th>Shul</th><th>Marital</th><th>Contact</th><th>Children</th>
-        <th>Home Yom Tov</th><th data-sort="approval_status">Status</th><th data-sort="card_amount">Card $</th><th data-sort="created_at">Submitted</th><th></th>
-      </tr></thead>
-      <tbody id="tbody"><tr><td colspan="12" class="empty-state">Loading…</td></tr></tbody>
+      <thead id="thead"></thead>
+      <tbody id="tbody"><tr><td class="empty-state">Loading…</td></tr></tbody>
     </table>
   </div>
   <div class="paginator" id="pager"></div>
@@ -49,11 +46,59 @@ renderShell('/admin/applicants.html', `
 let state = { search:'', status:'', marital_status:'', home_for_yomtov:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
 let selected = new Set();
 
+// Every field a column can show, plus how to render it — the checkbox
+// (selection) column is always first and never customizable, so it's not
+// in this list. Which of these show, and in what order, is per-admin
+// (Customize Columns button, saved via attachColumnCustomizer).
+function contactLine(a) {
+  const method = a.preferred_contact_method || '';
+  const num = a.preferred_number === 'husband' ? a.husband_cell : a.preferred_number === 'wife' ? a.wife_cell : a.home_phone;
+  return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
+}
+const APPLICANT_COLUMNS = [
+  { key: 'external_id', label: 'ID', sort: 'external_id', render: a => `<code>${esc(a.external_id||'')}</code>` },
+  { key: 'name', label: 'Name', sort: 'last_name', render: a => `<strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused ? ' ' + badge('paused','paused') : ''}` },
+  { key: 'shul', label: 'Shul', render: a => esc(a.shul_name||'') },
+  { key: 'marital_status', label: 'Marital', render: a => esc(a.marital_status||'') },
+  { key: 'contact', label: 'Contact', render: a => contactLine(a) },
+  { key: 'email', label: 'Email', render: a => esc(a.email||'') },
+  { key: 'home_phone', label: 'Home Phone', render: a => esc(a.home_phone||'') },
+  { key: 'husband_cell', label: 'Husband Cell', render: a => esc(a.husband_cell||'') },
+  { key: 'wife_cell', label: 'Wife Cell', render: a => esc(a.wife_cell||'') },
+  { key: 'address', label: 'Address', render: a => esc([a.address,a.city,a.state,a.zip].filter(Boolean).join(', ')) },
+  { key: 'num_children', label: 'Children', render: a => a.num_children ?? 0 },
+  { key: 'home_for_yomtov', label: 'Home Yom Tov', render: a => a.home_for_yomtov ? 'Yes' : 'No' },
+  { key: 'approval_status', label: 'Status', sort: 'approval_status', render: a => badge(a.approval_status, a.approval_status) },
+  { key: 'card_amount', label: 'Card $', sort: 'card_amount', render: a => a.card_amount != null ? fmtMoney(a.card_amount) : '' },
+  { key: 'comments', label: 'Comments', render: a => esc(a.comments||'') },
+  { key: 'created_at', label: 'Submitted', sort: 'created_at', render: a => fmtDate(a.created_at) },
+];
+const DEFAULT_APPLICANT_COLUMNS = ['external_id','name','shul','marital_status','contact','num_children','home_for_yomtov','approval_status','card_amount','created_at'];
+let activeColumns = DEFAULT_APPLICANT_COLUMNS;
+
+function renderThead() {
+  const cols = activeColumns.map(k => APPLICANT_COLUMNS.find(c => c.key === k)).filter(Boolean);
+  qs('#thead').innerHTML = `<tr>
+    <th style="width:34px"><input type="checkbox" id="chk-all"></th>
+    ${cols.map(c => `<th ${c.sort ? `data-sort="${c.sort}"` : ''}>${esc(c.label)}</th>`).join('')}
+    <th></th>
+  </tr>`;
+  qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk:not(:disabled)').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
+}
+qs('#thead').parentElement.addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (!th) return;
+  const key = th.dataset.sort;
+  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
+  state.sort = key; load();
+});
+
 async function load() {
   const params = new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([,v]) => v !== '')));
   try {
     const { applicants, total } = await api('/applicants?' + params);
-    qs('#tbody').innerHTML = applicants.length ? applicants.map(rowHtml).join('') : '<tr><td colspan="12" class="empty-state">No applicants found.</td></tr>';
+    const cols = activeColumns.map(k => APPLICANT_COLUMNS.find(c => c.key === k)).filter(Boolean);
+    qs('#tbody').innerHTML = applicants.length ? applicants.map(a => rowHtml(a, cols)).join('') : `<tr><td colspan="${cols.length+2}" class="empty-state">No applicants found.</td></tr>`;
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
     qs('#pager').innerHTML = `<button class="btn btn-sm btn-outline" ${state.page<=1?'disabled':''} onclick="changePage(-1)">Prev</button> Page ${state.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${state.page>=pages?'disabled':''} onclick="changePage(1)">Next</button>`;
     qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
@@ -61,26 +106,11 @@ async function load() {
 }
 function changePage(d) { state.page += d; load(); }
 
-function contactLine(a) {
-  const method = a.preferred_contact_method || '';
-  const num = a.preferred_number === 'husband' ? a.husband_cell : a.preferred_number === 'wife' ? a.wife_cell : a.home_phone;
-  return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
-}
-
-function rowHtml(a) {
-  return `<tr>
+function rowHtml(a, cols) {
+  return `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
     <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}" ${a.is_paused ? 'disabled' : ''}></td>
-    <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><code>${esc(a.external_id||'')}</code></td>
-    <td onclick="openApplicant('${a.id}')" style="cursor:pointer"><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused ? ' ' + badge('paused','paused') : ''}</td>
-    <td onclick="openApplicant('${a.id}')" style="cursor:pointer">${esc(a.shul_name||'')}</td>
-    <td>${esc(a.marital_status||'')}</td>
-    <td>${contactLine(a)}</td>
-    <td>${a.num_children ?? 0}</td>
-    <td>${a.home_for_yomtov ? 'Yes' : 'No'}</td>
-    <td>${badge(a.approval_status, a.approval_status)}</td>
-    <td>${a.card_amount != null ? fmtMoney(a.card_amount) : ''}</td>
-    <td>${fmtDate(a.created_at)}</td>
-    <td><button class="btn btn-sm btn-outline" onclick="openApplicant('${a.id}')">View</button></td>
+    ${cols.map(c => `<td>${c.render(a)}</td>`).join('')}
+    <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openApplicant('${a.id}')">View</button></td>
   </tr>`;
 }
 
@@ -90,19 +120,12 @@ function onCheck(e) {
   qs('#btn-mass-approve').textContent = `Approve Selected (${selected.size})`;
   qs('#btn-mass-approve').disabled = selected.size === 0;
 }
-qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk:not(:disabled)').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
 
-['search','status','marital','yomtov'].forEach(k => {});
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
 qs('#f-yomtov').addEventListener('change', () => { state.home_for_yomtov = qs('#f-yomtov').value; state.page = 1; load(); });
 qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
-qsa('#tbl th[data-sort]').forEach(th => th.addEventListener('click', () => {
-  const key = th.dataset.sort;
-  state.dir = (state.sort === key && state.dir === 'DESC') ? 'ASC' : 'DESC';
-  state.sort = key; load();
-}));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 qs('#btn-template').addEventListener('click', () => downloadAuthed('/applicants/import/template', 'applicant_import_template.csv'));
@@ -297,6 +320,8 @@ window.compareDup = (flagId) => {
 };
 window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
+attachColumnCustomizer('btn-columns', 'columns_applicants', APPLICANT_COLUMNS, DEFAULT_APPLICANT_COLUMNS, (order) => { activeColumns = order; renderThead(); load(); })
+  .then(order => { activeColumns = order; renderThead(); load(); });
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
 attachLiveRefresh('live-banner', async () => {
   const params = new URLSearchParams({ search: state.search, status: state.status, marital_status: state.marital_status, home_for_yomtov: state.home_for_yomtov, season_id: state.season_id, pageSize: 1 });

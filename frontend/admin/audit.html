@@ -25,21 +25,54 @@ renderShell('/admin/audit.html', `
   <div id="actions-list">Loading…</div>
 `);
 
-const FIELD_LABELS = { approval_status: 'Status', card_amount: 'Card Amount', is_active: 'Active', first_name: 'First Name', last_name: 'Last Name',
-  name_en: 'Name', name: 'Name', role: 'Role', phone: 'Phone', slots_allocated: 'Slots' };
-function fieldLabel(k) { return FIELD_LABELS[k] || k; }
-function fmtVal(v) { if (v === null || v === undefined) return '(empty)'; if (v === 1 && typeof v === 'number') return 'Yes'; if (v === 0 && typeof v === 'number') return 'No'; return String(v); }
+const ENTITY_LABELS = { shul: 'shul', applicant: 'applicant', store: 'store', season: 'season', task: 'task', user: 'user', card: 'card' };
+const ACTION_VERBS = { create: 'Created', update: 'Updated', delete: 'Deleted', approve: 'Approved', reject: 'Rejected', undo: 'Reversed a change to', login: 'Signed in', esign: 'Signed', send_contract: 'Sent a contract to', retract_signature: 'Retracted a signature on', resolve_duplicate: 'Resolved a duplicate flag on' };
+const FIELD_LABELS = {
+  approval_status: 'Status', card_amount: 'Card Amount', is_active: 'Active', first_name: 'First Name', last_name: 'Last Name',
+  name_en: 'Name', name: 'Name', role: 'Role', phone: 'Phone', slots_allocated: 'Slots', email: 'Email', home_phone: 'Home Phone',
+  husband_cell: 'Husband Cell', wife_cell: 'Wife Cell', address: 'Address', city: 'City', state: 'State', zip: 'Zip',
+  marital_status: 'Marital Status', num_children: 'Children', home_for_yomtov: 'Home for Yom Tov', comments: 'Comments',
+  visibility: 'Visibility', opens_at: 'Opens', closes_at: 'Closes', setup_status: 'Setup Status', manager_name: 'Manager Name',
+  manager_phone: 'Manager Phone', manager_email: 'Manager Email', owner_name: 'Owner Name', owner_phone: 'Owner Phone', owner_email: 'Owner Email',
+};
+// Turns an unmapped snake_case column name into a readable label as a
+// fallback, rather than showing the raw db column name.
+function fieldLabel(k) { return FIELD_LABELS[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+const DATE_FIELDS = new Set(['opens_at', 'closes_at']);
+function fmtVal(k, v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'number' && (v === 0 || v === 1) && ['is_active', 'home_for_yomtov'].includes(k)) return v ? 'Yes' : 'No';
+  if (DATE_FIELDS.has(k)) return fmtDateTime(v);
+  if (k === 'card_amount') return fmtMoney(v);
+  return String(v);
+}
+// Best-effort human name for whichever entity this action touched, so the
+// headline reads "Updated shul — Congregation Beth Israel" instead of a
+// bare entity type + id.
+function entityName(row) {
+  const r = row.after || row.before;
+  if (!r) return '';
+  return r.name_en || r.name || `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.email || '';
+}
 
-// Summarizes what an action actually changed by diffing before/after key by
-// key — for a 'create' (before=null) or 'delete' (after=null) this just
-// lists the row's fields directly instead of a diff.
-function describeChange(a) {
-  if (a.action === 'create') return `Created ${a.entity_type}${a.after ? ': ' + (a.after.name_en || a.after.name || `${a.after.first_name||''} ${a.after.last_name||''}`.trim() || a.after.email || a.entity_id) : ''}`;
-  if (a.action === 'delete') return `Deleted ${a.entity_type}${a.before ? ': ' + (a.before.name_en || a.before.name || `${a.before.first_name||''} ${a.before.last_name||''}`.trim() || a.before.email || a.entity_id) : ''}`;
+// One clear headline per action, then (for actions with a real before/after
+// diff) a short field-by-field list underneath — one field per line, plain
+// labels, formatted values — instead of a single comma-packed "→" dump.
+function headline(a) {
+  const verb = ACTION_VERBS[a.action] || (a.action.charAt(0).toUpperCase() + a.action.slice(1));
+  if (a.action === 'login') return 'Signed in';
+  const label = ENTITY_LABELS[a.entity_type] || a.entity_type;
+  const name = entityName(a);
+  return `${verb} ${label}${name ? ' — ' + esc(name) : ''}`;
+}
+function changeList(a) {
+  if (['create', 'delete', 'login'].includes(a.action)) return '';
   const before = a.before || {}, after = a.after || {};
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
-  if (!keys.length) return `${a.action} on ${a.entity_type}`;
-  return keys.map(k => `${fieldLabel(k)}: ${esc(fmtVal(before[k]))} → ${esc(fmtVal(after[k]))}`).join(', ');
+  if (!keys.length) return '';
+  return `<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--text-muted)">
+    ${keys.map(k => `<li><strong style="color:var(--text-dark)">${esc(fieldLabel(k))}:</strong> ${esc(fmtVal(k, before[k]))} <span style="color:var(--brand-gold-dark)">→</span> ${esc(fmtVal(k, after[k]))}</li>`).join('')}
+  </ul>`;
 }
 
 async function load() {
@@ -48,9 +81,9 @@ async function load() {
   qs('#actions-list').innerHTML = actions.length ? actions.map(a => `<div class="card" style="margin-bottom:8px;padding:14px 16px">
       <div class="flex-between">
         <div>
-          <strong style="text-transform:capitalize">${esc(a.action)}</strong> · <span class="small-muted" style="text-transform:capitalize">${esc(a.entity_type)}</span>
-          <div style="margin-top:4px">${describeChange(a)}</div>
-          <div class="small-muted" style="margin-top:6px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}${a.undone_at ? ' · ' + badge('undone','inactive') : ''}</div>
+          <strong>${headline(a)}</strong>${a.undone_at ? ' ' + badge('undone', 'inactive') : ''}
+          ${changeList(a)}
+          <div class="small-muted" style="margin-top:8px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}</div>
         </div>
         ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}')">Undo</button>` : ''}
       </div>

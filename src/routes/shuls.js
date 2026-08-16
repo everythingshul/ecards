@@ -289,6 +289,20 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
 router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
+  // The shul detail view always shows the *latest* contract row for this
+  // shul (ORDER BY created_at DESC LIMIT 1) — creating a new one here
+  // unconditionally would shadow an already-executed, legally-signed
+  // agreement behind a fresh unsigned one. This is exactly the scenario
+  // triggered by "I uploaded a new template PDF, let me resend the
+  // contract" for a shul that's already signed: nothing was actually
+  // deleted (the old row and its signed_pdf_path both still exist), but it
+  // would become unreachable through the normal admin UI, which reads as
+  // "the signed one got lost." Block it; retracting the signature first
+  // (a separate, explicit, audited action) is the real way to redo one.
+  const existingContract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
+  if (existingContract?.status === 'signed') {
+    return res.status(409).json({ error: 'This shul already has a signed contract on file. Retract the existing signature first if you need to send a new one.' });
+  }
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
   const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(shul.season_id);
   const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'contract_template_text'`).get(req.user.org_id);

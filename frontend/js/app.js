@@ -634,6 +634,63 @@ function attachLiveRefresh(bannerContainerId, fetchTotal, loadFn, intervalMs = 1
   setInterval(check, intervalMs);
 }
 
+// Lets an admin choose which columns show in a list view, and in what
+// order, persisted to their own account (routes/preferences.js) — follows
+// them across devices/browsers, not just this one. `columns` is the full
+// available set [{key,label}]; `storageKey` picks which saved preference to
+// load/save (e.g. 'columns_applicants'); `defaultOrder` is the fallback
+// list of visible column keys when nothing's been saved yet. Wires a
+// "Customize Columns" button (by id) to open the editor; `onChange(order)`
+// is called with the new visible-column-keys array whenever it's saved.
+// Returns a promise resolving to the currently-effective order, so the
+// caller's first render can use it immediately rather than waiting on a
+// separate callback.
+async function attachColumnCustomizer(buttonId, storageKey, columns, defaultOrder, onChange) {
+  let order = defaultOrder;
+  try {
+    const { value } = await api(`/preferences/${storageKey}`);
+    if (Array.isArray(value) && value.length) order = value.filter(k => columns.some(c => c.key === k));
+  } catch { /* use default */ }
+
+  let draft = null;
+  function renderList() {
+    if (!draft) draft = [...order, ...columns.map(c => c.key).filter(k => !order.includes(k))];
+    qs('#col-customizer-list').innerHTML = draft.map((key, i) => {
+      const col = columns.find(c => c.key === key);
+      const visible = order.includes(key);
+      return `<div class="card" style="margin:6px 0;padding:8px 12px;display:flex;align-items:center;gap:10px">
+        <label class="checkbox-row" style="flex:1;margin:0"><input type="checkbox" ${visible ? 'checked' : ''} onchange="window.__toggleCustomCol('${key}')"> ${esc(col.label)}</label>
+        <button type="button" class="btn btn-sm btn-outline" onclick="window.__moveCustomCol('${key}',-1)" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="window.__moveCustomCol('${key}',1)" ${i === draft.length - 1 ? 'disabled' : ''}>&darr;</button>
+      </div>`;
+    }).join('');
+  }
+  window.__toggleCustomCol = (key) => {
+    if (order.includes(key)) order = order.filter(k => k !== key);
+    else { order.push(key); order = draft.filter(k => order.includes(k)); }
+    renderList();
+  };
+  window.__moveCustomCol = (key, dir) => {
+    const i = draft.indexOf(key), j = i + dir;
+    if (j < 0 || j >= draft.length) return;
+    [draft[i], draft[j]] = [draft[j], draft[i]];
+    order = draft.filter(k => order.includes(k));
+    renderList();
+  };
+  window.__saveCustomCols = async () => {
+    try { await api(`/preferences/${storageKey}`, { method: 'PUT', body: { value: order } }); closeModal(); onChange(order); } catch (err) { toast(err.message, true); }
+  };
+
+  const btn = document.getElementById(buttonId);
+  if (btn) btn.addEventListener('click', () => {
+    draft = null;
+    openModal('Customize Columns', `<p class="small-muted">Choose which columns to show, and use the arrows to reorder them.</p><div id="col-customizer-list"></div>`,
+      `<button class="btn btn-primary btn-sm" onclick="window.__saveCustomCols()">Save</button>`);
+    renderList();
+  });
+  return order;
+}
+
 // Checks a built-in public application form's schedule (opens_at/closes_at,
 // is_active) before letting the caller show its form. Returns true if the
 // form is open for submissions; on false, it has already hidden `formSelector`

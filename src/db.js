@@ -195,6 +195,16 @@ CREATE TABLE IF NOT EXISTS emails_sent (
 );
 CREATE INDEX IF NOT EXISTS idx_emails_sent_org ON emails_sent(org_id, created_at);
 
+-- Per-user account preferences (e.g. which list columns to show and in what
+-- order) — follows the admin across devices/browsers, unlike localStorage.
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, key)
+);
+
 -- Admin overrides for system-triggered emails (services/mail.js's
 -- SYSTEM_EMAIL_TEMPLATES). A missing row for a given key means "use the
 -- built-in default" — this table only ever holds the customized ones.

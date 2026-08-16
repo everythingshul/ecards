@@ -91,7 +91,14 @@ tr:hover td { background: var(--brand-panel-2); }
 .app-header .brand img { height: 32px; width: auto; }
 .app-header .brand-name { font-family: Georgia, serif; font-size: 14px; line-height: 1.2; color: var(--brand-gold-light); white-space: nowrap; }
 .app-header .brand-name span { display: block; font-size: 11px; color: var(--sidebar-muted); }
-.app-header nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; }
+/* overflow visible (not hidden) is deliberate: layoutNavOverflow() in app.js
+   already hides overflowing links itself via inline display:none, so this
+   container never actually needs to clip anything — but the "More" dropdown
+   (.nav-more-dropdown, position:absolute, opens below the nav bar) is also a
+   descendant of this element, and overflow:hidden here would clip that
+   dropdown's box away, making it render but be entirely invisible/
+   unclickable the moment it opens. */
+.app-header nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: visible; }
 .app-header nav a { display: flex; align-items: center; padding: 10px 12px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
 .app-header nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
 .app-header nav a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }

@@ -17,20 +17,27 @@ renderShell('/shul-portal/dashboard.html', `
   <div id="slots-banner"></div>
   <div class="toolbar"><input id="f-search" placeholder="Search name…"></div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="7" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="8" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
+
+function contactLine(a) {
+  const method = a.preferred_contact_method || '';
+  const num = a.preferred_number === 'husband' ? a.husband_cell : a.preferred_number === 'wife' ? a.wife_cell : a.home_phone;
+  return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
+}
 
 async function load() {
   const params = new URLSearchParams({ search: qs('#f-search').value || '' });
   try {
     const { applicants, total } = await api('/applicants?' + params);
     qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
+        <td><code>${esc(a.external_id||'')}</code></td>
         <td><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused?' '+badge('paused','paused'):''}</td>
-        <td>${esc(a.marital_status||'')}</td><td>${esc(a.email||a.home_phone||'')}</td><td>${a.num_children??0}</td>
+        <td>${esc(a.marital_status||'')}</td><td>${contactLine(a)}</td><td>${a.num_children??0}</td>
         <td>${a.home_for_yomtov?'Yes':'No'}</td><td>${badge(a.approval_status,a.approval_status)}</td><td>${a.card_amount!=null?fmtMoney(a.card_amount):''}</td>
-      </tr>`).join('') : '<tr><td colspan="7" class="empty-state">No applicants submitted yet.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="8" class="empty-state">No applicants submitted yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
 qs('#f-search').addEventListener('input', () => load());
@@ -55,15 +62,50 @@ window.createApplicant = async () => {
     num_children: +qs('#n-children').value, home_for_yomtov: qs('#n-yomtov').checked, comments: qs('#n-comments').value };
   try { await api('/applicants', { method: 'POST', body: b }); toast('Applicant submitted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
+// Everything shown here is exactly what was submitted for this applicant
+// (plus status/card, which answer "what happened to it") — nothing an admin
+// added internally (notes, duplicate-flag reasoning) is ever included; the
+// API already withholds those entirely for the shul role.
 async function openApplicant(id) {
   try {
     const { applicant: a } = await api(`/applicants/${id}`);
     openModal(`${a.first_name} ${a.last_name}`, `
-      <p><strong>Status:</strong> ${badge(a.approval_status,a.approval_status)}</p>
-      <p><strong>Marital Status:</strong> ${esc(a.marital_status||'')} &nbsp; <strong>Children:</strong> ${a.num_children??0}</p>
-      <p><strong>Contact:</strong> ${esc(a.preferred_contact_method||'')} (${esc(a.preferred_number||'')})</p>
-      <p><strong>Home for Yom Tov:</strong> ${a.home_for_yomtov?'Yes':'No'}</p>
-      <p><strong>Card Amount:</strong> ${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>
+      <div class="grid-2">
+        <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>
+        <div><strong>Status</strong><br>${badge(a.approval_status,a.approval_status)}</div>
+      </div>
+      <div class="divider"></div>
+      <div class="grid-2">
+        <div><strong>First Name</strong><br>${esc(a.first_name||'')}</div>
+        <div><strong>Last Name</strong><br>${esc(a.last_name||'')}</div>
+      </div>
+      <div class="grid-2">
+        <div><strong>Marital Status</strong><br>${esc(a.marital_status||'')}</div>
+        <div><strong>Children</strong><br>${a.num_children??0}</div>
+      </div>
+      <div class="grid-2">
+        <div><strong>Home Phone</strong><br>${esc(a.home_phone||'')}</div>
+        <div><strong>Email</strong><br>${esc(a.email||'')}</div>
+      </div>
+      <div class="grid-2">
+        <div><strong>Husband Cell</strong><br>${esc(a.husband_cell||'')}</div>
+        <div><strong>Wife Cell</strong><br>${esc(a.wife_cell||'')}</div>
+      </div>
+      <div class="grid-2">
+        <div><strong>Preferred Contact</strong><br>${esc(a.preferred_contact_method||'')}</div>
+        <div><strong>Number To Use</strong><br>${esc(a.preferred_number||'')}</div>
+      </div>
+      <div class="divider"></div>
+      <p><strong>Address</strong><br>${esc(a.address||'')}</p>
+      <div class="grid-2">
+        <div><strong>City</strong><br>${esc(a.city||'')}</div>
+        <div><strong>State</strong><br>${esc(a.state||'')}</div>
+      </div>
+      <p><strong>Zip</strong><br>${esc(a.zip||'')}</p>
+      <p><strong>Home for Yom Tov</strong><br>${a.home_for_yomtov?'Yes':'No'}</p>
+      <p><strong>Comments</strong><br>${esc(a.comments||'')||'<span class="small-muted">None</span>'}</p>
+      <div class="divider"></div>
+      <p><strong>Card Amount</strong><br>${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>
       <p class="small-muted">Editable fields are locked once reviewed by the administrator; contact your admin for changes.</p>
     `);
   } catch (err) { toast(err.message, true); }
