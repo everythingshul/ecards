@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { normalizePhone } from './utils/phone.js';
 import { generateApplicantExternalId } from './utils/externalId.js';
 
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
+export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates']) {
   const p = join(DATA_DIR, sub);

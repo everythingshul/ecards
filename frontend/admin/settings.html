@@ -12,6 +12,7 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
+const isSuperAdmin = Auth.user()?.role === 'super_admin';
 renderShell('/admin/settings.html', `
   <h2>Settings</h2>
   <div class="tabs">
@@ -20,6 +21,7 @@ renderShell('/admin/settings.html', `
     <button data-t="fields">Required Fields</button>
     <button data-t="documents">Documents</button>
     <button data-t="emails">Auto Emails</button>
+    ${isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
   </div>
 
   <div id="panel-org">
@@ -123,12 +125,25 @@ renderShell('/admin/settings.html', `
     <p class="small-muted">Edit the text of automatic system emails (contract ready, approvals, invites, password reset). <code>{{placeholders}}</code> get filled in with real values when each email actually sends — leave them as-is, just move them where you want.</p>
     <div id="email-templates-list">Loading…</div>
   </div>
+
+  ${isSuperAdmin ? `
+  <div id="panel-backups" style="display:none">
+    <div class="card">
+      <div class="flex-between"><h3 style="margin:0">Database Backups</h3><div class="pill-row">
+        <button class="btn btn-sm btn-outline" onclick="downloadBackupNow()">Download Backup Now</button>
+        <button class="btn btn-sm btn-primary" onclick="runBackupNow()">Run Backup</button>
+      </div></div>
+      <p class="small-muted">A full snapshot of the database is taken automatically every few hours (kept on this server's disk). "Run Backup" takes one immediately; "Download Backup Now" takes one and downloads it straight to your computer — the only copy that's off this server, so do this periodically and keep it somewhere safe.</p>
+      <div id="backups-list" style="margin-top:14px">Loading…</div>
+    </div>
+  </div>` : ''}
 `);
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','fields','documents','emails'].forEach(t => qs('#panel-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+  ['org','seasons','fields','documents','emails','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
   if (b.dataset.t === 'emails') loadEmailTemplates();
+  if (b.dataset.t === 'backups') loadBackups();
 }));
 
 async function loadOrg() {
@@ -310,6 +325,20 @@ window.resetEmailTemplate = async (key) => {
   if (!confirm('Revert this email to the built-in default text?')) return;
   try { await api(`/settings/email-templates/${key}`, { method: 'DELETE' }); toast('Reset'); loadEmailTemplates(); } catch (err) { toast(err.message, true); }
 };
+
+function fmtBytes(n) { if (n < 1024) return n + ' B'; if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB'; return (n/(1024*1024)).toFixed(1) + ' MB'; }
+async function loadBackups() {
+  if (!isSuperAdmin) return;
+  const { backups } = await api('/settings/backups');
+  qs('#backups-list').innerHTML = backups.length ? `<table><thead><tr><th>Created</th><th>Size</th><th></th></tr></thead><tbody>
+      ${backups.map(b => `<tr><td>${fmtDateTime(b.createdAt)}</td><td>${fmtBytes(b.sizeBytes)}</td>
+        <td><button class="btn btn-sm btn-outline" onclick="downloadAuthed('/settings/backups/${encodeURIComponent(b.filename)}/download','${esc(b.filename)}')">Download</button></td></tr>`).join('')}
+    </tbody></table>` : '<p class="small-muted">No backups yet — the first automatic one runs shortly after this server started.</p>';
+}
+window.runBackupNow = async () => {
+  try { await api('/settings/backups/run', { method: 'POST' }); toast('Backup created'); loadBackups(); } catch (err) { toast(err.message, true); }
+};
+window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
 loadOrg(); loadZipRestriction(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');

@@ -3,9 +3,10 @@ import multer from 'multer';
 import { unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
 import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate } from '../services/pdf.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
+import { runBackup, listBackups, backupPath } from '../services/backup.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -153,6 +154,37 @@ router.put('/email-templates/:key', requireAdmin, (req, res) => {
 router.delete('/email-templates/:key', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM system_email_templates WHERE org_id = ? AND key = ?').run(req.user.org_id, req.params.key);
   res.json({ ok: true });
+});
+
+// Backups — super_admin only, not the general requireAdmin roster. The raw
+// SQLite file is a complete copy of every applicant/shul/store/card record
+// plus password hashes; that's a materially bigger blast radius than what
+// staff/org_admin normally touch, so it gets its own tighter gate.
+router.get('/backups', requireRole('super_admin'), (req, res) => {
+  res.json({ backups: listBackups() });
+});
+
+router.post('/backups/run', requireRole('super_admin'), async (req, res) => {
+  try {
+    const path = await runBackup();
+    res.json({ ok: true, backups: listBackups(), created: path.split('/').pop() });
+  } catch (e) { res.status(500).json({ error: `Backup failed: ${e.message}` }); }
+});
+
+router.get('/backups/:filename/download', requireRole('super_admin'), (req, res) => {
+  const path = backupPath(req.params.filename);
+  if (!path) return res.status(404).json({ error: 'Backup not found' });
+  res.download(path, req.params.filename);
+});
+
+// Fresh snapshot, right now, streamed straight to the browser — the
+// "get me a copy off this server immediately" action, independent of the
+// automatic rotation schedule.
+router.get('/backups/download-now', requireRole('super_admin'), async (req, res) => {
+  try {
+    const path = await runBackup();
+    res.download(path, path.split('/').pop());
+  } catch (e) { res.status(500).json({ error: `Backup failed: ${e.message}` }); }
 });
 
 export default router;

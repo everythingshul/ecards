@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { initMail } from './services/mail.js';
 import { sendDueTaskReminders } from './services/reminders.js';
 import { syncAllCards } from './services/cardSync.js';
+import { runBackup } from './services/backup.js';
 import { DEFAULT_ORG_ID } from './db.js';
 
 import authRoutes from './routes/auth.js';
@@ -127,3 +128,10 @@ setTimeout(() => { sendDueTaskReminders().catch(e => console.error('[reminders] 
 const CARD_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 setInterval(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, CARD_SYNC_INTERVAL_MS);
 setTimeout(() => { syncAllCards(DEFAULT_ORG_ID).catch(e => console.error('[cardSync] sweep failed', e.message)); }, 20 * 1000);
+
+// Rotating local DB backups (services/backup.js) — every 4 hours, 12 kept
+// (48 hours of coverage) by default. Runs once shortly after boot too so a
+// freshly-deployed instance isn't hours away from having any backup at all.
+const BACKUP_INTERVAL_MS = 4 * 60 * 60 * 1000;
+setInterval(() => { runBackup().catch(e => console.error('[backup] failed', e.message)); }, BACKUP_INTERVAL_MS);
+setTimeout(() => { runBackup().catch(e => console.error('[backup] failed', e.message)); }, 30 * 1000);
