@@ -4,6 +4,7 @@ import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { normalizePhone } from '../utils/phone.js';
+import { logAudit } from '../services/audit.js';
 
 const router = Router();
 const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms', 'users', 'settings'];
@@ -49,7 +50,9 @@ router.post('/', async (req, res) => {
   const tmpl = renderSystemTemplate(req.user.org_id, 'userInvite', { role: role.replace('_', ' '), inviteUrl });
   const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body);
   if (emailError) console.error('[mail] user invite email failed:', emailError);
-  res.status(201).json({ user: db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(id), emailError });
+  const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  logAudit(req.user.org_id, req.user.id, 'create', 'user', id, null, created, req.ip);
+  res.status(201).json({ user: { id: created.id, email: created.email, role: created.role }, emailError });
 });
 
 router.put('/:id', (req, res) => {
@@ -66,6 +69,15 @@ router.put('/:id', (req, res) => {
   }
   db.prepare(`UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), phone = COALESCE(?, phone), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?`)
     .run(first_name, last_name, phone === undefined ? undefined : normalizePhone(phone), role, is_active === undefined ? undefined : (is_active ? 1 : 0), user.id);
+  // Only the plain-field changes are undo-tracked — permissions/assignments
+  // are their own tables with their own upsert/replace semantics, not a
+  // single before/after column snapshot this generic mechanism can restore.
+  const changedFields = ['first_name', 'last_name', 'phone', 'role', 'is_active'].filter(f => req.body?.[f] !== undefined);
+  if (changedFields.length) {
+    const after = { first_name, last_name, phone: phone === undefined ? undefined : normalizePhone(phone), role, is_active: is_active === undefined ? undefined : (is_active ? 1 : 0) };
+    logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id,
+      Object.fromEntries(changedFields.map(f => [f, user[f]])), Object.fromEntries(changedFields.map(f => [f, after[f]])), req.ip);
+  }
   if (Array.isArray(permissions)) {
     for (const p of permissions) upsertPermission(user.id, p);
   }
@@ -80,6 +92,7 @@ router.delete('/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
   db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(user.id);
+  logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 0 }, req.ip);
   res.json({ ok: true });
 });
 
@@ -119,6 +132,11 @@ router.delete('/:id/permanent', (req, res) => {
   nullOut('tasks', 'assigned_to');
   nullOut('tasks', 'created_by');
   db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+  // Full row snapshot means undo can genuinely re-create the login (same id,
+  // same password hash) — but not the permissions/user_assignments rows
+  // deleted above, which aren't part of this single-table restore. An admin
+  // undoing this gets the account back and re-grants permissions from there.
+  logAudit(req.user.org_id, req.user.id, 'delete', 'user', user.id, user, null, req.ip);
   res.json({ ok: true });
 });
 

@@ -6,6 +6,7 @@ import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { logAudit } from '../services/audit.js';
 
 const router = Router();
 
@@ -106,7 +107,9 @@ router.post('/', requireAdmin, (req, res) => {
     .run(id, req.user.org_id, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
       b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email || '',
       b.comments || '', b.setup_status || 'pending', b.has_provider_account ? 1 : 0);
-  res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id) });
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(id);
+  logAudit(req.user.org_id, req.user.id, 'create', 'store', id, null, store, req.ip);
+  res.status(201).json({ store });
 });
 
 router.put('/:id', requireAdmin, (req, res) => {
@@ -118,7 +121,11 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (b.manager_phone !== undefined) b.manager_phone = normalizePhone(b.manager_phone);
   if (b.owner_phone !== undefined) b.owner_phone = normalizePhone(b.owner_phone);
   const sets = fields.filter(f => b[f] !== undefined);
-  if (sets.length) db.prepare(`UPDATE stores SET ${sets.map(f=>`${f}=?`).join(',')} WHERE id=?`).run(...sets.map(f => f==='has_provider_account' ? (b[f]?1:0) : b[f]), store.id);
+  if (sets.length) {
+    const vals = sets.map(f => f === 'has_provider_account' ? (b[f] ? 1 : 0) : b[f]);
+    db.prepare(`UPDATE stores SET ${sets.map(f=>`${f}=?`).join(',')} WHERE id=?`).run(...vals, store.id);
+    logAudit(req.user.org_id, req.user.id, 'update', 'store', store.id, Object.fromEntries(sets.map(f => [f, store[f]])), Object.fromEntries(sets.map((f,i) => [f, vals[i]])), req.ip);
+  }
   res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
 });
 

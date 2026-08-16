@@ -105,6 +105,7 @@ const NAV_ITEMS = [
   { href: '/admin/updates.html', label: 'Updates', icon: '&#9670;', resource: 'updates' },
   { href: '/admin/users.html', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings.html', label: 'Settings', icon: '&#9670;', resource: 'settings' },
+  { href: '/admin/audit.html', label: 'Recent Actions', icon: '&#9670;', resource: 'audit', roles: ['super_admin'] },
 ];
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard.html', label: 'My Applicants' },
@@ -120,7 +121,7 @@ const STORE_NAV = [
 function renderShell(activeHref, contentHtml) {
   const user = Auth.user();
   const role = user?.role;
-  let items = NAV_ITEMS;
+  let items = NAV_ITEMS.filter(i => !i.roles || i.roles.includes(role));
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
   const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}" title="${esc(i.label)}" data-href="${i.href}"><span class="nav-label">${esc(i.label)}</span></a>`).join('');

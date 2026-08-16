@@ -1,0 +1,107 @@
+import { db, uuid } from '../db.js';
+
+// ---------------------------------------------------------------------------
+// Shared audit trail + generic undo/redo. Previously logAudit() was a local,
+// unexported function duplicated only in shuls.js — every other route's
+// mutations went completely unlogged. Pulled out here so every route can log
+// consistently, and so undo/redo has one real implementation instead of N
+// bespoke ones.
+//
+// Undo/redo works by restoring exactly the columns captured in before_json/
+// after_json — NOT a full-row replace — so an undo never clobbers a column
+// some *other*, later action touched. "Redo" isn't a separate code path:
+// undoing an action logs a new audit_log row recording what it just did
+// (before = the state right before the undo, after = the state it restored
+// to); redoing is just calling undo() again on THAT new row. This keeps the
+// history a simple forward-only append log instead of a branching structure.
+//
+// Only a curated set of action names are undoable at all (see
+// UNDOABLE_ACTIONS below) — workflow/notification actions like esign, login,
+// or send_contract have before/after shapes that don't represent full row
+// state, and generically "restoring" them would do something destructive or
+// meaningless (e.g. undoing an esign by deleting the contract row instead of
+// un-signing it, which is a real, separate feature already).
+// ---------------------------------------------------------------------------
+
+// 'undo' is here deliberately: undoing an action logs a new 'undo' entry
+// (see undoAuditEntry below), and that entry must itself be undoable — that
+// symmetry IS how redo works, rather than a separate redo code path.
+export const UNDOABLE_ACTIONS = ['create', 'update', 'delete', 'approve', 'reject', 'undo'];
+
+// entity_type (as used in audit_log) -> real table + primary key column.
+const ENTITY_TABLES = {
+  shul: { table: 'shuls', pk: 'id' },
+  applicant: { table: 'applicants', pk: 'id' },
+  store: { table: 'stores', pk: 'id' },
+  season: { table: 'seasons', pk: 'id' },
+  task: { table: 'tasks', pk: 'id' },
+  user: { table: 'users', pk: 'id' },
+  card: { table: 'cards', pk: 'id' },
+};
+
+export function logAudit(orgId, userId, action, entityType, entityId, before, after, ip) {
+  const id = uuid();
+  db.prepare(`INSERT INTO audit_log (id, org_id, user_id, action, entity_type, entity_id, before_json, after_json, ip_address)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(id, orgId, userId, action, entityType, entityId, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, ip || null);
+  return id;
+}
+
+// Last N hours of audit_log for an org, newest first, with the acting user's
+// name attached. `null` user_id (public form submissions, system actions)
+// shows as "System".
+export function getRecentActions(orgId, hours = 48) {
+  const rows = db.prepare(`SELECT a.*, u.first_name, u.last_name, u.email AS user_email
+    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.org_id = ? AND a.created_at >= datetime('now', ?) ORDER BY a.created_at DESC`)
+    .all(orgId, `-${hours} hours`);
+  return rows.map(r => ({
+    ...r,
+    before: r.before_json ? JSON.parse(r.before_json) : null,
+    after: r.after_json ? JSON.parse(r.after_json) : null,
+    undoable: UNDOABLE_ACTIONS.includes(r.action) && !!ENTITY_TABLES[r.entity_type] && !r.undone_at && !!(r.before_json || r.after_json),
+  }));
+}
+
+// Restores `targetState` onto entityId in its table:
+//  - targetState is an object and the row exists  -> UPDATE just those columns
+//  - targetState is an object and the row is gone  -> re-INSERT it (full or partial row)
+//  - targetState is null and the row exists        -> DELETE it
+//  - targetState is null and the row is gone        -> already correct, no-op
+function restoreEntityState(entityType, entityId, targetState) {
+  const def = ENTITY_TABLES[entityType];
+  if (!def) throw new Error(`Entity type "${entityType}" is not undoable`);
+  const exists = !!db.prepare(`SELECT 1 FROM ${def.table} WHERE ${def.pk} = ?`).get(entityId);
+  if (targetState === null) {
+    if (exists) db.prepare(`DELETE FROM ${def.table} WHERE ${def.pk} = ?`).run(entityId);
+    return;
+  }
+  const keys = Object.keys(targetState).filter(k => k !== def.pk);
+  if (exists) {
+    if (!keys.length) return;
+    db.prepare(`UPDATE ${def.table} SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE ${def.pk} = ?`)
+      .run(...keys.map(k => targetState[k]), entityId);
+  } else {
+    const allKeys = [def.pk, ...keys];
+    db.prepare(`INSERT INTO ${def.table} (${allKeys.join(', ')}) VALUES (${allKeys.map(() => '?').join(', ')})`)
+      .run(...allKeys.map(k => (k === def.pk ? entityId : targetState[k])));
+  }
+}
+
+// Undoes one audit_log entry: restores before_json, marks it undone, and
+// logs a fresh 'undo' entry (before = after_json, after = before_json) that
+// itself is undoable — clicking Undo on THAT entry is what redo is.
+export function undoAuditEntry(auditId, actingUser, ip) {
+  const entry = db.prepare('SELECT * FROM audit_log WHERE id = ?').get(auditId);
+  if (!entry) throw new Error('Action not found');
+  if (entry.org_id !== actingUser.org_id) throw new Error('Not found');
+  if (!UNDOABLE_ACTIONS.includes(entry.action)) throw new Error(`"${entry.action}" actions can't be undone`);
+  if (!ENTITY_TABLES[entry.entity_type]) throw new Error(`"${entry.entity_type}" records can't be undone`);
+  if (entry.undone_at) throw new Error('This action was already undone');
+  const before = entry.before_json ? JSON.parse(entry.before_json) : null;
+  const after = entry.after_json ? JSON.parse(entry.after_json) : null;
+  if (before === null && after === null) throw new Error('Nothing to restore for this action');
+
+  restoreEntityState(entry.entity_type, entry.entity_id, before);
+  db.prepare(`UPDATE audit_log SET undone_at = datetime('now') WHERE id = ?`).run(auditId);
+  return logAudit(entry.org_id, actingUser.id, 'undo', entry.entity_type, entry.entity_id, after, before, ip);
+}

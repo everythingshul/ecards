@@ -11,6 +11,7 @@ import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { logAudit } from '../services/audit.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -443,11 +444,6 @@ function checkScope(req, res, shulId) {
   if (req.permission.scope !== 'assigned') return;
   const ok = db.prepare(`SELECT 1 FROM user_assignments WHERE user_id = ? AND entity_type='shul' AND entity_id = ?`).get(req.user.id, shulId);
   if (!ok) res.status(403).json({ error: 'Not assigned to you' });
-}
-
-function logAudit(orgId, userId, action, entityType, entityId, before, after, ip) {
-  db.prepare(`INSERT INTO audit_log (id, org_id, user_id, action, entity_type, entity_id, before_json, after_json, ip_address)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(uuid(), orgId, userId, action, entityType, entityId, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, ip);
 }
 
 export default router;

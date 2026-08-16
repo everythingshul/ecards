@@ -12,6 +12,7 @@ import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { logAudit } from '../services/audit.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -207,6 +208,7 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
       req.user.role === 'shul' ? 'shul_upload' : 'admin', initialStatus);
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
   const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
+  logAudit(req.user.org_id, req.user.id, 'create', 'applicant', id, null, applicant, req.ip);
   res.status(201).json({ applicant: maskForShul(applicant, req.user.role), duplicate: req.user.role === 'shul' ? false : !!flag });
 });
 
@@ -224,6 +226,8 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (sets.length) {
     const vals = sets.map(f => f === 'home_for_yomtov' ? (b[f] ? 1 : 0) : b[f]);
     db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, applicant.id);
+    logAudit(req.user.org_id, req.user.id, 'update', 'applicant', applicant.id,
+      Object.fromEntries(sets.map(f => [f, applicant[f]])), Object.fromEntries(sets.map((f, i) => [f, vals[i]])), req.ip);
   }
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
 });
@@ -240,6 +244,8 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
   db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
     .run(req.user.id, amount, applicant.id);
+  logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', applicant.id,
+    { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
   let emailError = null;
   if (applicant.email) {
     const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
@@ -253,6 +259,7 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
+  logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
   res.json({ ok: true });
 });
 
@@ -271,6 +278,8 @@ router.post('/mass-approve', requireAdmin, (req, res) => {
     }
     const amount = card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
     db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`).run(req.user.id, amount, id);
+    logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', id,
+      { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
     approved++;
   }
   res.json({ approved, skipped, capReached });

@@ -507,6 +507,7 @@ safeAlter(`ALTER TABLE applicants ADD COLUMN external_id TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN opens_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN closes_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
+safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
