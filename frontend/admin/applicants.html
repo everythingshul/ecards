@@ -199,16 +199,43 @@ window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.tr
 window.assignCard = async (id) => { try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
 
 function openApplicantForm() {
-  const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
-    <label>Shul ID *</label><input id="n-shul_id" placeholder="Paste shul ID from Shuls page">
-    <label>Marital Status</label><select id="n-marital_status"><option value=""></option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select>
-    <label>Home Phone</label><input id="n-home_phone">
-    <label>Email</label><input id="n-email">`;
+  const body = `
+    <div class="grid-2"><div><label>First Name *</label><input id="n-first_name"></div><div><label>Last Name *</label><input id="n-last_name"></div></div>
+    <label>Shul *</label><input id="n-shul-search" placeholder="Search shuls by name…" autocomplete="off"><input type="hidden" id="n-shul_id">
+    <div class="grid-2">
+      <div><label>Marital Status</label><select id="n-marital_status"><option value=""></option><option>single</option><option>married</option><option>widowed</option><option>divorced</option></select></div>
+      <div><label>Children</label><input id="n-num_children" type="number" value="0"></div>
+    </div>
+    <div class="grid-2"><div><label>Home Phone</label><input id="n-home_phone"></div><div><label>Email</label><input id="n-email"></div></div>
+    <div class="grid-2"><div><label>Husband Cell</label><input id="n-husband_cell"></div><div><label>Wife Cell</label><input id="n-wife_cell"></div></div>
+    <div class="grid-2">
+      <div><label>Preferred Contact</label><select id="n-pcm"><option value=""></option><option>phone</option><option>text</option><option>email</option></select></div>
+      <div><label>Number To Use</label><select id="n-pn"><option value=""></option><option value="home">home</option><option value="husband">husband</option><option value="wife">wife</option></select></div>
+    </div>
+    <label>Address</label><input id="n-address">
+    <div class="grid-2"><div><label>City</label><input id="n-city"></div><div><label>State</label><input id="n-state"></div></div>
+    <label>Zip</label><input id="n-zip">
+    <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="n-yomtov"><label style="margin:0">Home for Yom Tov</label></div>
+    <label>Card Amount ($)</label><input id="n-card" type="number" step="0.01">
+    <label>Comments</label><textarea id="n-comments" rows="3"></textarea>
+    <div class="divider"></div>
+    <div class="checkbox-row"><input type="checkbox" id="n-bypass"><label style="margin:0">Bypass required fields for this submission</label></div>
+  `;
   openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Create</button>`);
+  attachShulSearchSelect('n-shul-search', 'n-shul_id');
 }
 window.createApplicant = async () => {
-  const body = { first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, shul_id: qs('#n-shul_id').value,
-    marital_status: qs('#n-marital_status').value, home_phone: qs('#n-home_phone').value, email: qs('#n-email').value };
+  const body = {
+    first_name: qs('#n-first_name').value, last_name: qs('#n-last_name').value, shul_id: qs('#n-shul_id').value,
+    marital_status: qs('#n-marital_status').value, num_children: +qs('#n-num_children').value || 0,
+    home_phone: qs('#n-home_phone').value, email: qs('#n-email').value,
+    husband_cell: qs('#n-husband_cell').value, wife_cell: qs('#n-wife_cell').value,
+    preferred_contact_method: qs('#n-pcm').value, preferred_number: qs('#n-pn').value,
+    address: qs('#n-address').value, city: qs('#n-city').value, state: qs('#n-state').value, zip: qs('#n-zip').value,
+    home_for_yomtov: qs('#n-yomtov').checked, card_amount: qs('#n-card').value === '' ? null : +qs('#n-card').value,
+    comments: qs('#n-comments').value, bypass_required: qs('#n-bypass').checked,
+  };
+  if (!body.shul_id) return toast('Select a shul from the dropdown', true);
   try { await api('/applicants', { method: 'POST', body }); toast('Applicant created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 

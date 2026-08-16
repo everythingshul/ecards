@@ -263,6 +263,48 @@ async function showOtherSeasons(entityLabel, endpoint, reopen) {
   } catch (err) { toast(err.message, true); }
 }
 
+// Searchable dropdown for picking a shul by name instead of pasting a raw
+// ID. `inputId` is the visible text input; `hiddenId` is a hidden input
+// that ends up holding the selected shul's id (what actually gets
+// submitted). Reuses the Places-autocomplete dropdown styling. Debounced,
+// searches via the admin shuls list endpoint so every shul (any status) is
+// reachable, not just approved/public ones.
+function attachShulSearchSelect(inputId, hiddenId, initialLabel = '') {
+  const input = document.getElementById(inputId);
+  const hidden = document.getElementById(hiddenId);
+  if (!input || !hidden) return;
+  if (initialLabel) input.value = initialLabel;
+  input.parentElement.style.position = input.parentElement.style.position || 'relative';
+  let dropdown = null;
+  let debounceTimer = null;
+  function closeDropdown() { if (dropdown) { dropdown.remove(); dropdown = null; } }
+  input.addEventListener('input', () => {
+    hidden.value = '';
+    clearTimeout(debounceTimer);
+    const q = input.value.trim();
+    if (!q) { closeDropdown(); return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const { shuls } = await api('/shuls?search=' + encodeURIComponent(q) + '&pageSize=10');
+        closeDropdown();
+        if (!shuls.length) return;
+        dropdown = document.createElement('div');
+        dropdown.className = 'places-dropdown';
+        dropdown.innerHTML = shuls.map(s => `<div class="places-dropdown-item" data-id="${s.id}" data-label="${esc(s.name_en)}">${esc(s.name_en)}${s.city ? ` <span class="small-muted">(${esc(s.city)}, ${esc(s.state||'')})</span>` : ''}</div>`).join('');
+        input.parentElement.appendChild(dropdown);
+        dropdown.querySelectorAll('.places-dropdown-item').forEach(item => {
+          item.addEventListener('click', () => {
+            input.value = item.dataset.label;
+            hidden.value = item.dataset.id;
+            closeDropdown();
+          });
+        });
+      } catch { /* leave the field editable even if search fails */ }
+    }, 300);
+  });
+  document.addEventListener('click', (e) => { if (dropdown && !input.parentElement.contains(e.target)) closeDropdown(); });
+}
+
 // Google Places address autocomplete — built on the new Places API's
 // AutocompleteSuggestion/Place classes (google.maps.places.Autocomplete, the
 // old widget, needs the legacy "Places API" enabled in addition to "Places

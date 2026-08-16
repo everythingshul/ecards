@@ -181,16 +181,26 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (shul.slots_allocated && used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
+  // Admins filling out the form directly can bypass the org's configured
+  // required fields for this one submission (e.g. an incomplete record that
+  // needs to exist now and get filled in later) — shul-portal submitters
+  // can't set this, only admins.
+  const bypassRequired = req.user.role !== 'shul' && !!b.bypass_required;
+  if (!bypassRequired) {
+    const requiredErrors = validateRequiredFields([b], getRequiredFields(req.user.org_id, 'applicant').filter(f => f !== 'shul_id'));
+    if (requiredErrors.length) return res.status(400).json({ error: requiredErrors[0].error });
+  }
 
   const id = uuid();
   // Zip-restricted applicants are auto-rejected silently — the submission
   // still appears to succeed normally so the submitting shul is never told.
   const initialStatus = isZipAllowed(req.user.org_id, b.zip) ? 'pending' : 'rejected';
+  const cardAmount = req.user.role !== 'shul' && b.card_amount ? +b.card_amount : null;
   db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?, ?)`)
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source, approval_status)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, ?, ?)`)
     .run(id, req.user.org_id, shulId, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
-      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, b.comments || '',
+      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, cardAmount, b.comments || '',
       req.user.role === 'shul' ? 'shul_upload' : 'admin', initialStatus);
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
   const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
