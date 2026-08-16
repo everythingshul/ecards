@@ -111,7 +111,7 @@ function renderShell(activeHref, contentHtml) {
       <header class="app-header" id="app-header">
         <div class="brand"><img src="/img/org-logo.png" alt="Organization logo"><div class="brand-name">Kipas Hair BP<span>Platform</span></div></div>
         <button class="header-menu-btn" id="header-menu-btn" aria-label="Toggle menu">&#9776;</button>
-        <nav id="header-nav">${navHtml}</nav>
+        <nav id="header-nav">${navHtml}<div class="nav-more" id="nav-more"><button class="nav-more-btn" id="nav-more-btn" type="button">More &#9662;</button><div class="nav-more-dropdown" id="nav-more-dropdown"></div></div></nav>
         <div class="header-user">
           <span class="header-user-email">${esc(user?.email || '')}</span>
           <button onclick="Auth.logout()">Sign out</button>
@@ -120,14 +120,50 @@ function renderShell(activeHref, contentHtml) {
       <div class="content" id="content">${contentHtml}</div>
     </div>`;
   qs('#header-menu-btn').addEventListener('click', () => qs('#header-nav').classList.toggle('open'));
+  qs('#nav-more-btn').addEventListener('click', (e) => { e.stopPropagation(); qs('#nav-more-dropdown').classList.toggle('open'); });
+  document.addEventListener('click', (e) => { const dd = qs('#nav-more-dropdown'); if (dd && dd.classList.contains('open') && !qs('#nav-more').contains(e.target)) dd.classList.remove('open'); });
+  layoutNavOverflow();
+  window.addEventListener('resize', debounce(layoutNavOverflow, 150));
   if (role === 'shul' || role === 'store') {
     api('/updates/inbox/unread-count').then(({ count }) => {
       if (!count) return;
       const link = document.querySelector('nav a[data-href$="/updates.html"]');
       if (link) link.querySelector('.nav-label').innerHTML += ` ${badge(String(count), 'active')}`;
+      layoutNavOverflow();
     }).catch(() => {});
   }
 }
+
+// On the wide (non-hamburger) header layout, the nav row hides links that
+// don't fit and collects them into a "More" dropdown instead of letting the
+// nav scroll horizontally. Below the mobile breakpoint (see theme.css) the
+// whole nav becomes a full-width vertical dropdown behind the hamburger
+// button instead, so this is a no-op there — reset to "everything visible,
+// no More button" so a resize back up to desktop width starts clean.
+function layoutNavOverflow() {
+  const nav = qs('#header-nav'); const moreWrap = qs('#nav-more'); const moreBtn = qs('#nav-more-btn'); const moreDropdown = qs('#nav-more-dropdown');
+  if (!nav || !moreWrap) return;
+  const links = qsa('#header-nav > a');
+  links.forEach(a => { a.style.display = ''; });
+  moreDropdown.classList.remove('open');
+  moreDropdown.innerHTML = '';
+  if (window.innerWidth <= 780) { moreWrap.style.display = 'none'; return; }
+  moreWrap.style.display = 'inline-flex';
+  const available = nav.clientWidth;
+  const moreWidth = moreWrap.getBoundingClientRect().width;
+  let usedWidth = 0;
+  const overflowLinks = [];
+  for (const a of links) {
+    const w = a.getBoundingClientRect().width;
+    if (usedWidth + w > available - moreWidth) overflowLinks.push(a);
+    else usedWidth += w;
+  }
+  if (!overflowLinks.length) { moreWrap.style.display = 'none'; return; }
+  moreDropdown.innerHTML = overflowLinks.map(a => a.outerHTML).join('');
+  overflowLinks.forEach(a => { a.style.display = 'none'; });
+  moreBtn.classList.toggle('active', overflowLinks.some(a => a.classList.contains('active')));
+}
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 function openModal(title, bodyHtml, footerHtml = '') {
   const el = document.createElement('div');

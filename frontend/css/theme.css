@@ -91,12 +91,23 @@ tr:hover td { background: var(--brand-panel-2); }
 .app-header .brand img { height: 32px; width: auto; }
 .app-header .brand-name { font-family: Georgia, serif; font-size: 14px; line-height: 1.2; color: var(--brand-gold-light); white-space: nowrap; }
 .app-header .brand-name span { display: block; font-size: 11px; color: var(--sidebar-muted); }
-.app-header nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
-.app-header nav::-webkit-scrollbar { height: 5px; }
-.app-header nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.25); border-radius: 3px; }
+.app-header nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; }
 .app-header nav a { display: flex; align-items: center; padding: 10px 12px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
 .app-header nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
 .app-header nav a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }
+/* JS-driven overflow menu (layoutNavOverflow in app.js): items that don't
+   fit the header's width get hidden and relisted here instead of the nav
+   scrolling horizontally. Hidden by default (display:none via inline style
+   set only when there's actually overflow); nav-more-btn itself is always
+   in the flow so its width can be measured before deciding what overflows. */
+.nav-more { position: relative; flex-shrink: 0; }
+.nav-more-btn { display: flex; align-items: center; gap: 4px; padding: 10px 12px; border-radius: 8px; background: none; border: none; color: var(--sidebar-link); font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.nav-more-btn:hover, .nav-more-btn.active { background: rgba(255,255,255,.06); color: #fff; }
+.nav-more-dropdown { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--brand-bg); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; box-shadow: var(--shadow); min-width: 200px; z-index: 50; flex-direction: column; padding: 6px; }
+.nav-more-dropdown.open { display: flex; }
+.nav-more-dropdown a { padding: 10px 12px; border-radius: 8px; color: var(--sidebar-link); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.nav-more-dropdown a:hover { background: rgba(255,255,255,.06); color: #fff; }
+.nav-more-dropdown a.active { background: var(--sidebar-active-1); color: var(--brand-gold-light); font-weight: 600; }
 .app-header .header-user { display: flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 12.5px; color: var(--sidebar-muted); }
 .app-header .header-user-email { white-space: nowrap; }
 .app-header .header-user button { background: none; border: none; color: var(--brand-gold-light); cursor: pointer; padding: 0; font-size: 12.5px; text-decoration: underline; white-space: nowrap; }
