@@ -1,6 +1,16 @@
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 
+// render.yaml generates JWT_SECRET automatically, so production should
+// always have a real one — but if a deploy ever comes up without it, silently
+// falling back to a fixed, publicly-known string (visible in this repo's
+// history) would let anyone forge a valid session token for any user,
+// including super_admin. Fail loud instead of quietly issuing forgeable
+// tokens on a platform holding financial/PII data. Local dev without a
+// .env still works — only production is required to set it explicitly.
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('JWT_SECRET must be set in production — refusing to start with a guessable default.');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
 export function signToken(user) {

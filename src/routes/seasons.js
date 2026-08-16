@@ -3,7 +3,11 @@ import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
-router.use(auth);
+// Internal team only — no shul/store portal page ever calls this (portal
+// season context, e.g. capacity banners, comes from the shul/applicant's own
+// season_id, not a direct call here), and the full list exposes every
+// season's applicant counts/capacity org-wide.
+router.use(auth, requireAdmin);
 
 // Adds live capacity numbers to a season row: how many applicants are
 // currently approved against it, and how many slots remain (null = no cap

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -31,10 +32,29 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const FRONTEND_DIR = join(__dirname, '..', 'frontend');
 
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*', credentials: true }));
+// Standard hardening headers (HSTS, X-Frame-Options, X-Content-Type-Options,
+// Referrer-Policy, etc.). contentSecurityPolicy/crossOriginEmbedderPolicy are
+// off: every admin/portal page is server-rendered with inline <script> blocks
+// and inline onclick= handlers throughout (no build step, no nonce
+// plumbing), so helmet's default CSP would break the entire frontend. A real
+// CSP here is a follow-up that needs those pages restructured first, not
+// something to silently half-enable.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(cors({ origin: process.env.ALLOWED_ORIGIN || process.env.APP_URL || '*', credentials: true }));
 app.use(express.json({ limit: '15mb' })); // e-signature PNGs are base64 in JSON bodies
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 2000 }));
+// Auth endpoints get their own much tighter limit — the blanket 2000/15min
+// above is sized for normal app usage (list pages, dashboards polling), not
+// for how many password guesses one IP should get against /login. Applies to
+// every /api/auth/* route (login, forgot-password, accept-invite,
+// change-password) since all of them are password-guessing/token-guessing
+// surface.
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+});
+app.use('/api/auth', authRateLimit);
 
 initMail();
 

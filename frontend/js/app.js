@@ -7,6 +7,24 @@ const Auth = {
   set(token, user) { localStorage.setItem('ec_token', token); localStorage.setItem('ec_user', JSON.stringify(user)); },
   logout() { localStorage.removeItem('ec_token'); localStorage.removeItem('ec_user'); location.href = '/login.html'; },
   requireAuth() { if (!this.token()) location.href = '/login.html'; },
+  // Bounces away immediately if the signed-in role isn't one of `roles` —
+  // e.g. a shul-portal login typing /admin/dashboard.html into the address
+  // bar. This is a UX guard only: the role read here comes from localStorage
+  // and every real data endpoint independently re-checks the actual role
+  // server-side from the JWT on every request (see middleware/auth.js), so
+  // there's nothing to gain by tampering with it client-side.
+  requireRole(...roles) {
+    this.requireAuth();
+    if (!this.token()) return;
+    const user = this.user();
+    if (!user) return this.logout();
+    if (!roles.includes(user.role)) {
+      if (user.role === 'shul') location.href = '/shul-portal/dashboard.html';
+      else if (user.role === 'store') location.href = '/store-portal/dashboard.html';
+      else location.href = '/admin/dashboard.html';
+    }
+  },
+  requireAdmin() { this.requireRole('staff', 'org_admin', 'super_admin'); },
   can(resource, action = 'can_view') {
     const u = this.user();
     if (!u) return false;

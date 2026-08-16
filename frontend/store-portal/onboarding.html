@@ -12,7 +12,7 @@
 <body>
 <script src="/js/app.js"></script>
 <script>
-Auth.requireAuth();
+Auth.requireRole('store');
 document.body.innerHTML = `
   <div class="public-wrap">
     <div class="public-header"><img class="brand-mark" src="/img/org-logo.png" alt="Organization logo"><h1>Complete Your Store Setup</h1></div>

@@ -1,8 +1,10 @@
 import { db, uuid } from '../db.js';
 
-// Role defaults used when a user has no explicit `permissions` row for a resource.
-// super_admin/org_admin/staff get full access by default; shul/store portal users
-// are locked to their own record via scope handling in the routes themselves.
+// Role defaults used when a user has no explicit `permissions` row for a
+// resource (the `permissions` table itself is only ever populated for
+// internal team members — super_admin/org_admin/staff — via Users &
+// Permissions; a shul/store portal login never has rows there, so it always
+// falls back to ROLE_DEFAULTS below).
 const ROLE_DEFAULTS = {
   super_admin: { can_view: 1, can_edit: 1, can_export: 1, hidden_fields: [], scope: 'all' },
   org_admin:   { can_view: 1, can_edit: 1, can_export: 1, hidden_fields: [], scope: 'all' },
@@ -10,9 +12,30 @@ const ROLE_DEFAULTS = {
   shul:        { can_view: 1, can_edit: 1, can_export: 0, hidden_fields: [], scope: 'assigned' },
   store:       { can_view: 1, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' },
 };
+const PORTAL_DENIED = { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' };
+
+// ROLE_DEFAULTS above is a single flat object per role, not resource-aware —
+// on its own it would hand a shul/store portal login can_view:1 on EVERY
+// resource passed to requirePermission(), including ones that were never
+// built with portal-scoped filtering (e.g. cards.js has no shul_id/store_id
+// scoping at all, unlike applicants.js/shuls.js/stores.js which explicitly
+// force the query down to the caller's own record for these roles). This is
+// the allowlist of resources a portal login may ever get a "yes" on; every
+// route in that list independently re-scopes to the caller's own record —
+// this is only the coarse can-they-even-ask-about-this-resource gate.
+// Anything not listed (cards, users, settings, forms, dashboard, emails,
+// sms, tasks, updates, orgs, ...) is internal-team-only and denied outright,
+// so a portal account hitting one of those routes 403s before any query runs
+// — the same protection dashboard.js gets from requireAdmin, generalized to
+// every current and future resource that reuses this middleware.
+const PORTAL_ALLOWED_RESOURCES = { shul: ['shuls', 'applicants'], store: ['stores'] };
 
 export function getPermission(user, resource) {
   if (user.role === 'super_admin') return { can_view: 1, can_edit: 1, can_export: 1, hidden_fields: [], scope: 'all' };
+  if (user.role === 'shul' || user.role === 'store') {
+    if (!(PORTAL_ALLOWED_RESOURCES[user.role] || []).includes(resource)) return PORTAL_DENIED;
+    return ROLE_DEFAULTS[user.role];
+  }
   const row = db.prepare('SELECT * FROM permissions WHERE user_id = ? AND resource = ?').get(user.id, resource);
   if (!row) return ROLE_DEFAULTS[user.role] || { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' };
   return { ...row, hidden_fields: JSON.parse(row.hidden_fields || '[]') };

@@ -11,7 +11,7 @@
 <body>
 <script src="/js/app.js"></script>
 <script>
-Auth.requireAuth();
+Auth.requireAdmin();
 renderShell('/admin/updates.html', `
   <div class="flex-between"><h2>Updates</h2><button class="btn btn-primary btn-sm" id="btn-compose">Send Update</button></div>
   <p class="small-muted">Broadcast a message to specific shuls/stores or whole groups. Recipients get an email and see it in their portal.</p>

@@ -12,6 +12,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20.11.0
+      - key: NODE_ENV
+        value: production
       - key: DATA_DIR
         value: /data
       - key: APP_URL

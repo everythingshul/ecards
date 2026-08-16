@@ -11,7 +11,7 @@
 <body>
 <script src="/js/app.js"></script>
 <script>
-Auth.requireAuth();
+Auth.requireAdmin();
 renderShell('/admin/sms.html', `
   <div class="flex-between"><h2>SMS Center</h2><button class="btn btn-primary btn-sm" id="btn-compose">Send Message</button></div>
   <div id="mock-banner"></div>

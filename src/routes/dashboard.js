@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { auth } from '../middleware/auth.js';
+import { auth, requireAdmin } from '../middleware/auth.js';
 import { getPermission } from '../middleware/permissions.js';
 
 const router = Router();
-router.use(auth);
+// Internal team only — every count below is computed org-wide (total shuls,
+// total applicants, total card dollars loaded, top stores by spend), not
+// scoped to a single shul/store, so a portal login must never reach this at
+// all (no portal page calls it — each has its own scoped dashboard).
+router.use(auth, requireAdmin);
 
 router.get('/stats', (req, res) => {
   const orgId = req.user.org_id;

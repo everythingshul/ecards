@@ -11,7 +11,7 @@
 <body>
 <script src="/js/app.js"></script>
 <script>
-Auth.requireAuth();
+Auth.requireRole('shul');
 renderShell('/shul-portal/upload.html', `
   <h2>Bulk Upload Applicants</h2>
   <div class="card">
