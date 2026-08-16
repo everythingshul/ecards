@@ -47,6 +47,35 @@ router.get('/export', requirePermission('cards', 'can_export'), (req, res) => {
   sendCsv(res, `cards-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
 });
 
+// Per-shul rollup: how much of the money loaded onto that shul's applicants'
+// cards has actually been spent so far. Must be registered before /:id (same
+// reason as /export above — otherwise Express matches "by-shul" as an :id).
+// "Allocated" here means card value loaded (SUM(cards.amount)), matching the
+// org-wide "Total Loaded" stat on the dashboard — not slots_allocated, which
+// is a headcount, not a dollar figure. "Spent" mirrors the existing
+// store-spend convention elsewhere (negative card_transactions.amount = a purchase).
+router.get('/by-shul', requireAdmin, (req, res) => {
+  const { season_id } = req.query;
+  let where = 'WHERE c.org_id = ?';
+  const params = [req.user.org_id];
+  if (season_id) { where += ' AND c.season_id = ?'; params.push(season_id); }
+  const rows = db.prepare(`
+    SELECT s.id AS shul_id, s.name_en AS shul_name,
+      COALESCE(SUM(c.amount), 0) AS allocated,
+      COALESCE((SELECT SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END)
+        FROM card_transactions t WHERE t.card_id IN (
+          SELECT c2.id FROM cards c2 JOIN applicants a2 ON a2.id = c2.applicant_id WHERE a2.shul_id = s.id AND c2.org_id = ?
+        )), 0) AS spent
+    FROM shuls s
+    JOIN applicants a ON a.shul_id = s.id
+    JOIN cards c ON c.applicant_id = a.id
+    ${where}
+    GROUP BY s.id
+    HAVING allocated > 0
+    ORDER BY allocated DESC`).all(req.user.org_id, ...params);
+  res.json({ shuls: rows.map(r => ({ ...r, remaining: r.allocated - r.spent })) });
+});
+
 router.get('/:id', (req, res) => {
   const card = db.prepare(`SELECT c.*, a.first_name, a.last_name FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id WHERE c.id = ? AND c.org_id = ?`).get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });

@@ -150,10 +150,7 @@
       if (org.support_phone) contactBits.push(`<a href="tel:${esc(org.support_phone)}">${esc(org.support_phone)}</a>`);
       qs('#about-contact').innerHTML = contactBits.length ? contactBits.join(' &nbsp;·&nbsp; ') : '';
 
-      // Once per browser tab session, not once per page load — an admin-set
-      // popup shouldn't nag someone clicking between apply and back.
-      if (popup?.enabled && popup.message && !sessionStorage.getItem('ec_popup_seen')) {
-        sessionStorage.setItem('ec_popup_seen', '1');
+      if (popup?.enabled && popup.message) {
         const el = document.createElement('div');
         el.className = 'popup-backdrop';
         el.innerHTML = `<div class="popup-box"><p>${esc(popup.message)}</p><button class="btn btn-primary btn-sm" id="popup-close">Close</button></div>`;

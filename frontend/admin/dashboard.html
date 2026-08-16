@@ -15,6 +15,7 @@ Auth.requireAdmin();
 renderShell('/admin/dashboard', `
   <div class="flex-between"><h2>Dashboard</h2></div>
   <div class="stat-grid" id="stats"><div class="small-muted">Loading…</div></div>
+  <div id="capacity-banner"></div>
   <div class="card" id="dup-panel" style="display:none;margin-bottom:16px">
     <div class="flex-between"><h3 style="margin:0">Open Duplicate Flags</h3><a href="/admin/shuls?dup=1" class="btn btn-sm btn-outline">Review</a></div>
     <p class="small-muted" id="dup-text"></p>
@@ -29,6 +30,14 @@ renderShell('/admin/dashboard', `
     <div id="my-tasks" style="margin-top:10px"></div>
   </div>
 `);
+
+api('/seasons/active').then(({ season }) => {
+  if (!season || season.max_accepted_applicants == null) return;
+  qs('#capacity-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${season.is_full ? 'border-color:var(--danger)' : ''}">
+    <strong>${esc(season.name)} capacity:</strong> ${season.accepted_count} of ${season.max_accepted_applicants} accepted (${season.remaining} remaining)
+    ${season.is_full ? ' <strong style="color:var(--danger)">This season is full — new applications are locked.</strong>' : ''}
+  </div>`;
+}).catch(() => {});
 
 (async () => {
   try {

@@ -16,7 +16,7 @@ renderShell('/admin/cards', `
   <div class="flex-between"><h2>Cards & Transactions</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-sync-all">Sync All Now</button><button class="btn btn-outline btn-sm" id="btn-export-cards">Export Cards CSV</button><button class="btn btn-outline btn-sm" id="btn-export-txns">Export Transactions CSV</button></div></div>
   <p class="small-muted">Cards auto-sync with disccardpromos every 15 minutes in the background. Use Sync All Now for an immediate refresh.</p>
   <div id="mock-banner"></div>
-  <div class="tabs"><button class="active" id="tab-cards-btn">Cards</button><button id="tab-txns-btn">All Transactions</button></div>
+  <div class="tabs"><button class="active" id="tab-cards-btn">Cards</button><button id="tab-txns-btn">All Transactions</button><button id="tab-byshul-btn">Spent by Shul</button></div>
   <div id="panel-cards">
     <div class="toolbar"><input id="f-search" placeholder="Search applicant name or card number…"><select id="f-status"><option value="">All statuses</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option><option value="activated">Activated</option><option value="deactivated">Deactivated</option></select></div>
     <div class="card" style="padding:0;overflow-x:auto">
@@ -32,13 +32,27 @@ renderShell('/admin/cards', `
     </div>
     <div class="paginator" id="pager-txns"></div>
   </div>
+  <div id="panel-byshul" style="display:none">
+    <p class="small-muted">Money loaded onto each shul's applicants' cards, and how much of it has been spent in stores so far.</p>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table><thead><tr><th>Shul</th><th>Allocated</th><th>Spent</th><th>Remaining</th><th></th></tr></thead>
+      <tbody id="tbody-byshul"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+    </div>
+  </div>
 `);
 
 let state = { search:'', status:'', page:1, pageSize:25 };
 let txnPage = 1;
 
-qs('#tab-cards-btn').addEventListener('click', () => { qs('#tab-cards-btn').classList.add('active'); qs('#tab-txns-btn').classList.remove('active'); qs('#panel-cards').style.display='block'; qs('#panel-txns').style.display='none'; });
-qs('#tab-txns-btn').addEventListener('click', () => { qs('#tab-txns-btn').classList.add('active'); qs('#tab-cards-btn').classList.remove('active'); qs('#panel-cards').style.display='none'; qs('#panel-txns').style.display='block'; loadTxns(); });
+const cardsTabs = ['cards', 'txns', 'byshul'];
+function showCardsTab(name) {
+  cardsTabs.forEach(t => { qs('#tab-'+t+'-btn').classList.toggle('active', t === name); qs('#panel-'+t).style.display = t === name ? 'block' : 'none'; });
+  if (name === 'txns') loadTxns();
+  if (name === 'byshul') loadByShul();
+}
+qs('#tab-cards-btn').addEventListener('click', () => showCardsTab('cards'));
+qs('#tab-txns-btn').addEventListener('click', () => showCardsTab('txns'));
+qs('#tab-byshul-btn').addEventListener('click', () => showCardsTab('byshul'));
 qs('#btn-export-cards').addEventListener('click', () => downloadAuthed('/cards/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'cards.csv'));
 qs('#btn-sync-all').addEventListener('click', async () => {
   const btn = qs('#btn-sync-all'); btn.disabled = true; btn.textContent = 'Syncing…';
@@ -74,6 +88,19 @@ async function loadTxns() {
         <td>${fmtDateTime(t.occurred_at)}</td><td>${esc(t.first_name||'')} ${esc(t.last_name||'')}</td><td>${esc(t.card_number_masked||'')}</td>
         <td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'')}</td>
       </tr>`).join('') : '<tr><td colspan="6" class="empty-state">No transactions yet.</td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadByShul() {
+  try {
+    const { shuls } = await api('/cards/by-shul');
+    qs('#tbody-byshul').innerHTML = shuls.length ? shuls.map(s => {
+      const pct = s.allocated > 0 ? Math.min(100, Math.round((s.spent / s.allocated) * 100)) : 0;
+      return `<tr>
+        <td>${esc(s.shul_name)}</td><td>${fmtMoney(s.allocated)}</td><td>${fmtMoney(s.spent)}</td><td>${fmtMoney(s.remaining)}</td>
+        <td style="min-width:120px"><div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden"><div style="width:${pct}%;background:var(--brand-gold-dark);height:100%"></div></div><span class="small-muted">${pct}%</span></td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="5" class="empty-state">No cards loaded yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
 

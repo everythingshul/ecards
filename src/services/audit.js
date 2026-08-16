@@ -54,11 +54,28 @@ export function getRecentActions(orgId, hours = 48) {
     FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
     WHERE a.org_id = ? AND a.created_at >= datetime('now', ?) ORDER BY a.created_at DESC`)
     .all(orgId, `-${hours} hours`);
+  // A row is only "redoable" if the undo-entry it points to hasn't itself
+  // been undone yet — otherwise that undo was already consumed by a
+  // previous redo (or a second undo/redo cycle), and pointing at it again
+  // would hit "already undone" instead of doing anything. Looked up
+  // separately since the target row can, in principle, sit outside this
+  // window's LIMIT if a lot happened since — a plain id lookup is safe either way.
+  const undoEntryIds = [...new Set(rows.map(r => r.undo_entry_id).filter(Boolean))];
+  const consumedIds = new Set();
+  if (undoEntryIds.length) {
+    const placeholders = undoEntryIds.map(() => '?').join(',');
+    db.prepare(`SELECT id FROM audit_log WHERE id IN (${placeholders}) AND undone_at IS NOT NULL`).all(...undoEntryIds)
+      .forEach(r => consumedIds.add(r.id));
+  }
   return rows.map(r => ({
     ...r,
     before: r.before_json ? JSON.parse(r.before_json) : null,
     after: r.after_json ? JSON.parse(r.after_json) : null,
     undoable: UNDOABLE_ACTIONS.includes(r.action) && !!ENTITY_TABLES[r.entity_type] && !r.undone_at && !!(r.before_json || r.after_json),
+    // Lets the UI put a "Redo" button directly on an already-undone row
+    // instead of making the admin go find the separate "Reversed a change
+    // to..." entry the undo created.
+    redoable: !!r.undone_at && !!r.undo_entry_id && !consumedIds.has(r.undo_entry_id),
   }));
 }
 
@@ -102,6 +119,7 @@ export function undoAuditEntry(auditId, actingUser, ip) {
   if (before === null && after === null) throw new Error('Nothing to restore for this action');
 
   restoreEntityState(entry.entity_type, entry.entity_id, before);
-  db.prepare(`UPDATE audit_log SET undone_at = datetime('now') WHERE id = ?`).run(auditId);
-  return logAudit(entry.org_id, actingUser.id, 'undo', entry.entity_type, entry.entity_id, after, before, ip);
+  const undoEntryId = logAudit(entry.org_id, actingUser.id, 'undo', entry.entity_type, entry.entity_id, after, before, ip);
+  db.prepare(`UPDATE audit_log SET undone_at = datetime('now'), undo_entry_id = ? WHERE id = ?`).run(undoEntryId, auditId);
+  return undoEntryId;
 }

@@ -21,7 +21,7 @@ renderShell('/admin/audit', `
       <option value="168">Last 7 days</option>
     </select>
   </div>
-  <p class="small-muted">Every create/update/approve/reject across the system, who did it, and what changed. Undoing restores exactly the fields that action changed; undoing an undo is how you redo.</p>
+  <p class="small-muted">Every create/update/approve/reject across the system, who did it, and what changed. Undoing restores exactly the fields that action changed; an undone action shows a Redo button to bring it back.</p>
   <div id="actions-list">Loading…</div>
 `);
 
@@ -86,6 +86,7 @@ async function load() {
           <div class="small-muted" style="margin-top:8px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}</div>
         </div>
         ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}')">Undo</button>` : ''}
+        ${a.redoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.undo_entry_id}')">Redo</button>` : ''}
       </div>
     </div>`).join('') : '<p class="small-muted">No actions in this window.</p>';
 }

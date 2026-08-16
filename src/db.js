@@ -518,6 +518,10 @@ safeAlter(`ALTER TABLE forms ADD COLUMN opens_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN closes_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
 safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
+// Points an undone entry at the fresh 'undo' entry that reversed it, so the
+// UI can offer a one-click "Redo" right on that same row instead of making
+// the admin go find the separate "Reversed a change to..." log entry.
+safeAlter(`ALTER TABLE audit_log ADD COLUMN undo_entry_id TEXT`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
