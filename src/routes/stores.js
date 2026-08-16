@@ -15,7 +15,7 @@ const router = Router();
 // 'pending'; admin reviews and invites to the portal same as an admin-added store.
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const windowError = formWindowError(getFormWindow(orgId, 'store-application'));
+  const windowError = formWindowError(getFormWindow(orgId, 'store_application'));
   if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (!b.name || !b.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });

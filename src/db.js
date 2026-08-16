@@ -8,7 +8,7 @@ import { generateApplicantExternalId } from './utils/externalId.js';
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates']) {
+for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates', 'forms']) {
   const p = join(DATA_DIR, sub);
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }
@@ -524,20 +524,25 @@ safeAlter(`ALTER TABLE stores ADD COLUMN agreed_terms_at TEXT`);
 safeAlter(`ALTER TABLE seasons ADD COLUMN max_accepted_applicants INTEGER`);
 safeAlter(`ALTER TABLE shuls ADD COLUMN is_locked INTEGER DEFAULT 0`);
 safeAlter(`ALTER TABLE applicants ADD COLUMN external_id TEXT`);
+// The disccardpromos account created for this applicant on approval (see
+// services/giftcard.js's upsertAccountForApproval) — distinct from
+// cards.provider_card_id, which is the actual gift card assigned later.
+safeAlter(`ALTER TABLE applicants ADD COLUMN provider_account_id TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN opens_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN closes_at TEXT`);
 safeAlter(`ALTER TABLE forms ADD COLUMN is_default INTEGER DEFAULT 0`);
-// A permanent, slug-independent identifier for the three built-in forms —
-// lets admins rename a built-in form's URL Slug (routes/forms.js PUT /:id)
-// without breaking the hardcoded public pages (apply.html, apply-store.html,
-// apply-ezras-habayis.html) that look their schedule/window up by this key
-// (see utils/formSchedule.js) rather than by slug. One-time backfill below
-// links existing rows by their current (pre-this-migration, always-fixed)
-// slug value; new installs get it set directly at seed time further down.
-safeAlter(`ALTER TABLE forms ADD COLUMN builtin_key TEXT`);
-for (const key of ['shul-application', 'store-application', 'ezras-habayis-application']) {
-  db.prepare(`UPDATE forms SET builtin_key = ? WHERE slug = ? AND builtin_key IS NULL`).run(key, key);
-}
+// Which form is the CURRENTLY ACTIVE one for its section (shul_application/
+// store_application/applicant_application) — the fixed public pages
+// (apply.html, apply-store.html, apply-ezras-habayis.html) render whichever
+// form has this flag set for their type, not one permanently-pinned row, so
+// any form of the right type — built-in or admin-created — can be switched
+// in as "the" form for that section (routes/forms.js PUT /:id/set-default)
+// without breaking those pages (see utils/formSchedule.js). Exactly one form
+// per (org, type) can have this set at a time. One-time backfill below makes
+// the three originally-seeded forms (is_default=1) the current default for
+// their type, since nothing else could have been chosen before this existed.
+safeAlter(`ALTER TABLE forms ADD COLUMN is_current_default INTEGER DEFAULT 0`);
+db.prepare(`UPDATE forms SET is_current_default = 1 WHERE is_default = 1 AND is_current_default = 0`).run();
 // Every form is pinned to one season, so which season a submission lands in
 // is determined by the form the applicant/shul/store actually used — not by
 // whichever season happens to be "active" at the moment they hit submit
@@ -643,19 +648,19 @@ if (orgCount === 0) {
 // schedule/active-state record those routes check (see utils/formSchedule.js),
 // not a submission target. INSERT OR IGNORE on a UNIQUE slug makes this safe
 // to run on every boot, including for orgs that existed before this existed.
-const insDefaultForm = db.prepare(`INSERT OR IGNORE INTO forms (id, org_id, name, type, slug, builtin_key, schema_json, is_default) VALUES (?,?,?,?,?,?,?,1)`);
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Shul Registration', 'shul_application', 'shul-application', 'shul-application', JSON.stringify([
+const insDefaultForm = db.prepare(`INSERT OR IGNORE INTO forms (id, org_id, name, type, slug, schema_json, is_default, is_current_default) VALUES (?,?,?,?,?,?,1,1)`);
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Shul Registration', 'shul_application', 'shul-application', JSON.stringify([
   { key: 'name_en', label: 'Shul Name', type: 'text', required: true }, { key: 'address', label: 'Address', type: 'text', required: true },
   { key: 'ruv_first_name', label: 'Rav First Name', type: 'text', required: true }, { key: 'ruv_last_name', label: 'Rav Last Name', type: 'text', required: true },
   { key: 'ruv_phone', label: 'Rav Phone', type: 'tel', required: true },
   { key: 'gabai_first_name', label: 'Gabai First Name', type: 'text', required: true }, { key: 'gabai_last_name', label: 'Gabai Last Name', type: 'text', required: true },
   { key: 'gabai_cell', label: 'Gabai Cell', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
 ]));
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Store Application', 'store_application', 'store-application', 'store-application', JSON.stringify([
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Store Application', 'store_application', 'store-application', JSON.stringify([
   { key: 'name', label: 'Store Name', type: 'text', required: true }, { key: 'owner_name', label: 'Owner Name', type: 'text', required: false },
   { key: 'owner_email', label: 'Owner Email', type: 'email', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
 ]));
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'applicant_application', 'ezras-habayis-application', 'ezras-habayis-application', JSON.stringify([
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'applicant_application', 'ezras-habayis-application', JSON.stringify([
   { key: 'first_name', label: 'First Name', type: 'text', required: true }, { key: 'last_name', label: 'Last Name', type: 'text', required: true },
   { key: 'home_phone', label: 'Home Phone', type: 'tel', required: false }, { key: 'email', label: 'Email', type: 'email', required: false },
 ]));

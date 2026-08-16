@@ -77,7 +77,8 @@ router.get('/by-shul', requireAdmin, (req, res) => {
 });
 
 router.get('/:id', (req, res) => {
-  const card = db.prepare(`SELECT c.*, a.first_name, a.last_name FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id WHERE c.id = ? AND c.org_id = ?`).get(req.params.id, req.user.org_id);
+  const card = db.prepare(`SELECT c.*, a.first_name, a.last_name, a.husband_cell, a.wife_cell, a.home_phone
+    FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id WHERE c.id = ? AND c.org_id = ?`).get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   const transactions = db.prepare('SELECT * FROM card_transactions WHERE card_id = ? ORDER BY occurred_at DESC').all(card.id);
   res.json({ card, transactions });

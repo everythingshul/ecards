@@ -6,6 +6,7 @@ import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
+import * as giftcard from '../services/giftcard.js';
 import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
@@ -28,7 +29,7 @@ const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone',
 // season's locked system shul (see utils/ezrasHabayis.js).
 router.post('/apply-ezras-habayis', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const windowError = formWindowError(getFormWindow(orgId, 'ezras-habayis-application'));
+  const windowError = formWindowError(getFormWindow(orgId, 'applicant_application'));
   if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
@@ -36,7 +37,7 @@ router.post('/apply-ezras-habayis', (req, res) => {
   if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
   if (!b.first_name || !b.last_name) return res.status(400).json({ error: 'First and last name are required' });
 
-  const shul = getOrCreateEzrasHabayisShul(orgId, getFormSeasonId(orgId, 'ezras-habayis-application'));
+  const shul = getOrCreateEzrasHabayisShul(orgId, getFormSeasonId(orgId, 'applicant_application'));
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
 
@@ -305,7 +306,29 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
     if (emailError) console.error('[mail] applicant approval email failed:', emailError);
   }
-  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError });
+  // Writes/links the disccardpromos account for this applicant — idempotent
+  // by external_id (existing account just gets the current season added;
+  // a new one is created under a group matching the shul's English name,
+  // creating that group first if needed — see giftcard.js's
+  // upsertAccountForApproval). Best-effort: a disccardpromos hiccup here
+  // must never undo or block the approval that already committed above,
+  // same "external side-effect can fail without failing the action" pattern
+  // as the approval email right above.
+  let providerAccountError = null;
+  if (applicant.shul_id) {
+    try {
+      const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
+      const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
+        externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
+        groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
+      });
+      if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
+    } catch (e) {
+      providerAccountError = e.message;
+      console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
+    }
+  }
+  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError });
 });
 
 router.post('/:id/reject', requireAdmin, (req, res) => {

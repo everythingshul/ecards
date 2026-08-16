@@ -1,11 +1,17 @@
 import { Router } from 'express';
-import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
+import multer from 'multer';
+import { join } from 'path';
+import { writeFileSync } from 'fs';
+import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { detectAndFlag } from '../services/duplicates.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { isZipAllowed } from './applicants.js';
-import { formWindowError } from '../utils/formSchedule.js';
+import { formWindowError, REQUIRED_MINIMUM_FIELDS } from '../utils/formSchedule.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const FORMS_DIR = join(DATA_DIR, 'forms');
 
 const router = Router();
 
@@ -23,11 +29,12 @@ router.get('/public/:slug', (req, res) => {
 
 // Public: same as above but for the three built-in application pages
 // (apply.html, apply-store.html, apply-ezras-habayis.html), which are fixed
-// pages at fixed URLs — not slug-driven — so they look their form up by the
-// permanent builtin_key instead of the now-editable slug (see PUT /:id and
-// utils/formSchedule.js).
-router.get('/public/builtin/:builtinKey', (req, res) => {
-  const form = db.prepare('SELECT * FROM forms WHERE builtin_key = ? AND is_active = 1').get(req.params.builtinKey);
+// pages at fixed URLs — not slug-driven — so they look up whichever form is
+// CURRENTLY the live default for that section (type + is_current_default;
+// see PUT /:id/set-default and utils/formSchedule.js) instead of a specific
+// pinned row or the now-freely-editable slug.
+router.get('/public/default/:type', (req, res) => {
+  const form = db.prepare('SELECT * FROM forms WHERE type = ? AND is_current_default = 1 AND is_active = 1').get(req.params.type);
   if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
   res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
@@ -119,6 +126,18 @@ router.post('/public/:slug/submit', (req, res) => {
 
 router.use(auth, requireAdmin);
 
+// Uploads an image for an 'image' block in a form's schema (see
+// frontend/admin/forms.html's field editor) — returns the URL to store on
+// that field. Same memory-storage-then-write-to-disk pattern as
+// routes/updates.js's inline-image attachments.
+router.post('/upload-image', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+  if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ error: 'File must be an image' });
+  const safeName = `${uuid()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  writeFileSync(join(FORMS_DIR, safeName), req.file.buffer);
+  res.json({ url: `/uploads/forms/${safeName}` });
+});
+
 router.get('/', (req, res) => {
   const forms = db.prepare('SELECT * FROM forms WHERE org_id = ? ORDER BY created_at DESC').all(req.user.org_id);
   res.json({ forms: forms.map(f => ({ ...f, schema_json: JSON.parse(f.schema_json), target_json: JSON.parse(f.target_json || '[]') })) });
@@ -145,10 +164,11 @@ router.put('/:id', (req, res) => {
     if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
   }
   // Renaming a built-in form's slug is safe — the public page that actually
-  // serves it (apply.html etc.) looks itself up by the permanent
-  // builtin_key, not slug (see utils/formSchedule.js) — but slug still has
-  // to stay unique and non-empty for the generic /forms/public/:slug lookup
-  // that custom forms (and anyone with an old link to this one) rely on.
+  // serves it (apply.html etc.) looks up whichever form is the current
+  // default for its type, not by slug (see utils/formSchedule.js) — but
+  // slug still has to stay unique and non-empty for the generic
+  // /forms/public/:slug lookup that custom forms (and anyone with an old
+  // link to this one) rely on.
   if (slug !== undefined) {
     if (!slug) return res.status(400).json({ error: 'URL Slug is required' });
     const conflict = db.prepare('SELECT 1 FROM forms WHERE slug = ? AND id != ?').get(slug, form.id);
@@ -163,6 +183,32 @@ router.put('/:id', (req, res) => {
     opens_at=CASE WHEN ? THEN ? ELSE opens_at END, closes_at=CASE WHEN ? THEN ? ELSE closes_at END, updated_at=datetime('now') WHERE id=?`)
     .run(name, visibility, slug, schema ? JSON.stringify(schema) : null, target ? JSON.stringify(target) : null, is_active === undefined ? undefined : (is_active ? 1 : 0), season_id || null,
       opensAt !== undefined ? 1 : 0, opensAt, closesAt !== undefined ? 1 : 0, closesAt, form.id);
+  res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
+});
+
+// Makes this form the CURRENTLY ACTIVE one for its section — the fixed
+// public page for that type (apply.html/apply-store.html/apply-ezras-
+// habayis.html) starts rendering and submitting through it immediately,
+// replacing whichever form held that spot before. Only one form per (org,
+// type) can be current at a time, so this clears the flag off every other
+// form of the same type first. Refuses to switch to a form whose schema is
+// missing any of that type's non-negotiable required fields (see
+// REQUIRED_MINIMUM_FIELDS in utils/formSchedule.js) — the live section must
+// always be able to collect what the rest of the system (disccardpromos
+// account creation, contract generation, etc.) needs, regardless of which
+// specific form document is currently serving it.
+router.put('/:id/set-default', (req, res) => {
+  const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!form) return res.status(404).json({ error: 'Not found' });
+  const required = REQUIRED_MINIMUM_FIELDS[form.type];
+  if (required) {
+    const schema = JSON.parse(form.schema_json);
+    const keys = new Set(schema.map(f => f.key));
+    const missing = required.filter(k => !keys.has(k));
+    if (missing.length) return res.status(400).json({ error: `This form is missing required field(s) for this section: ${missing.join(', ')}` });
+  }
+  db.prepare('UPDATE forms SET is_current_default = 0 WHERE org_id = ? AND type = ?').run(req.user.org_id, form.type);
+  db.prepare('UPDATE forms SET is_current_default = 1, updated_at = datetime(\'now\') WHERE id = ?').run(form.id);
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });
 

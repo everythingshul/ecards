@@ -25,7 +25,7 @@ const REQUIRED_SHUL_FIELDS = ['name_en', 'address', 'city', 'state', 'zip', 'ruv
 // generates (but does not yet send) the contract PDF.
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const windowError = formWindowError(getFormWindow(orgId, 'shul-application'));
+  const windowError = formWindowError(getFormWindow(orgId, 'shul_application'));
   if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
@@ -33,7 +33,7 @@ router.post('/apply', (req, res) => {
   for (const f of REQUIRED_SHUL_FIELDS) {
     if (!b[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
   }
-  const seasonId = getFormSeasonId(orgId, 'shul-application');
+  const seasonId = getFormSeasonId(orgId, 'shul_application');
   const id = uuid();
   db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip, lat, lng, place_id,
       ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip, ruv_place_id,

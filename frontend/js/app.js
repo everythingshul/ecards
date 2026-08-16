@@ -868,21 +868,22 @@ async function attachColumnCustomizer(buttonId, storageKey, columns, defaultOrde
   return order;
 }
 
-// Checks a built-in public application form's schedule (opens_at/closes_at,
-// is_active) before letting the caller show its form. `builtinKey` is one of
-// 'shul-application'/'store-application'/'ezras-habayis-application' — the
-// permanent identifier for these three (see utils/formSchedule.js), looked
-// up via /forms/public/builtin/:builtinKey rather than by slug, since these
-// pages are fixed at fixed URLs and the slug is just an editable label for
-// them, not a route. Returns true if the form is open for submissions; on
-// false, it has already hidden `formSelector` and rendered a "not open
-// yet"/"closed" card in its place, so callers just need to bail out of
-// their own init logic. Missing/unreachable config (network hiccup,
-// pre-migration env) fails open — never block a real applicant because this
-// one check couldn't be made.
-async function guardFormWindow(builtinKey, formSelector) {
+// Checks the schedule (opens_at/closes_at, is_active) of whichever form is
+// CURRENTLY the live default for a section before letting the caller show
+// its form. `type` is one of 'shul_application'/'store_application'/
+// 'applicant_application' (see utils/formSchedule.js and
+// forms.is_current_default) — looked up via /forms/public/default/:type
+// rather than by slug, since these pages are fixed at fixed URLs and the
+// slug is just an editable label for whichever form currently serves them,
+// not a route. Returns true if the form is open for submissions; on false,
+// it has already hidden `formSelector` and rendered a "not open yet"/
+// "closed" card in its place, so callers just need to bail out of their own
+// init logic. Missing/unreachable config (network hiccup, pre-migration
+// env) fails open — never block a real applicant because this one check
+// couldn't be made.
+async function guardFormWindow(type, formSelector) {
   try {
-    const { windowError } = await api(`/forms/public/builtin/${builtinKey}`);
+    const { windowError } = await api(`/forms/public/default/${type}`);
     if (!windowError) return true;
     const form = qs(formSelector);
     if (form) {
@@ -904,6 +905,11 @@ async function guardFormWindow(builtinKey, formSelector) {
 // but any of the builder's other field types work too. Mirrors form.html's
 // fieldHtml() checkbox layout so the two renderers look consistent.
 function extraFieldHtml(f) {
+  // 'header'/'image' are presentational blocks, not real inputs — nothing to
+  // submit, so collectExtraFieldsText() below just skips them (no
+  // data-extra-key element to find).
+  if (f.type === 'header') return `<h3 style="margin-top:22px">${esc(f.label || '')}</h3>`;
+  if (f.type === 'image') return f.url ? `<img src="${esc(f.url)}" alt="${esc(f.label||'')}" style="max-width:100%;height:auto;margin:14px 0;border-radius:8px">` : '';
   const req = f.required ? 'required' : '';
   if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" data-extra-key="${esc(f.key)}" id="extra-${esc(f.key)}" ${req}><label style="margin:0" for="extra-${esc(f.key)}">${esc(f.label || f.key)}</label></div>`;
   const label = `<label>${esc(f.label || f.key)} ${f.required ? '<span class="req">*</span>' : ''}</label>`;
@@ -913,18 +919,21 @@ function extraFieldHtml(f) {
   return `${label}<input type="${inputType}" data-extra-key="${esc(f.key)}" ${req}>`;
 }
 
-// Fetches a built-in public form's schema, filters out whatever the hardcoded
-// page already collects natively (knownKeys), and injects the rest into
-// containerId — so fields added in the Form Builder beyond the fixed set
-// actually show up on the real public page instead of being silently
-// ignored. Returns the extra-field schema (possibly empty) for the submit
-// handler to read values back out of via collectExtraFieldsText(). Fails
-// open (returns []) on any error — a form-builder hiccup should never block
-// a real applicant from submitting the base form.
-async function attachExtraFormFields(builtinKey, containerId, knownKeys) {
+// Fetches whichever form is currently the live default for this section
+// (type = 'shul_application'/'store_application'/'applicant_application' —
+// see forms.is_current_default), filters out whatever the hardcoded page
+// already collects natively (knownKeys), and injects the rest — real fields
+// plus header/image blocks — into containerId, so anything added in the
+// Form Builder beyond the fixed set actually shows up on the real public
+// page instead of being silently ignored. Returns the extra-field schema
+// (possibly empty) for the submit handler to read values back out of via
+// collectExtraFieldsText(). Fails open (returns []) on any error — a
+// form-builder hiccup should never block a real applicant from submitting
+// the base form.
+async function attachExtraFormFields(type, containerId, knownKeys) {
   try {
-    const { form } = await api(`/forms/public/builtin/${builtinKey}`);
-    const extra = (form.schema_json || []).filter(f => f.key && !knownKeys.includes(f.key));
+    const { form } = await api(`/forms/public/default/${type}`);
+    const extra = (form.schema_json || []).filter(f => (f.type === 'header' || f.type === 'image') || (f.key && !knownKeys.includes(f.key)));
     const container = qs('#' + containerId);
     if (container) container.innerHTML = extra.map(extraFieldHtml).join('');
     return extra;

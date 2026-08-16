@@ -22,11 +22,14 @@ let fieldDraft = [];
 let formsCache = [];
 let seasonsCache = [];
 
-const DEFAULT_FORM_PREVIEW = { 'shul-application': '/apply', 'store-application': '/apply-store', 'ezras-habayis-application': '/apply-ezras-habayis' };
-// Built-in forms are fixed pages at fixed URLs — the Preview Link always
-// goes there regardless of the (now-editable) slug, keyed by the permanent
-// builtin_key rather than by slug.
-function previewLink(f) { return (f.builtin_key && DEFAULT_FORM_PREVIEW[f.builtin_key]) || '/form?slug=' + esc(f.slug); }
+const SECTION_PAGE = { shul_application: '/apply', store_application: '/apply-store', applicant_application: '/apply-ezras-habayis' };
+const SECTION_LABEL = { shul_application: 'Shul Application', store_application: 'Store Application', applicant_application: 'Applicant Application' };
+// The section's fixed public page always goes to whichever form is
+// currently the default for its type — Preview Link goes there when this
+// form IS that one; otherwise there's no live URL to preview yet (it would
+// only take effect after "Set as Default"), so it falls back to the
+// generic slug-driven form renderer instead.
+function previewLink(f) { return (f.is_current_default && SECTION_PAGE[f.type]) || '/form?slug=' + esc(f.slug); }
 function scheduleStatus(f) {
   const now = new Date();
   if (!f.is_active) return badge('inactive', 'rejected');
@@ -42,18 +45,23 @@ async function load() {
   const seasonName = (id) => seasons.find(s => s.id === id)?.name || 'no season';
   qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
       <div class="flex-between">
-        <div><strong>${esc(f.name)}</strong> ${f.is_default ? badge('built-in', 'active') : ''} <span class="small-muted">/${esc(f.slug)}</span><br>
+        <div><strong>${esc(f.name)}</strong> ${f.is_current_default ? badge(`live for ${esc(SECTION_LABEL[f.type]||f.type)}`, 'active') : ''} <span class="small-muted">/${esc(f.slug)}</span><br>
           <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${esc(seasonName(f.season_id))} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
         <div class="pill-row">
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
           <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
+          ${!f.is_current_default ? `<button class="btn btn-sm btn-outline" onclick="setDefaultForm('${f.id}')">Set as Default for ${esc(SECTION_LABEL[f.type]||f.type)}</button>` : ''}
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>
       </div>
     </div>`).join('') : '<p class="small-muted">No forms yet.</p>';
 }
 window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { method: 'PUT', body: { is_active: activate === 'true' } }); load(); } catch (err) { toast(err.message, true); } };
+window.setDefaultForm = async (id) => {
+  if (!confirm(`Make this the live form for its section? The public page will immediately start using it instead of whichever form serves that section now.`)) return;
+  try { await api(`/forms/${id}/set-default`, { method: 'PUT' }); toast('This is now the live form for its section'); load(); } catch (err) { toast(err.message, true); }
+};
 
 qs('#btn-new').addEventListener('click', () => {
   fieldDraft = [{ key: 'first_name', label: 'First Name', type: 'text', required: true }];
@@ -84,19 +92,18 @@ window.saveEditForm = async (id) => {
 function toLocalInputValue(iso) { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 
 function formBody(existing = null) {
-  const typeLabel = { shul_application: 'Shul Application', store_application: 'Store Application', applicant_application: 'Applicant Application' };
   return `
     <label>Form Name *</label><input id="f-name" value="${existing ? esc(existing.name) : ''}">
     <div class="grid-2">
       <div><label>Type</label>${existing?.editing
-        ? `<input value="${esc(typeLabel[existing.type] || existing.type)}" disabled>`
+        ? `<input value="${esc(SECTION_LABEL[existing.type] || existing.type)}" disabled>`
         : `<select id="f-type"><option value="shul_application">Shul Application</option><option value="store_application">Store Application</option><option value="applicant_application">Applicant Application</option></select>`}
       </div>
       <div><label>Visibility</label><select id="f-visibility"><option value="public" ${existing?.visibility==='public'?'selected':''}>Public (anyone with the link)</option><option value="group" ${existing?.visibility==='group'?'selected':''}>Group of Shuls</option><option value="individual" ${existing?.visibility==='individual'?'selected':''}>Individual Shul</option></select></div>
     </div>
     <label>Season *</label><select id="f-season">${seasonsCache.map(s => `<option value="${s.id}" ${(existing ? existing.season_id === s.id : s.is_active) ? 'selected' : ''}>${esc(s.name)}${s.is_active?' (active)':''}</option>`).join('')}</select>
     <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026" value="${existing ? esc(existing.slug) : ''}">
-    ${existing?.editing && existing.builtin_key ? `<p class="small-muted">This form's real public page is fixed at <code>${esc(DEFAULT_FORM_PREVIEW[existing.builtin_key] || '')}</code> regardless of this slug — renaming it here won't move or break the live page.</p>` : ''}
+    ${existing?.editing && existing.is_current_default && SECTION_PAGE[existing.type] ? `<p class="small-muted">This form is live at <code>${esc(SECTION_PAGE[existing.type])}</code> — that URL is fixed regardless of this slug; renaming it here won't move or break the live page.</p>` : ''}
     ${existing?.editing ? `
     <div class="grid-2">
       <div><label>Opens <span class="small-muted">(blank = always open)</span></label><input type="datetime-local" id="f-opens" value="${toLocalInputValue(existing.opens_at)}"></div>
@@ -107,23 +114,47 @@ function formBody(existing = null) {
     <div id="field-list"></div>
   `;
 }
+// 'header' and 'image' are presentational blocks, not real inputs — no Field
+// Key (nothing to submit under), no Required (nothing to require). They
+// still live in the same schema array/order as real fields, so an admin can
+// interleave section headings and images between groups of fields.
+const BLOCK_TYPES = ['header', 'image'];
 function renderFields() {
-  qs('#field-list').innerHTML = fieldDraft.map((f, i) => `<div class="card" style="margin:8px 0;padding:12px">
+  qs('#field-list').innerHTML = fieldDraft.map((f, i) => {
+    const isBlock = BLOCK_TYPES.includes(f.type);
+    const isImage = f.type === 'image';
+    return `<div class="card" style="margin:8px 0;padding:12px">
       <div class="grid-2">
-        <div><label style="margin-top:0">Field Key</label><input value="${esc(f.key)}" onchange="fieldDraft[${i}].key=this.value"></div>
-        <div><label style="margin-top:0">Label</label><input value="${esc(f.label)}" onchange="fieldDraft[${i}].label=this.value"></div>
+        ${isBlock ? '' : `<div><label style="margin-top:0">Field Key</label><input value="${esc(f.key)}" onchange="fieldDraft[${i}].key=this.value"></div>`}
+        <div style="${isBlock ? 'grid-column:1/-1' : ''}"><label style="margin-top:0">${isImage ? 'Alt Text' : 'Label'}</label><input value="${esc(f.label)}" onchange="fieldDraft[${i}].label=this.value"></div>
       </div>
       <div class="grid-2">
-        <div><label style="margin-top:0">Type</label><select onchange="fieldDraft[${i}].type=this.value">
-          ${['text','email','tel','number','textarea','checkbox','select'].map(t => `<option ${f.type===t?'selected':''}>${t}</option>`).join('')}
+        <div><label style="margin-top:0">Type</label><select onchange="fieldDraft[${i}].type=this.value; renderFields()">
+          ${['text','email','tel','number','textarea','checkbox','select','header','image'].map(t => `<option ${f.type===t?'selected':''}>${t}</option>`).join('')}
         </select></div>
-        <div><label style="margin-top:0">Required</label><select onchange="fieldDraft[${i}].required=this.value==='1'"><option value="1" ${f.required?'selected':''}>Yes</option><option value="0" ${!f.required?'selected':''}>No</option></select></div>
+        ${isBlock ? '' : `<div><label style="margin-top:0">Required</label><select onchange="fieldDraft[${i}].required=this.value==='1'"><option value="1" ${f.required?'selected':''}>Yes</option><option value="0" ${!f.required?'selected':''}>No</option></select></div>`}
       </div>
+      ${isImage ? `<div style="margin-top:8px">
+        <input type="file" accept="image/*" onchange="uploadFieldImage(${i}, this)">
+        ${f.url ? `<img src="${esc(f.url)}" style="max-width:200px;max-height:120px;display:block;margin-top:8px;border-radius:6px">` : '<p class="small-muted">No image uploaded yet.</p>'}
+      </div>` : ''}
       <button type="button" class="btn btn-sm btn-outline" style="margin-top:6px" onclick="removeField(${i})">Remove</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 window.addField = () => { fieldDraft.push({ key: '', label: '', type: 'text', required: false }); renderFields(); };
 window.removeField = (i) => { fieldDraft.splice(i, 1); renderFields(); };
+window.uploadFieldImage = async (i, input) => {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData(); fd.append('image', file);
+  try {
+    const { url } = await api('/forms/upload-image', { method: 'POST', isForm: true, body: fd });
+    fieldDraft[i].url = url;
+    renderFields();
+    toast('Image uploaded');
+  } catch (err) { toast(err.message, true); }
+};
 
 window.createForm = async () => {
   const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft, season_id: qs('#f-season').value };

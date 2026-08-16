@@ -60,10 +60,10 @@
 <script src="/js/app.js"></script>
 <script>renderPublicFooter();</script>
 <script>
-guardFormWindow('store-application', '#apply-form');
+guardFormWindow('store_application', '#apply-form');
 
 const STORE_KNOWN_KEYS = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','has_provider_account','comments'];
-const extraFieldsPromise = attachExtraFormFields('store-application', 'extra-fields', STORE_KNOWN_KEYS);
+const extraFieldsPromise = attachExtraFormFields('store_application', 'extra-fields', STORE_KNOWN_KEYS);
 
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('store_address', { address:'store_address', city:'store_city', state:'store_state', zip:'store_zip' });

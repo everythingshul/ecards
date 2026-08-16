@@ -92,12 +92,12 @@
 <script>
 let shulId = null, signToken = null, sigPad = null;
 
-guardFormWindow('shul-application', '#apply-form');
+guardFormWindow('shul_application', '#apply-form');
 
 const SHUL_KNOWN_KEYS = ['name_en','name_he','address','city','state','zip','place_id','lat','lng',
   'ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
   'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
-const extraFieldsPromise = attachExtraFormFields('shul-application', 'extra-fields', SHUL_KNOWN_KEYS);
+const extraFieldsPromise = attachExtraFormFields('shul_application', 'extra-fields', SHUL_KNOWN_KEYS);
 
 loadGoogleMaps().then(() => {
   attachPlacesAutocomplete('shul_address', { address:'shul_address', city:'shul_city', state:'shul_state', zip:'shul_zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });

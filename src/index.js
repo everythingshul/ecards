@@ -103,6 +103,7 @@ app.use('/api/contact', contactRoutes);
 app.use('/uploads/contracts', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'contracts')));
 app.use('/uploads/logos', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'logos')));
 app.use('/uploads/updates', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'updates')));
+app.use('/uploads/forms', express.static(join(process.env.DATA_DIR || join(process.cwd(), 'data'), 'forms')));
 
 // Canonicalize old .html links/bookmarks to the extensionless URL (301, so
 // search engines and browsers update their stored copy) — everything on the

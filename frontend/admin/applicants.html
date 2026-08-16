@@ -189,6 +189,7 @@ async function openApplicant(id) {
         <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
       </div>
       <div id="atab-cards" style="display:none">
+        ${a.provider_account_id ? `<p class="small-muted">disccardpromos Account: <code>${esc(a.provider_account_id)}</code></p>` : ''}
         ${cards.length ? cards.map(c => `<div class="card" style="margin-bottom:10px"><div class="flex-between"><strong>${esc(c.card_number_masked||'Unassigned')}</strong>${badge(c.status,c.status)}</div><div class="small-muted">Amount: ${fmtMoney(c.amount)} · Activated: ${c.activated_at?fmtDateTime(c.activated_at):'not yet'}</div><a class="small-muted" href="/admin/cards?card=${c.id}">View transactions</a></div>`).join('') : `<p class="small-muted">No card assigned yet.</p>${a.approval_status==='approved' ? `<button class="btn btn-sm btn-primary" onclick="assignCard('${id}')">Assign Gift Card</button>` : '<p class="small-muted">Applicant must be approved first.</p>'}`}
       </div>
       <div id="atab-documents" style="display:none">
@@ -230,7 +231,12 @@ window.saveApplicant = async (id) => {
   try { await api(`/applicants/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.approveApplicant = async (id) => {
-  try { const r = await api(`/applicants/${id}/approve`, { method: 'POST' }); toast(r.emailError ? `Approved, but email failed: ${r.emailError}` : 'Approved', !!r.emailError); closeModal(); load(); } catch (err) { toast(err.message, true); }
+  try {
+    const r = await api(`/applicants/${id}/approve`, { method: 'POST' });
+    const issues = [r.emailError && `email failed: ${r.emailError}`, r.providerAccountError && `disccardpromos account failed: ${r.providerAccountError}`].filter(Boolean);
+    toast(issues.length ? `Approved, but ${issues.join('; ')}` : 'Approved', issues.length > 0);
+    closeModal(); load();
+  } catch (err) { toast(err.message, true); }
 };
 window.rejectApplicant = async (id) => { if (!confirm('Reject this applicant?')) return; try { await api(`/applicants/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.trim(); if (!note) return; try { await api(`/applicants/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };

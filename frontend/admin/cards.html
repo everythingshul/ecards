@@ -117,7 +117,7 @@ async function openCard(id) {
         <div><strong>Card Number</strong><br>${esc(card.card_number_masked||'')}</div>
         <div><strong>Amount</strong><br>${fmtMoney(card.amount)}</div>
       </div>
-      ${card.status === 'assigned' ? `<div class="divider"></div><label>Activation Phone</label><input id="act-phone" placeholder="(555) 555-5555">` : ''}
+      ${card.status === 'assigned' ? `<div class="divider"></div><label>Activation Phone <span class="small-muted">(defaults to the applicant's phone on file — change it if they want to activate with a different number)</span></label><input id="act-phone" placeholder="(555) 555-5555" value="${esc(card.husband_cell || card.wife_cell || card.home_phone || '')}">` : ''}
       <div class="divider"></div>
       <h4>Transaction History</h4>
       ${transactions.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Store</th></tr></thead><tbody>${transactions.map(t=>`<tr><td>${fmtDateTime(t.occurred_at)}</td><td>${badge(t.type,t.type)}</td><td>${fmtMoney(t.amount)}</td><td>${esc(t.store_name||'')}</td></tr>`).join('')}</tbody></table>` : '<p class="small-muted">No transactions synced yet.</p>'}
