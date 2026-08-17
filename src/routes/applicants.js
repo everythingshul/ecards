@@ -15,6 +15,7 @@ import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
+import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -291,8 +292,17 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
   if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
   if (b.shul_id !== undefined) {
-    const targetShul = db.prepare('SELECT id FROM shuls WHERE id = ? AND org_id = ?').get(b.shul_id, req.user.org_id);
+    const targetShul = db.prepare('SELECT id, name_en, season_id FROM shuls WHERE id = ? AND org_id = ?').get(b.shul_id, req.user.org_id);
     if (!targetShul) return res.status(400).json({ error: 'Shul not found' });
+    // An applicant's season is fixed at creation (inherited from whichever
+    // shul they were added under — see the INSERT statements above) and
+    // never changes on its own, so reassigning them to a shul from a
+    // different season would silently split their record across seasons —
+    // e.g. an approved-this-season applicant reassigned under a next-season
+    // shul while still showing as this season's approval/card. Block it
+    // instead; if the applicant genuinely needs to move seasons, that's a
+    // deliberate separate action, not a side effect of a shul reassignment.
+    if (targetShul.season_id !== applicant.season_id) return res.status(400).json({ error: `"${targetShul.name_en}" is in a different season than this applicant — reassigning across seasons isn't allowed.` });
   }
   // card_amount and reassigning which shul an applicant belongs to are
   // admin-only (spec #5 for card_amount; shul_id because a shul reassigning
@@ -319,6 +329,30 @@ router.post('/:id/set-pending', requireAdmin, (req, res) => {
   db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
   logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
+});
+
+// Permanent deletion — full removal, not the pause/reject soft-states
+// elsewhere in this file. Every table's reference to this applicant is
+// cleaned up first (FK enforcement is ON): cards + their transactions and
+// notes are hard-deleted since they're meaningless without the applicant;
+// any other applicant's duplicate_of_applicant_id pointing here is cleared
+// so that applicant survives; the polymorphic entity_type/entity_id rows
+// (documents, tasks, etc.) are cleaned up too. Wrapped in a transaction so a
+// failure partway through doesn't leave orphaned rows.
+router.delete('/:id/permanent', requireAdmin, (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const del = db.transaction(() => {
+    db.prepare('DELETE FROM card_transactions WHERE card_id IN (SELECT id FROM cards WHERE applicant_id = ?)').run(applicant.id);
+    db.prepare('DELETE FROM cards WHERE applicant_id = ?').run(applicant.id);
+    db.prepare('DELETE FROM applicant_notes WHERE applicant_id = ?').run(applicant.id);
+    db.prepare('UPDATE applicants SET duplicate_of_applicant_id = NULL WHERE duplicate_of_applicant_id = ?').run(applicant.id);
+    deletePolymorphicRefs('applicant', applicant.id);
+    db.prepare('DELETE FROM applicants WHERE id = ?').run(applicant.id);
+  });
+  del();
+  logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
+  res.json({ ok: true });
 });
 
 router.post('/:id/approve', requireAdmin, async (req, res) => {

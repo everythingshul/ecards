@@ -94,7 +94,7 @@ async function openStore(id) {
       <div id="stab-documents" style="display:none">
         <div id="stab-documents-list"><p class="small-muted">Loading…</p></div>
       </div>`;
-    const footer = `<button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Store', '/stores/${id}/season-history', 'openStore')">View Other Seasons</button><button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button>${s.portal_user_id && ['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${s.portal_user_id}','${esc(s.name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
+    const footer = `<button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Store', '/stores/${id}/season-history', 'openStore')">View Other Seasons</button><button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button>${s.portal_user_id && ['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${s.portal_user_id}','${esc(s.name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" style="color:#b71c1c;border-color:#b71c1c" onclick="deleteStore('${id}')">Delete Permanently</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
     openModal(s.name, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
@@ -111,6 +111,10 @@ window.saveStore = async (id) => {
   try { await api(`/stores/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.inviteStore = async (id) => { try { const r = await api(`/stores/${id}/invite`, { method: 'POST' }); toast(r.emailError ? `Invite created, but email failed: ${r.emailError}` : 'Invite sent', !!r.emailError); } catch (err) { toast(err.message, true); } };
+window.deleteStore = async (id) => {
+  if (!confirm('Permanently delete this store? This removes the store and its billing records completely and cannot be undone.')) return;
+  try { await api(`/stores/${id}/permanent`, { method: 'DELETE' }); toast('Store deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
 window.addBilling = async (id) => {
   const period = qs('#b-period').value.trim(), amount_owed = +qs('#b-amount').value || 0;
   if (!period) return toast('Enter a period', true);

@@ -8,6 +8,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { formWindowError } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, STORE_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
+import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 
 const router = Router();
 
@@ -141,6 +142,28 @@ router.put('/:id', requireAdmin, (req, res) => {
     logAudit(req.user.org_id, req.user.id, 'update', 'store', store.id, Object.fromEntries(sets.map(f => [f, store[f]])), Object.fromEntries(sets.map((f,i) => [f, vals[i]])), req.ip);
   }
   res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
+});
+
+// Permanent deletion — full removal. Card transactions against this store
+// are kept (a card's own ledger shouldn't lose history) but unlinked
+// (store_id set to null) since the store record itself is gone; billing
+// rows are hard-deleted since they're meaningless without the store. A
+// linked portal login is deactivated, not deleted (that's user
+// management's job). FK enforcement is ON, so every hard reference is
+// cleaned up first, wrapped in a transaction.
+router.delete('/:id/permanent', requireAdmin, (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  const del = db.transaction(() => {
+    db.prepare('UPDATE card_transactions SET store_id = NULL WHERE store_id = ?').run(store.id);
+    db.prepare('DELETE FROM store_billing WHERE store_id = ?').run(store.id);
+    if (store.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(store.portal_user_id);
+    deletePolymorphicRefs('store', store.id);
+    db.prepare('DELETE FROM stores WHERE id = ?').run(store.id);
+  });
+  del();
+  logAudit(req.user.org_id, req.user.id, 'delete', 'store', store.id, store, null, req.ip);
+  res.json({ ok: true });
 });
 
 // Invite a store to their self-service portal.

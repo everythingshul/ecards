@@ -203,11 +203,12 @@ async function openApplicant(id) {
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Applicant', '/applicants/${id}/other-seasons', 'openApplicant')">View Other Seasons</button>
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('applicant','${id}','${esc(a.first_name+' '+a.last_name).replace(/'/g,"\\'")}')">+ Add Task</button>
+      ${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" style="color:#b71c1c;border-color:#b71c1c" onclick="deleteApplicant('${id}')">Delete Permanently</button>` : ''}
       ${a.approval_status !== 'pending' ? `<button class="btn btn-outline btn-sm" onclick="setApplicantPending('${id}')">Set to Pending</button>` : ''}
       ${a.is_paused ? '' : (a.approval_status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectApplicant('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveApplicant('${id}')">Approve</button>` : '')}
       <button class="btn btn-primary btn-sm" onclick="saveApplicant('${id}')">Save</button>`;
     openModal(`${a.first_name} ${a.last_name}`, body, footer);
-    attachShulSelect('e-shul_id', a.shul_id || '');
+    attachShulSelect('e-shul_id', a.shul_id || '', a.season_id || '');
     qsa('#atabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#atabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
       ['info','notes','cards','documents','messages'].forEach(t => qs('#atab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
@@ -243,6 +244,10 @@ window.approveApplicant = async (id) => {
 };
 window.rejectApplicant = async (id) => { if (!confirm('Reject this applicant?')) return; try { await api(`/applicants/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.setApplicantPending = async (id) => { try { await api(`/applicants/${id}/set-pending`, { method: 'POST' }); toast('Moved back to pending'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.deleteApplicant = async (id) => {
+  if (!confirm('Permanently delete this applicant? This removes their record, cards, notes, and documents completely and cannot be undone.')) return;
+  try { await api(`/applicants/${id}/permanent`, { method: 'DELETE' }); toast('Applicant deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
 window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.trim(); if (!note) return; try { await api(`/applicants/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
 window.assignCard = async (id) => { try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
 

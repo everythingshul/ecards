@@ -178,6 +178,7 @@ async function openShul(id) {
       <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Shul', '/shuls/${id}/other-seasons', 'openShul')">View Other Seasons</button>
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('shul','${id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">+ Add Task</button>
       ${shul.is_paused ? `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',false)">Unpause</button>` : `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',true)">Pause</button>`}
+      ${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" style="color:#b71c1c;border-color:#b71c1c" onclick="deleteShul('${id}')">Delete Permanently</button>` : ''}
       ${['approved','rejected'].includes(shul.status) ? `<button class="btn btn-outline btn-sm" onclick="setShulPending('${id}')">Set to Pending</button>` : ''}
       ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : `<button class="btn btn-outline btn-sm" onclick="resendWelcome('${id}')">Resend Welcome Email</button>`}
       ${shul.portal_user_id && ['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${shul.portal_user_id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">Set Password</button>` : ''}
@@ -213,6 +214,10 @@ window.approveShul = async (id) => {
 };
 window.rejectShul = async (id) => { if (!confirm('Reject this shul application?')) return; try { await api(`/shuls/${id}/reject`, { method: 'POST' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.setShulPending = async (id) => { try { await api(`/shuls/${id}/set-pending`, { method: 'POST' }); toast('Moved back to pending'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.deleteShul = async (id) => {
+  if (!confirm('Permanently delete this shul? This removes the shul, its contract, and notes completely and cannot be undone. Its applicants are kept but unlinked from this shul.')) return;
+  try { await api(`/shuls/${id}/permanent`, { method: 'DELETE' }); toast('Shul deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
 window.resendWelcome = async (id) => {
   try {
     const r = await api(`/shuls/${id}/resend-welcome`, { method: 'POST' });

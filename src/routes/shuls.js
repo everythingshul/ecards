@@ -13,6 +13,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
+import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -153,7 +154,10 @@ router.use(auth, requirePermission('shuls'));
 // of status, since an admin correcting an applicant's shul assignment needs
 // to be able to pick any real shul, not just approved/active ones.
 router.get('/all-list', (req, res) => {
-  const rows = db.prepare(`SELECT id, name_en, name_he, city, state FROM shuls WHERE org_id = ? AND is_locked = 0 ORDER BY name_en`).all(req.user.org_id);
+  const { season_id } = req.query;
+  const clause = season_id ? ' AND season_id = ?' : '';
+  const params = season_id ? [req.user.org_id, season_id] : [req.user.org_id];
+  const rows = db.prepare(`SELECT id, name_en, name_he, city, state FROM shuls WHERE org_id = ? AND is_locked = 0${clause} ORDER BY name_en`).all(...params);
   res.json({ shuls: rows });
 });
 
@@ -371,6 +375,31 @@ router.post('/:id/set-pending', requireAdmin, (req, res) => {
   db.prepare(`UPDATE shuls SET status='submitted', updated_at=datetime('now') WHERE id=?`).run(shul.id);
   logAudit(req.user.org_id, req.user.id, 'set-pending', 'shul', shul.id, { status: shul.status }, { status: 'submitted' }, req.ip);
   res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id) });
+});
+
+// Permanent deletion — full removal, not the reject/pause soft-states
+// elsewhere in this file. Applicants belonging to this shul are NOT
+// deleted — that's a separate, deliberate action (DELETE
+// /applicants/:id/permanent) — they're just unlinked (shul_id set to null)
+// so an admin can reassign them rather than silently losing their records.
+// A linked portal login is deactivated (not deleted) since that's the
+// user-management flow's job, not this one's. FK enforcement is ON, so
+// every hard reference is cleaned up first, wrapped in a transaction.
+router.delete('/:id/permanent', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const del = db.transaction(() => {
+    db.prepare('UPDATE applicants SET shul_id = NULL WHERE shul_id = ?').run(shul.id);
+    db.prepare('UPDATE shuls SET duplicate_of_shul_id = NULL WHERE duplicate_of_shul_id = ?').run(shul.id);
+    db.prepare('DELETE FROM contracts WHERE shul_id = ?').run(shul.id);
+    db.prepare('DELETE FROM shul_notes WHERE shul_id = ?').run(shul.id);
+    if (shul.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(shul.portal_user_id);
+    deletePolymorphicRefs('shul', shul.id);
+    db.prepare('DELETE FROM shuls WHERE id = ?').run(shul.id);
+  });
+  del();
+  logAudit(req.user.org_id, req.user.id, 'delete', 'shul', shul.id, shul, null, req.ip);
+  res.json({ ok: true });
 });
 
 // Generate + email the contract (spec #3: "always email them when there's a doc to sign").

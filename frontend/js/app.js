@@ -424,11 +424,16 @@ async function showOtherSeasons(entityLabel, endpoint, reopen) {
 // its own value ends up being the selected shul's id — no separate hidden
 // field needed. Pulls from the admin all-list endpoint so every shul (any
 // status) is selectable, not just approved/public ones.
-async function attachShulSelect(selectId, initialShulId = '') {
+// seasonId, when passed, restricts the options to shuls in that season —
+// an applicant's season is fixed at creation and the backend (PUT
+// /applicants/:id) refuses a cross-season reassignment, so a caller editing
+// an existing applicant should pass their current season_id here rather
+// than let the admin pick a shul the save will just reject.
+async function attachShulSelect(selectId, initialShulId = '', seasonId = '') {
   const select = document.getElementById(selectId);
   if (!select) return;
   try {
-    const { shuls } = await api('/shuls/all-list');
+    const { shuls } = await api(`/shuls/all-list${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`);
     select.innerHTML = '<option value="">Select a shul…</option>' +
       shuls.map(s => `<option value="${s.id}">${esc(s.name_en)}${s.city ? ` (${esc(s.city)}, ${esc(s.state||'')})` : ''}</option>`).join('');
     if (initialShulId) select.value = initialShulId;
