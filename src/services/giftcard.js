@@ -14,14 +14,31 @@
 // if the real API contract differs once confirmed (or they add an endpoint we
 // need), only this file changes.
 //
-// CONFIRMED against real API docs (2026-08-16): base https://api.disccardpromos.com,
-// auth header is `Authorization: Token <key>` — NOT Bearer. The "Customers"
-// resource (/org/customers/...) below is fully confirmed. The card-level
-// functions further down (assign/activate/deactivate/status/transactions)
-// are still an unverified best-guess placeholder — their docs host
-// (docs.disccardpromos.com) is blocked by this environment's network egress
-// policy, so those are pending the same kind of confirmation the Customers
-// endpoints just got.
+// CONFIRMED against real API docs (2026-08-16/17): base
+// https://api.disccardpromos.com, auth header is `Authorization: Token <key>`
+// — NOT Bearer. Two resource groups are now confirmed against real docs
+// pasted in by the user (docs.disccardpromos.com itself is blocked by this
+// environment's network egress policy, so we only ever see what gets pasted
+// in directly):
+//   - Customers: /org/customers/... — see the block further down.
+//   - Card ops: /v1/balances/, /v1/charge/, /v1/refund/, /v1/add-funds/ —
+//     see getCardBalance/chargeCard/refundCard/addFunds below.
+//
+// IMPORTANT — this changes the mental model of "assigning a card":
+// /v1/add-funds/ credits a customer's balance against one of their
+// `packages` (their term for what we'd call a season's Discount), identified
+// by discount_id, and takes the customer by our external_id directly. There
+// is no confirmed "assign/activate a card to an applicant" endpoint at all —
+// every real endpoint we've seen operates on an existing customer (who
+// already carries `active_cards`), not on a card being provisioned fresh.
+// assignCard/activateCard/deactivateCard/getCardStatus/listTransactions
+// below are the OLD unverified best-guess placeholder (paths like
+// /cards/assign, /cards/:id/activate) and almost certainly do NOT match the
+// real API — real confirmed paths all live under /v1/ or /org/, never
+// /cards/. They're left in place (and still used by routes/cards.js /
+// services/cardSync.js) because pulling them without a confirmed
+// replacement would break the app; treat them as known-wrong pending real
+// docs for card provisioning/activation and a transaction-history endpoint.
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
@@ -54,6 +71,57 @@ async function call(orgId, path, opts = {}) {
   }
   return body;
 }
+
+// ---------------------------------------------------------------------------
+// Card ops — CONFIRMED (2026-08-17) against real API docs. All four live
+// under /v1/, distinct from the /org/customers/ prefix the Customers
+// resource uses below.
+// ---------------------------------------------------------------------------
+
+// Live balance check for one card by its card number. Returns the raw
+// provider response (docs show a balance figure keyed off cardNum) so
+// callers can pick the field they need rather than this module guessing at
+// a normalized shape.
+export async function getCardBalance(orgId, { cardNum }) {
+  if (isMockMode(orgId)) return { balance: null, mock: true };
+  return call(orgId, `/v1/balances/?cardNum=${encodeURIComponent(cardNum)}`);
+}
+
+// What a store's own register/card-reader calls at checkout to deduct from a
+// card's balance — this app doesn't run a POS, so nothing currently calls
+// this, but it's exposed as a correct, confirmed function in case a future
+// store-portal manual-charge feature needs it.
+export async function chargeCard(orgId, { cardNum, amount }) {
+  if (isMockMode(orgId)) return { success: true, mock: true };
+  return call(orgId, '/v1/charge/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
+}
+
+// Store-side reversal of a charge — same "not called anywhere yet" caveat as
+// chargeCard above.
+export async function refundCard(orgId, { cardNum, amount }) {
+  if (isMockMode(orgId)) return { success: true, mock: true };
+  return call(orgId, '/v1/refund/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
+}
+
+// Credits amount onto a customer's balance against one of their `packages`
+// (discountId) — this is what actually loads money for a season, identified
+// by OUR applicant's external_id rather than a disccardpromos customer id.
+// NOT yet wired into the applicant-approval flow: we have no confirmed
+// mapping from our season records to their discount_id (see the Customers
+// section below for what's still open there).
+export async function addFunds(orgId, { externalId, discountId, amount }) {
+  if (isMockMode(orgId)) return { success: true, mock: true };
+  return call(orgId, '/v1/add-funds/', { method: 'POST', body: JSON.stringify({
+    external_id: externalId, discount_id: discountId, amount,
+  }) });
+}
+
+// ---------------------------------------------------------------------------
+// OLD unverified placeholder — see the file header note above. Kept in use
+// by routes/cards.js and services/cardSync.js pending confirmed real
+// endpoints for provisioning/activating a card and reading its transaction
+// history.
+// ---------------------------------------------------------------------------
 
 // Assign the next available card to an applicant. externalId is the
 // applicant's 4-digit external_id (see utils/externalId.js) — disccardpromos
