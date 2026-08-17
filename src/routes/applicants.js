@@ -16,7 +16,7 @@ import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
-import { lockApplicantCards } from '../services/cardSync.js';
+import { lockApplicantCards, unlockApplicantCustomer } from '../services/cardSync.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -329,7 +329,7 @@ router.post('/:id/set-pending', requireAdmin, async (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
   logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
-  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant.id);
+  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), cardLockErrors });
 });
 
@@ -392,8 +392,11 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
         externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
         groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
+        homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
+        email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
       });
       if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
+      await unlockApplicantCustomer(req.user.org_id, result.accountId);
     } catch (e) {
       providerAccountError = e.message;
       console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
@@ -427,7 +430,7 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
   logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
-  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant.id);
+  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
   res.json({ ok: true, cardLockErrors });
 });
 
@@ -460,8 +463,11 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
         const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
           externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
           groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
+          homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
+          email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
+        await unlockApplicantCustomer(req.user.org_id, result.accountId);
         accountOk = true;
       } catch (e) {
         providerErrors++;

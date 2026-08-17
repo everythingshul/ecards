@@ -18,30 +18,40 @@ export async function syncOneCard(orgId, card) {
   return txns.length;
 }
 
-// Locks every active card an applicant holds — used when an applicant is
+// Locks an applicant's disccardpromos customer — used when an applicant is
 // rejected or moved back to pending (spec: "rejecting or making a customer
-// pending should trigger a lock on the card by disccard"), so a card can't
-// keep being spent once the person behind it is no longer approved.
-// Best-effort per card, same pattern as the disccard account/funds writes
-// in routes/applicants.js's approve flow: a provider failure is collected
-// and returned to the caller to surface, but never blocks the status change
-// that triggered it (the local card row is still marked deactivated either
-// way, since "no longer approved" should never show a still-active card in
-// our own UI regardless of whether the provider call succeeded).
-export async function lockApplicantCards(orgId, applicantId) {
-  const cards = db.prepare(`SELECT * FROM cards WHERE applicant_id = ? AND status IN ('assigned','activated')`).all(applicantId);
-  const errors = [];
-  for (const card of cards) {
-    try {
-      const result = await giftcard.deactivateCard(orgId, { providerCardId: card.provider_card_id, reason: 'applicant no longer approved' });
-      db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=? WHERE id=?`).run(result.deactivatedAt, card.id);
-    } catch (e) {
-      console.error('[cardSync] failed to lock card', card.id, 'for applicant', applicantId, ':', e.message);
-      errors.push(e.message);
-      db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE id=?`).run(card.id);
-    }
+// pending should trigger a lock on the card by disccard"), so their card(s)
+// can't keep being spent once they're no longer approved. Per disccardpromos'
+// real Customer API, `is_active` is a field on the CUSTOMER, not on an
+// individual card — there is no per-card lock/deactivate endpoint at all —
+// so this deactivates the whole customer record rather than any specific
+// card, and every local card row for them is marked deactivated to match
+// (an applicant only ever has one disccardpromos customer regardless of how
+// many cards they hold). unlockApplicantCustomer (called on approval) is the
+// inverse. Best-effort: a provider failure is returned to the caller to
+// surface, but never blocks the status change that triggered it — the local
+// rows are still marked deactivated either way, since "no longer approved"
+// should never show as still-active in our own UI regardless of whether the
+// provider call succeeded.
+export async function lockApplicantCards(orgId, applicant) {
+  db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE applicant_id = ? AND status IN ('assigned','activated')`).run(applicant.id);
+  if (!applicant.provider_account_id) return { errors: [] };
+  try {
+    await giftcard.updateCustomer(orgId, applicant.provider_account_id, { isActive: false });
+    return { errors: [] };
+  } catch (e) {
+    console.error('[cardSync] failed to lock disccardpromos customer for applicant', applicant.id, ':', e.message);
+    return { errors: [e.message] };
   }
-  return { lockedCount: cards.length, errors };
+}
+
+// Reactivates the disccardpromos customer on (re-)approval, undoing
+// lockApplicantCards above for an applicant who was previously
+// rejected/pending and is now approved again.
+export async function unlockApplicantCustomer(orgId, providerAccountId) {
+  if (!providerAccountId) return;
+  try { await giftcard.updateCustomer(orgId, providerAccountId, { isActive: true }); }
+  catch (e) { console.error('[cardSync] failed to reactivate disccardpromos customer', providerAccountId, ':', e.message); }
 }
 
 // Sweeps every assigned/activated card in an org. Used by the automatic

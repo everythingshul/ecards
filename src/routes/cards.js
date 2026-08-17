@@ -84,39 +84,41 @@ router.get('/:id', (req, res) => {
   res.json({ card, transactions });
 });
 
-// Assign the next card to an approved applicant (spec #7: "assign a card, they get
-// a random card and when they use the phone on the account to activate, it'll be
-// written onto their account. We set the amount").
-// NOTE on assign/activate/deactivate below: these call giftcard.assignCard/
-// activateCard/deactivateCard, which are explicitly documented in
-// services/giftcard.js as an UNVERIFIED placeholder (paths like
-// /cards/assign) — every endpoint actually confirmed against real
-// disccardpromos docs lives under /v1/ or /org/customers/, never /cards/,
-// and their own docs describe customers as already carrying their
-// `active_cards` rather than a separate "assign a card" call. In live mode
-// this almost certainly 404s against the real API. Wrapped in try/catch so
-// that failure surfaces as a real, readable error instead of the generic
-// "Internal server error" the unhandled-rejection catch-all in index.js
-// would otherwise return, which made this look like a silent/opaque
-// failure rather than a specific, fixable one.
+// Assign a card to an approved applicant. Per disccardpromos' real Customer
+// API docs, there is no "give me a fresh card" endpoint — the org already
+// holds real physical card numbers, and "assigning" one means PATCHing the
+// applicant's disccardpromos customer with that exact card_number, which
+// activates it for them. So card_number here must be an actual physical
+// number in hand (e.g. from a batch of pre-printed cards), not something
+// this app generates — replaces the old giftcard.assignCard(), which called
+// a guessed, never-confirmed /cards/assign path.
 router.post('/assign', requireAdmin, async (req, res) => {
-  const { applicant_id, amount } = req.body || {};
+  const { applicant_id, card_number } = req.body || {};
+  if (!card_number) return res.status(400).json({ error: 'A real card number is required — disccardpromos activates an existing physical card, it does not generate one' });
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(applicant_id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Applicant not found' });
   if (applicant.approval_status !== 'approved') return res.status(400).json({ error: 'Applicant must be approved before a card is assigned' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant is paused pending duplicate resolution' });
-  const finalAmount = amount ?? applicant.card_amount ?? 0;
+  if (!applicant.provider_account_id) return res.status(400).json({ error: 'This applicant has no disccardpromos customer on file yet — re-approve them first so one gets created' });
+  const finalAmount = applicant.card_amount ?? 0;
   let result;
   try {
-    result = await giftcard.assignCard(req.user.org_id, { applicantId: applicant.id, externalId: applicant.external_id, amount: finalAmount });
+    result = await giftcard.linkCardToCustomer(req.user.org_id, applicant.provider_account_id, card_number);
   } catch (e) {
     console.error('[cards] assign failed:', e.message);
     return res.status(502).json({ error: `disccardpromos rejected the card assignment: ${e.message}` });
   }
+  // active_cards is a list of masked numbers with no stable per-card id in
+  // their API — the just-activated one is whichever entry matches this
+  // card_number's last 4 digits, falling back to a locally-computed mask if
+  // the response didn't come back as expected (mock mode, or an
+  // unrecognized shape).
+  const last4 = String(card_number).slice(-4);
+  const maskedNumber = (result.active_cards || []).find(c => c.endsWith(last4)) || `****${last4}`;
   const id = uuid();
   db.prepare(`INSERT INTO cards (id, org_id, applicant_id, season_id, card_number_masked, provider_card_id, status, amount, assigned_at)
     VALUES (?,?,?,?,?,?,'assigned',?,datetime('now'))`)
-    .run(id, req.user.org_id, applicant.id, applicant.season_id, result.maskedNumber, result.providerCardId, finalAmount);
+    .run(id, req.user.org_id, applicant.id, applicant.season_id, maskedNumber, null, finalAmount);
   db.prepare(`INSERT INTO card_transactions (id, card_id, type, amount, occurred_at) VALUES (?,?,?,?,datetime('now'))`)
     .run(uuid(), id, 'load', finalAmount);
   db.prepare(`INSERT INTO audit_log (id, org_id, user_id, action, entity_type, entity_id, after_json) VALUES (?,?,?,?,?,?,?)`)

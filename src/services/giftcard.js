@@ -200,16 +200,24 @@ export async function listAllTransactions(orgId, { since }) {
 }
 
 // ---------------------------------------------------------------------------
-// Customers — CONFIRMED (2026-08-16). This is disccardpromos's term for what
-// the rest of this app calls an "account": /org/customers/... . Written at
-// applicant-approval time (routes/applicants.js POST /:id/approve), separate
-// from assignCard() below (which happens later, when an actual card gets
-// handed out).
+// Customers — CONFIRMED against disccardpromos's real Customer Management API
+// docs (2026-08-17): /org/customers/... . This is their term for what the
+// rest of this app calls an "account", written at applicant-approval time
+// (routes/applicants.js POST /:id/approve).
 //
 // Their "group" is NOT a separate resource with its own id — `group_name` is
 // a plain string field directly on the customer record, just sent along on
-// create/update. No find-or-create-group call is needed (this replaces an
-// earlier guess that assumed a dedicated /groups endpoint).
+// create/update; passing an unknown group_name creates it automatically.
+//
+// IMPORTANT — there is no separate "assign/provision a new card" endpoint at
+// all. A customer carries a `card_number` write field ("activate a card
+// number for this customer") and a read-only `active_cards` array (masked
+// numbers) — disccardpromos expects the ORG to already hold real physical
+// card numbers and "assigning a card" means activating one of those numbers
+// against a customer via PATCH, not generating a fresh card id the way the
+// old assignCard()/activateCard() below (still kept for
+// deactivate/status/transactions, which their docs don't cover) guessed.
+// See linkCardToCustomer() / getCustomer() further down.
 //
 // Still unconfirmed: how "current season" maps onto their data model —
 // nothing in the Customer resource represents a season directly. The
@@ -219,6 +227,23 @@ export async function listAllTransactions(orgId, { since }) {
 // endpoint, needs their Packages docs to confirm. `seasonName` is threaded
 // through below and intentionally unused for now rather than guessed at.
 // ---------------------------------------------------------------------------
+
+// Every writable Customer field per their docs, mapped from our applicant
+// shape. house_number/street/appartment are three separate fields on their
+// side but one free-text `address` on ours — sent whole as `street` (with
+// house_number left unset) rather than guessing a split that would silently
+// mis-parse real addresses.
+function customerPayload({ firstName, lastName, groupName, homePhone, cell, email, phone2, address, city, state, zip, officeNotes, isActive, cardNumber, amount }) {
+  const body = {
+    first_name: firstName, last_name: lastName, group_name: groupName,
+    home_phone: homePhone, cell, email, phone2,
+    street: address, city, state, zip,
+    office_notes: officeNotes, is_active: isActive,
+    card_number: cardNumber, amount,
+  };
+  for (const k of Object.keys(body)) if (body[k] === undefined || body[k] === '') delete body[k];
+  return body;
+}
 
 // Looks up an existing disccardpromos customer by OUR applicant's
 // external_id. Returns null if not found (a 404 from the provider) or in
@@ -243,30 +268,74 @@ export async function findCustomerByExternalId(orgId, externalId) {
   }
 }
 
-export async function createCustomer(orgId, { externalId, firstName, lastName, groupName }) {
-  if (isMockMode(orgId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: groupName };
-  return call(orgId, '/org/customers/', { method: 'POST', body: JSON.stringify({
-    external_id: externalId, first_name: firstName, last_name: lastName, group_name: groupName,
-  }) });
+export async function createCustomer(orgId, opts) {
+  const { externalId } = opts;
+  if (isMockMode(orgId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
+  return call(orgId, '/org/customers/', { method: 'POST', body: JSON.stringify({ external_id: externalId, ...customerPayload(opts) }) });
 }
 
-export async function updateCustomer(orgId, customerId, patch) {
-  if (isMockMode(orgId)) return { id: customerId, ...patch };
-  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(patch) });
+// Their docs show PATCH at '/org/customers/{id}' with no trailing slash —
+// every other Customer endpoint (list/create/get-by-id/get-by-external-id/
+// delete) documents one, so this is very possibly just a docs typo, but
+// it's what's actually written, and a slash mismatch against a strict
+// Django-style router is exactly the kind of thing that would 404 silently
+// enough to look like "nothing happens" from our side. Matching it exactly
+// rather than guessing "they probably meant consistent" — if this is wrong
+// the now-loud error logging around this call will show it plainly.
+export async function updateCustomer(orgId, customerId, opts) {
+  if (isMockMode(orgId)) return { id: customerId, ...customerPayload(opts) };
+  return call(orgId, `/org/customers/${customerId}`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
+}
+
+export async function deleteCustomer(orgId, customerId) {
+  if (isMockMode(orgId)) return { ok: true };
+  return call(orgId, `/org/customers/${customerId}/`, { method: 'DELETE' });
+}
+
+// Full customer record including active_cards (masked numbers) and packages
+// — balances/transactions are opt-in per their docs (?balances=true /
+// ?transactions=true) since presumably heavier to compute. Used by
+// syncCustomerCards() below to mirror what's actually on disccardpromos'
+// side into our local `cards` table, which is the only way to pick up a
+// card that was assigned directly in their dashboard rather than through
+// this app.
+export async function getCustomerByExternalId(orgId, externalId, { balances = false, transactions = false } = {}) {
+  if (isMockMode(orgId)) return null;
+  const qs = [balances && 'balances=true', transactions && 'transactions=true'].filter(Boolean).join('&');
+  try {
+    return await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/${qs ? `?${qs}` : ''}`);
+  } catch (e) {
+    if (e.status === 404) return null;
+    throw e;
+  }
+}
+
+// "Assigning a card" on disccardpromos means activating a real physical card
+// number the org already holds against a customer — there is no endpoint
+// that generates/provisions a fresh card number. cardNumber must be a real
+// number an admin has in hand (e.g. from a batch of physical cards).
+export async function linkCardToCustomer(orgId, customerId, cardNumber) {
+  if (isMockMode(orgId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
+  return call(orgId, `/org/customers/${customerId}`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
 }
 
 // Idempotent upsert used at applicant-approval time: an existing customer
-// (matched by external_id) gets its group_name refreshed to the shul's
-// current English name; a new one gets created under that group. Returns
+// (matched by external_id) gets every field below refreshed (name, contact
+// info, address, group) rather than just group_name — the "not all info
+// transfers" report was this function only ever sending
+// external_id/first_name/last_name/group_name even though the applicant
+// record (and disccardpromos' own Customer schema) has phone/email/address
+// too. A new customer gets created with the same full set. Returns
 // { created, accountId }. (seasonName isn't wired to anything yet — see
 // note above.)
-export async function upsertAccountForApproval(orgId, { externalId, firstName, lastName, groupName, seasonName }) {
+export async function upsertAccountForApproval(orgId, opts) {
+  const { externalId } = opts;
   if (isMockMode(orgId)) return { created: true, accountId: `mock_acct_${externalId}` };
   const existing = await findCustomerByExternalId(orgId, externalId);
   if (existing) {
-    const updated = await updateCustomer(orgId, existing.id, { group_name: groupName });
+    const updated = await updateCustomer(orgId, existing.id, opts);
     return { created: false, accountId: updated.id ?? existing.id };
   }
-  const created = await createCustomer(orgId, { externalId, firstName, lastName, groupName });
+  const created = await createCustomer(orgId, opts);
   return { created: true, accountId: created.id };
 }

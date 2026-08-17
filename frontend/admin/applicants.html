@@ -262,7 +262,11 @@ window.deleteApplicant = async (id) => {
   try { await api(`/applicants/${id}/permanent`, { method: 'DELETE' }); toast('Applicant deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.addApplicantNote = async (id) => { const note = qs('#new-anote').value.trim(); if (!note) return; try { await api(`/applicants/${id}/notes`, { method: 'POST', body: { note } }); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
-window.assignCard = async (id) => { try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); } };
+window.assignCard = async (id) => {
+  const cardNumber = prompt('Enter the physical card number to activate for this applicant (disccardpromos activates a real card you already hold — it does not generate one):');
+  if (!cardNumber) return;
+  try { await api('/cards/assign', { method: 'POST', body: { applicant_id: id, card_number: cardNumber.trim() } }); toast('Card assigned'); closeModal(); openApplicant(id); } catch (err) { toast(err.message, true); }
+};
 
 function openApplicantForm() {
   const body = `
