@@ -604,6 +604,13 @@ safeAlter(`ALTER TABLE audit_log ADD COLUMN undone_at TEXT`);
 // UI can offer a one-click "Redo" right on that same row instead of making
 // the admin go find the separate "Reversed a change to..." log entry.
 safeAlter(`ALTER TABLE audit_log ADD COLUMN undo_entry_id TEXT`);
+// Full multi-field signing payload ({fieldId: value/dataUrl}) for documents
+// that use more than one fillable item (multiple signatures, initials, date,
+// text fields). signature_data/signer_name etc. above still get populated
+// from the primary signature field for backward compatibility with existing
+// "already signed" displays; field_values is the complete record.
+safeAlter(`ALTER TABLE contracts ADD COLUMN field_values TEXT`);
+safeAlter(`ALTER TABLE documents ADD COLUMN field_values TEXT`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —

@@ -22,10 +22,8 @@
     <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
     <input id="signer_name" placeholder="Type your full legal name">
     <label>Title / Role <span class="small-muted">(optional)</span></label>
-    <input id="signer_title">
-    <label>Signature <span class="req">*</span></label>
-    <canvas id="sig-pad"></canvas>
-    <div style="margin-top:8px"><button type="button" class="btn btn-outline btn-sm" id="clear-sig">Clear Signature</button></div>
+    <input id="signer_title" style="margin-bottom:16px">
+    <div id="sign-fields"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign Document</button>
     </div>
@@ -40,19 +38,19 @@
 <script>renderPublicFooter();</script>
 <script>
 const token = new URLSearchParams(location.search).get('token');
-let sigPad = null;
+let fields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
 
 (async () => {
   if (!token) { qs('#loading').textContent = 'Missing signing link.'; return; }
   try {
-    const { document: doc, entityName, alreadySigned } = await api(`/documents/sign/${token}`);
+    const { document: doc, entityName, alreadySigned, fields: docFields } = await api(`/documents/sign/${token}`);
     qs('#loading').style.display = 'none';
     if (alreadySigned) { qs('#done-section').style.display = 'block'; return; }
+    if (docFields && docFields.length) fields = docFields;
     qs('#doc-section').style.display = 'block';
     qs('#doc-title').textContent = entityName ? `${doc.title || 'Agreement'} for ${entityName}` : (doc.title || 'Agreement');
     qs('#doc-frame').src = `/api/documents/sign/${token}/pdf-preview`;
-    sigPad = initSignaturePad('sig-pad');
-    qs('#clear-sig').onclick = () => sigPad.clear();
+    renderSignFields(fields, qs('#sign-fields'));
   } catch (err) {
     qs('#loading').textContent = err.message;
   }
@@ -61,10 +59,11 @@ let sigPad = null;
 qs('#sign-btn')?.addEventListener('click', async () => {
   const signerName = qs('#signer_name').value.trim();
   if (!signerName) return toast('Please type your full name', true);
-  if (!sigPad || sigPad.isEmpty()) return toast('Please draw your signature', true);
+  const values = collectSignValues(fields);
+  if (!values) return;
   const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   try {
-    await api(`/documents/sign/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, signature_data: sigPad.toDataUrl() } });
+    await api(`/documents/sign/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, values } });
     qs('#doc-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
   } catch (err) {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { generateGenericDocumentPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
+import { generateGenericDocumentPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
 import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
@@ -130,7 +130,8 @@ router.get('/sign/:token', (req, res) => {
   if (document.status === 'void') return res.status(410).json({ error: 'This document has been voided.' });
   if (document.sign_token_expires && new Date(document.sign_token_expires) < new Date()) return res.status(410).json({ error: 'This signing link has expired. Contact us for a new one.' });
   const entity = resolveEntity(document.entity_type, document.entity_id, document.org_id);
-  res.json({ document, entityName: entity?.displayName || '' });
+  const fields = getSignatureFields(document.org_id, document.entity_type);
+  res.json({ document, entityName: entity?.displayName || '', fields });
 });
 
 router.get('/sign/:token/pdf-preview', (req, res) => {
@@ -146,17 +147,21 @@ router.post('/sign/:token/sign', async (req, res) => {
   if (!document) return res.status(404).json({ error: 'Not found' });
   if (document.status === 'signed') return res.status(409).json({ error: 'This document has already been signed' });
   if (document.status === 'void') return res.status(410).json({ error: 'This document has been voided' });
-  const { signature_data, signer_name, signer_title } = req.body || {};
-  if (!signer_name || !signature_data) return res.status(400).json({ error: 'Signature and signer name are required' });
+  const { signer_name, signer_title } = req.body || {};
+  if (!signer_name) return res.status(400).json({ error: 'Signer name is required' });
+  const fields = getSignatureFields(document.org_id, document.entity_type);
+  const { values, missing } = resolveSignatureValues(fields, req.body);
+  if (missing.length) return res.status(400).json({ error: `Please complete: ${missing.join(', ')}` });
 
   const signedAt = new Date().toISOString();
-  const signedPath = await stampSignature({
+  const primary = fields.find(f => f.type === 'signature') || fields[0];
+  const signedPath = await stampSignatureFields({
     unsignedPath: document.pdf_path, shulId: `${document.entity_type}-${document.entity_id}`,
-    signatureDataUrl: signature_data, signerName: signer_name, signedAt, ip: req.ip,
-    box: getSignatureBox(document.org_id, document.entity_type),
+    fields, values, signerName: signer_name, signedAt, ip: req.ip,
   });
-  db.prepare(`UPDATE documents SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=? WHERE id=?`)
-    .run(signature_data, signer_name, signer_title || '', signedAt, req.ip, signedPath, document.id);
+  const signatureData = primary ? values[primary.id] : null;
+  db.prepare(`UPDATE documents SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=? WHERE id=?`)
+    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), document.id);
   res.json({ ok: true, message: 'Document signed. Thank you.' });
 });
 

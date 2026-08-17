@@ -4,7 +4,7 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
-import { generateContractPdf, stampSignature, getSignatureBox } from '../services/pdf.js';
+import { generateContractPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
 import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
@@ -111,7 +111,7 @@ router.get('/contract/:token', (req, res) => {
   if (contract.status === 'signed') return res.json({ contract, alreadySigned: true });
   if (contract.sign_token_expires && new Date(contract.sign_token_expires) < new Date()) return res.status(410).json({ error: 'This signing link has expired. Contact us for a new one.' });
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(contract.shul_id);
-  res.json({ contract, shul });
+  res.json({ contract, shul, fields: getSignatureFields(DEFAULT_ORG_ID, 'shul') });
 });
 
 // Public: inline PDF preview (unsigned, or signed once complete) for the iframe on apply.html / sign-contract.html.
@@ -128,12 +128,17 @@ router.post('/contract/:token/sign', async (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE sign_token = ?').get(req.params.token);
   if (!contract) return res.status(404).json({ error: 'Not found' });
   if (contract.status === 'signed') return res.status(409).json({ error: 'This contract has already been signed' });
-  const { signature_data, signer_name, signer_title } = req.body || {};
-  if (!signer_name || !signature_data) return res.status(400).json({ error: 'Signature and signer name are required' });
+  const { signer_name, signer_title } = req.body || {};
+  if (!signer_name) return res.status(400).json({ error: 'Signer name is required' });
+  const fields = getSignatureFields(DEFAULT_ORG_ID, 'shul');
+  const { values, missing } = resolveSignatureValues(fields, req.body);
+  if (missing.length) return res.status(400).json({ error: `Please complete: ${missing.join(', ')}` });
   const signedAt = new Date().toISOString();
-  const signedPath = await stampSignature({ unsignedPath: contract.pdf_path, shulId: contract.shul_id, signatureDataUrl: signature_data, signerName: signer_name, signedAt, ip: req.ip, box: getSignatureBox(DEFAULT_ORG_ID, 'shul') });
-  db.prepare(`UPDATE contracts SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=? WHERE id=?`)
-    .run(signature_data, signer_name, signer_title || '', signedAt, req.ip, signedPath, contract.id);
+  const primary = fields.find(f => f.type === 'signature') || fields[0];
+  const signedPath = await stampSignatureFields({ unsignedPath: contract.pdf_path, shulId: contract.shul_id, fields, values, signerName: signer_name, signedAt, ip: req.ip });
+  const signatureData = primary ? values[primary.id] : null;
+  db.prepare(`UPDATE contracts SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=? WHERE id=?`)
+    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), contract.id);
   db.prepare(`UPDATE shuls SET status='contract_signed', updated_at=datetime('now') WHERE id=?`).run(contract.shul_id);
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(contract.shul_id);
   logAudit(shul.org_id, null, 'esign', 'contract', contract.id, null, { signer_name, signedAt }, req.ip);

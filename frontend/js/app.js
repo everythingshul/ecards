@@ -997,78 +997,162 @@ function initSignaturePad(canvasId) {
   };
 }
 
-// Draggable/resizable signature-box editor (Settings > Documents). kind is
-// 'shul' | 'applicant' | 'store'. Renders a page-proportioned mockup, not
-// the live PDF content, since that's reliable across browsers and works
-// the same whether the underlying doc is our generated Letter-size PDF or
-// an admin-uploaded PDF of any size — the box is saved as fractions (0-1)
-// of the page's actual width/height, top-left origin, and stampSignature()
-// (services/pdf.js) converts to PDF points at sign time.
+// Renders one input per admin-configured fillable field (from
+// getSignatureFields()/services/pdf.js's field list, as returned alongside
+// the contract/document on the signing endpoints) into `container` — a
+// signature pad for 'signature'/'initial', a date/text input otherwise.
+// Used by sign-contract.html, sign-document.html, and apply.html's embedded
+// contract-sign step so a document with more than one fillable item (extra
+// signatures, initials, a date, free text) renders the same way everywhere.
+window.signaturePads = {};
+function renderSignFields(fields, container) {
+  container.innerHTML = fields.map(f => {
+    if (f.type === 'signature' || f.type === 'initial') {
+      return `<label>${esc(f.label || (f.type === 'signature' ? 'Signature' : 'Initial'))}${f.required !== false ? ' <span class="req">*</span>' : ''}</label>
+        <canvas id="sig-${f.id}" class="sign-field-canvas" style="width:100%;height:${f.type === 'signature' ? 120 : 70}px;border:1px solid var(--border);border-radius:6px"></canvas>
+        <div style="margin:6px 0 16px"><button type="button" class="btn btn-outline btn-sm" onclick="signaturePads['${f.id}'].clear()">Clear</button></div>`;
+    }
+    if (f.type === 'date') {
+      return `<label>${esc(f.label || 'Date')}${f.required !== false ? ' <span class="req">*</span>' : ''}</label>
+        <input type="date" class="sign-field-text" data-fid="${f.id}" value="${new Date().toISOString().slice(0, 10)}" style="margin-bottom:16px">`;
+    }
+    return `<label>${esc(f.label || 'Text')}${f.required !== false ? ' <span class="req">*</span>' : ''}</label>
+      <input type="text" class="sign-field-text" data-fid="${f.id}" style="margin-bottom:16px">`;
+  }).join('');
+  fields.filter(f => f.type === 'signature' || f.type === 'initial').forEach(f => { signaturePads[f.id] = initSignaturePad(`sig-${f.id}`); });
+}
+
+// Reads back every field's value: signature/initial as a PNG data URL (or
+// '' if left blank), date/text as typed text. Returns null (and toasts) if
+// a required field was left empty — caller should abort the submit in that case.
+function collectSignValues(fields) {
+  const values = {};
+  for (const f of fields) {
+    if (f.type === 'signature' || f.type === 'initial') {
+      const pad = signaturePads[f.id];
+      values[f.id] = pad && !pad.isEmpty() ? pad.toDataUrl() : '';
+    } else {
+      values[f.id] = qs(`.sign-field-text[data-fid="${f.id}"]`)?.value.trim() || '';
+    }
+    if (f.required !== false && !values[f.id]) { toast(`Please complete: ${f.label || f.type}`, true); return null; }
+  }
+  return values;
+}
+
+// Draggable/resizable multi-field signature editor (Settings > Documents).
+// kind is 'shul' | 'applicant' | 'store'. Renders a page-proportioned
+// mockup, not the live PDF content, since that's reliable across browsers
+// and works the same whether the underlying doc is our generated
+// Letter-size PDF or an admin-uploaded PDF of any size — every field's box
+// is saved as fractions (0-1) of the page's actual width/height, top-left
+// origin, and stampSignatureFields() (services/pdf.js) converts to PDF
+// points at sign time. Supports any number of fillable fields (multiple
+// signatures/initials for co-signers, plus date/text fields), not just one.
 let sigBoxState = null;
+const SIGBOX_TYPE_LABEL = { signature: 'Signature', initial: 'Initial', date: 'Date', text: 'Text' };
 window.openSignatureBoxEditor = async (kind, title) => {
   let data;
   try { data = await api(`/settings/signature-box/${kind}`); } catch (err) { return toast(err.message, true); }
   const pageSize = data.pageSize;
-  const box = data.box || { x: 0.09, y: 0.62, width: 0.42, height: 0.22 };
+  let fields = (data.fields && data.fields.length) ? data.fields.map(f => ({ ...f })) : [{ id: 'signature', type: 'signature', label: 'Signature', required: true, x: 0.09, y: 0.62, width: 0.42, height: 0.22 }];
+  let activeId = fields[0].id;
   const mockW = 320;
   const mockH = Math.round(mockW * pageSize.height / pageSize.width);
+
   const bodyHtml = `
-    <p class="small-muted">Drag the box to position where the signature is stamped on the last page, and drag its corner handle to resize it. This preview is scaled to your page's proportions (not the live document content), so it works reliably for any page size.</p>
-    <div id="sigbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)">
-      <div id="sigbox-box" style="position:absolute;background:rgba(201,167,106,.35);border:2px solid var(--brand-gold-dark);cursor:move;box-sizing:border-box">
-        <div id="sigbox-handle" style="position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:var(--brand-gold-dark);cursor:nwse-resize"></div>
-      </div>
+    <p class="small-muted">Drag a field to position it, drag its corner to resize. Add multiple fields for extra signatures, initials, a date, or free text the signer fills in. This preview is scaled to your page's proportions, not the live document content.</p>
+    <div id="sigbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)"></div>
+    <div style="text-align:center;margin-bottom:12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('signature')">+ Signature</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('initial')">+ Initial</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('date')">+ Date</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('text')">+ Text</button>
     </div>
+    <div id="sigbox-fields"></div>
     <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt</p>
   `;
   openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveSignatureBox('${kind}')">Save Placement</button>`);
 
-  const boxEl = qs('#sigbox-box'), handleEl = qs('#sigbox-handle');
-  function render() {
-    boxEl.style.left = (box.x * mockW) + 'px';
-    boxEl.style.top = (box.y * mockH) + 'px';
-    boxEl.style.width = (box.width * mockW) + 'px';
-    boxEl.style.height = (box.height * mockH) + 'px';
-  }
-  render();
-
-  let dragMode = null, startPx = { x: 0, y: 0 }, startBox = null;
-  function onDown(mode) {
-    return (e) => {
-      e.preventDefault(); e.stopPropagation();
-      dragMode = mode;
-      startPx = { x: e.clientX, y: e.clientY };
-      startBox = { ...box };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-    };
-  }
-  function onMove(e) {
-    if (!dragMode) return;
-    const dx = (e.clientX - startPx.x) / mockW, dy = (e.clientY - startPx.y) / mockH;
-    if (dragMode === 'move') {
-      box.x = Math.min(1 - box.width, Math.max(0, startBox.x + dx));
-      box.y = Math.min(1 - box.height, Math.max(0, startBox.y + dy));
-    } else {
-      box.width = Math.min(1 - box.x, Math.max(0.12, startBox.width + dx));
-      box.height = Math.min(1 - box.y, Math.max(0.06, startBox.height + dy));
+  function startDrag(e, f, mode) {
+    e.preventDefault(); e.stopPropagation();
+    activeId = f.id;
+    const startPx = { x: e.clientX, y: e.clientY };
+    const startBox = { x: f.x, y: f.y, width: f.width, height: f.height };
+    function onMove(ev) {
+      const dx = (ev.clientX - startPx.x) / mockW, dy = (ev.clientY - startPx.y) / mockH;
+      if (mode === 'move') {
+        f.x = Math.min(1 - f.width, Math.max(0, startBox.x + dx));
+        f.y = Math.min(1 - f.height, Math.max(0, startBox.y + dy));
+      } else {
+        f.width = Math.min(1 - f.x, Math.max(0.1, startBox.width + dx));
+        f.height = Math.min(1 - f.y, Math.max(0.05, startBox.height + dy));
+      }
+      renderBoxes();
     }
-    render();
+    function onUp() { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }
-  function onUp() {
-    dragMode = null;
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
+
+  function renderBoxes() {
+    const page = qs('#sigbox-page');
+    if (!page) return;
+    page.innerHTML = '';
+    fields.forEach(f => {
+      const box = document.createElement('div');
+      const active = f.id === activeId;
+      box.style.cssText = `position:absolute;left:${f.x * mockW}px;top:${f.y * mockH}px;width:${f.width * mockW}px;height:${f.height * mockH}px;background:rgba(201,167,106,.35);border:2px solid ${active ? 'var(--brand-gold-dark)' : '#999'};cursor:move;box-sizing:border-box;font-size:10px;color:#241a15;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden`;
+      box.textContent = f.label || SIGBOX_TYPE_LABEL[f.type];
+      box.addEventListener('pointerdown', (e) => startDrag(e, f, 'move'));
+      const handle = document.createElement('div');
+      handle.style.cssText = 'position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:var(--brand-gold-dark);cursor:nwse-resize';
+      handle.addEventListener('pointerdown', (e) => startDrag(e, f, 'resize'));
+      box.appendChild(handle);
+      page.appendChild(box);
+    });
   }
-  boxEl.addEventListener('pointerdown', onDown('move'));
-  handleEl.addEventListener('pointerdown', onDown('resize'));
-  sigBoxState = { kind, get: () => box };
+
+  function renderFieldsList() {
+    const el = qs('#sigbox-fields');
+    if (!el) return;
+    el.innerHTML = fields.map(f => `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;padding:6px;border:1px solid ${f.id === activeId ? 'var(--brand-gold-dark)' : 'var(--border)'};border-radius:4px">
+        <select data-fid="${f.id}" class="sigbox-type" style="width:100px">
+          ${Object.keys(SIGBOX_TYPE_LABEL).map(t => `<option value="${t}" ${f.type === t ? 'selected' : ''}>${SIGBOX_TYPE_LABEL[t]}</option>`).join('')}
+        </select>
+        <input data-fid="${f.id}" class="sigbox-label" placeholder="Label" value="${esc(f.label || '')}" style="flex:1">
+        <label class="small-muted" style="display:flex;align-items:center;gap:3px;white-space:nowrap"><input type="checkbox" data-fid="${f.id}" class="sigbox-required" ${f.required !== false ? 'checked' : ''}> Required</label>
+        <button type="button" class="btn btn-outline btn-sm" onclick="selectSignatureField('${f.id}')">Select</button>
+        ${fields.length > 1 ? `<button type="button" class="btn btn-outline btn-sm" onclick="removeSignatureField('${f.id}')">&times;</button>` : ''}
+      </div>
+    `).join('');
+    qsa('.sigbox-type').forEach(sel => sel.onchange = () => { const f = fields.find(x => x.id === sel.dataset.fid); f.type = sel.value; renderBoxes(); });
+    qsa('.sigbox-label').forEach(inp => inp.oninput = () => { const f = fields.find(x => x.id === inp.dataset.fid); f.label = inp.value; renderBoxes(); });
+    qsa('.sigbox-required').forEach(cb => cb.onchange = () => { const f = fields.find(x => x.id === cb.dataset.fid); f.required = cb.checked; });
+  }
+
+  window.addSignatureField = (type) => {
+    const id = 'f' + Math.random().toString(36).slice(2, 9);
+    fields.push({ id, type, label: SIGBOX_TYPE_LABEL[type], required: true, x: 0.1, y: 0.1, width: type === 'signature' ? 0.4 : 0.25, height: type === 'signature' ? 0.18 : 0.08 });
+    activeId = id;
+    renderBoxes(); renderFieldsList();
+  };
+  window.removeSignatureField = (id) => {
+    fields = fields.filter(f => f.id !== id);
+    if (activeId === id) activeId = fields[0]?.id;
+    renderBoxes(); renderFieldsList();
+  };
+  window.selectSignatureField = (id) => { activeId = id; renderBoxes(); renderFieldsList(); };
+
+  renderBoxes();
+  renderFieldsList();
+  sigBoxState = { kind, get: () => fields };
 };
 window.saveSignatureBox = async (kind) => {
-  const box = sigBoxState?.kind === kind ? sigBoxState.get() : null;
-  if (!box) return;
+  const fields = sigBoxState?.kind === kind ? sigBoxState.get() : null;
+  if (!fields || !fields.length) return;
   try {
-    await api(`/settings/signature-box/${kind}`, { method: 'PUT', body: box });
+    await api(`/settings/signature-box/${kind}`, { method: 'PUT', body: { fields } });
     toast('Signature placement saved');
     closeModal();
   } catch (err) { toast(err.message, true); }

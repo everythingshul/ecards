@@ -4,7 +4,7 @@ import { unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
-import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate } from '../services/pdf.js';
+import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields } from '../services/pdf.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 import { runBackup, listBackups, backupPath } from '../services/backup.js';
 
@@ -88,23 +88,32 @@ async function templatePageSize(kind) {
   return { width: 612, height: 792 }; // our generated Letter-size default (services/pdf.js buildSimplePdf)
 }
 
+const SIG_FIELD_TYPES = ['signature', 'initial', 'date', 'text'];
+
 router.get('/signature-box/:kind', async (req, res) => {
   const kind = req.params.kind;
   if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const row = db.prepare('SELECT value FROM settings WHERE org_id = ? AND key = ?').get(req.user.org_id, `signature_box_${kind}`);
+  const fields = getSignatureFields(req.user.org_id, kind);
   const pageSize = await templatePageSize(kind);
-  res.json({ box: row ? JSON.parse(row.value) : null, pageSize });
+  res.json({ fields, pageSize });
 });
 
+// Body is the full fields array (replaces whatever was saved before) — the
+// admin editor always sends its whole current set, since fields can be
+// added/removed/reordered in the same edit session.
 router.put('/signature-box/:kind', requireAdmin, (req, res) => {
   const kind = req.params.kind;
   if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const { x, y, width, height } = req.body || {};
-  if ([x, y, width, height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
-  const value = JSON.stringify({ x, y, width, height });
+  const fields = req.body?.fields;
+  if (!Array.isArray(fields) || !fields.length) return res.status(400).json({ error: 'At least one field is required' });
+  for (const f of fields) {
+    if (!f.id || !SIG_FIELD_TYPES.includes(f.type)) return res.status(400).json({ error: 'Each field needs a valid id and type' });
+    if ([f.x, f.y, f.width, f.height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
+  }
+  const value = JSON.stringify(fields.map(f => ({ id: f.id, type: f.type, label: f.label || '', required: f.required !== false, x: f.x, y: f.y, width: f.width, height: f.height })));
   db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
     ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `signature_box_${kind}`, value);
-  res.json({ ok: true, box: { x, y, width, height } });
+  res.json({ ok: true, fields: JSON.parse(value) });
 });
 
 // Auto-email message editor — every key in SYSTEM_EMAIL_TEMPLATES (contract

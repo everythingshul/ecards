@@ -8,13 +8,25 @@ export const CUSTOM_TEMPLATE_PATH = join(DATA_DIR, 'contracts', 'org-template.pd
 
 export function hasCustomTemplate() { return existsSync(CUSTOM_TEMPLATE_PATH); }
 
-// The admin-configured signature placement for a document kind ('shul' |
+// The admin-configured fillable fields for a document kind ('shul' |
 // 'applicant' | 'store'), set via Settings > Documents' drag/resize editor
-// (routes/settings.js). Returns null if never configured, in which case
-// stampSignature() below falls back to its original hardcoded placement.
-export function getSignatureBox(orgId, kind) {
+// (routes/settings.js). Returns [] if never configured, in which case
+// stampSignatureFields() below falls back to a single hardcoded signature
+// box in its original placement, so existing orgs see no change until they
+// opt in.
+//
+// Storage format is an array of {id, type, label, x, y, width, height},
+// coordinates as fractions (0-1) of the page, top-left origin. Older orgs
+// have a single flat {x,y,width,height} object saved (the pre-multi-field
+// format) — normalized here into a one-item 'signature' field so every
+// caller only ever deals with the array shape.
+export function getSignatureFields(orgId, kind) {
   const row = db.prepare('SELECT value FROM settings WHERE org_id = ? AND key = ?').get(orgId, `signature_box_${kind}`);
-  return row ? JSON.parse(row.value) : null;
+  if (!row) return [];
+  const value = JSON.parse(row.value);
+  if (Array.isArray(value)) return value;
+  if (value && typeof value.x === 'number') return [{ id: 'signature', type: 'signature', label: 'Signature', x: value.x, y: value.y, width: value.width, height: value.height }];
+  return [];
 }
 
 // Shared simple word-wrapping PDF body builder, used by both the shul
@@ -127,63 +139,109 @@ export async function generateGenericDocumentPdf({ entityType, entityId, title, 
   return path;
 }
 
-// Stamps a signature (base64 PNG or typed name) + metadata onto the last page
-// of the unsigned PDF. `shulId` is really just "output file id" — callers
-// for applicant/store documents pass a composite string like
-// `applicant-<id>` here; the function itself has no shul-specific logic.
+// Normalizes a sign request body into a {values, missing} pair against a
+// document's configured fields. Accepts either the new multi-field shape
+// (`values: {fieldId: value}`) or the older single-signature shape
+// (`signature_data`, still sent by apply.html's embedded contract-sign step
+// and any other caller that hasn't been updated to the field editor) — a
+// bare `signature_data` is applied to the first 'signature' field so those
+// callers keep working unchanged against an org that never added extra
+// fields. `missing` lists the labels of any required field left unfilled.
+export function resolveSignatureValues(fields, body) {
+  const values = { ...(body?.values || {}) };
+  if (body?.signature_data) {
+    const primary = fields.find(f => f.type === 'signature') || fields[0];
+    if (primary && !values[primary.id]) values[primary.id] = body.signature_data;
+  }
+  const missing = fields.filter(f => f.required !== false && !values[f.id]).map(f => f.label || f.type);
+  return { values, missing };
+}
+
+// Stamps one or more fillable fields onto the unsigned PDF: signature/initial
+// images (or a typed-name fallback), plus plain typed text for 'date'/'text'
+// fields — each at its own admin-configured position, optionally on its own
+// page. `shulId` is really just "output file id" — callers for
+// applicant/store documents pass a composite string like `applicant-<id>`
+// here; the function itself has no shul-specific logic.
 //
-// `box` is the admin-configured signature placement from Settings >
-// Documents ({x, y, width, height}, all fractions 0-1 of the page's actual
-// size, TOP-LEFT origin — matches the drag/resize editor in the admin UI).
-// Falls back to the original hardcoded "~16% up from the bottom-left"
-// placement when no box has been configured yet for this document kind, so
-// existing orgs see no change until they opt in.
-export async function stampSignature({ unsignedPath, shulId, signatureDataUrl, signerName, signedAt, ip, box }) {
+// `fields` comes from getSignatureFields() above: [{id, type, label, x, y,
+// width, height, page}], coordinates as fractions 0-1 of the page, top-left
+// origin — matches the drag/resize editor in the admin UI. `page` is a
+// 0-based page index; omitted/out-of-range means "last page". Falls back to
+// a single hardcoded signature box in the original "~16% up from the
+// bottom-left" placement when no fields have been configured yet for this
+// document kind, so existing orgs see no change until they opt in.
+//
+// `values` maps field id -> the signer's input: a `data:image/png;base64,`
+// string for a drawn signature/initial, or plain text (typed name fallback
+// for signature/initial, or the entered value for date/text fields).
+// `signerName`/`signedAt`/`ip` are recorded once, below the *first*
+// signature-type field, for the human-readable "Signed by / Date / IP" line
+// that every signed document has always shown.
+export async function stampSignatureFields({ unsignedPath, shulId, fields, values, signerName, signedAt, ip }) {
   const bytes = readFileSync(unsignedPath);
   const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
-  const page = pages[pages.length - 1];
-  const { width: pw, height: ph } = page.getSize();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  let boxX, boxBottom, boxW, boxH;
-  if (box && [box.x, box.y, box.width, box.height].every(v => typeof v === 'number' && v >= 0 && v <= 1)) {
-    boxX = box.x * pw;
-    boxW = Math.max(60, box.width * pw);
-    boxH = Math.max(40, box.height * ph);
-    boxBottom = ph - box.y * ph - boxH; // convert top-left-origin fraction to PDF's bottom-left points
-  } else {
-    const margin = Math.max(32, pw * 0.09);
-    boxX = margin;
-    boxW = Math.min(260, pw - margin * 2);
-    boxH = Math.max(100, ph * 0.22);
-    boxBottom = Math.max(60, ph * 0.16);
+  const effectiveFields = fields && fields.length ? fields : [{ id: 'signature', type: 'signature' }];
+  let metaDrawn = false;
+
+  for (const field of effectiveFields) {
+    const pageIndex = (typeof field.page === 'number' && field.page >= 0 && field.page < pages.length) ? field.page : pages.length - 1;
+    const page = pages[pageIndex];
+    const { width: pw, height: ph } = page.getSize();
+
+    let boxX, boxBottom, boxW, boxH;
+    if ([field.x, field.y, field.width, field.height].every(v => typeof v === 'number' && v >= 0 && v <= 1)) {
+      boxX = field.x * pw;
+      boxW = Math.max(60, field.width * pw);
+      boxH = Math.max(40, field.height * ph);
+      boxBottom = ph - field.y * ph - boxH; // convert top-left-origin fraction to PDF's bottom-left points
+    } else {
+      const margin = Math.max(32, pw * 0.09);
+      boxX = margin;
+      boxW = Math.min(260, pw - margin * 2);
+      boxH = Math.max(100, ph * 0.22);
+      boxBottom = Math.max(60, ph * 0.16);
+    }
+    boxBottom = Math.max(10, boxBottom);
+    const boxTop = boxBottom + boxH;
+    const value = values?.[field.id];
+
+    if (field.type === 'date' || field.type === 'text') {
+      const label = field.type === 'date' ? (value || signedAt || '') : (value || '');
+      page.drawText(String(label), { x: boxX, y: boxBottom + boxH * 0.3, size: Math.min(12, boxH * 0.5), font, color: rgb(0.15, 0.11, 0.09) });
+      continue;
+    }
+
+    // signature | initial
+    const isPrimarySignature = field.type === 'signature' && !metaDrawn;
+    const lineY = boxTop - boxH * 0.06;
+    page.drawLine({ start: { x: boxX, y: lineY }, end: { x: boxX + boxW, y: lineY }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
+    const drawAreaH = boxH * (isPrimarySignature ? 0.48 : 0.8);
+    if (value && value.startsWith('data:image/png;base64,')) {
+      const pngBytes = Buffer.from(value.split(',')[1], 'base64');
+      const png = await doc.embedPng(pngBytes);
+      const scale = Math.min(boxW / png.width, drawAreaH / png.height, 1);
+      const dims = png.scale(scale);
+      page.drawImage(png, { x: boxX, y: lineY - 4 - dims.height, width: dims.width, height: dims.height });
+    } else {
+      page.drawText(value || signerName || '', { x: boxX + 4, y: lineY - drawAreaH * 0.65, size: Math.min(20, drawAreaH * 0.55), font: bold, color: rgb(0.15, 0.11, 0.09) });
+    }
+
+    if (isPrimarySignature) {
+      metaDrawn = true;
+      const lineGap = Math.max(9, boxH * 0.13);
+      let textY = boxBottom + boxH * 0.4;
+      page.drawText(`Signed by: ${signerName || ''}`, { x: boxX, y: textY, size: 10, font });
+      textY = Math.max(boxBottom, textY - lineGap);
+      page.drawText(`Date: ${signedAt}`, { x: boxX, y: textY, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
+      textY = Math.max(boxBottom - 4, textY - lineGap * 0.85);
+      page.drawText(`IP: ${ip || 'n/a'}`, { x: boxX, y: textY, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
+    }
   }
-  boxBottom = Math.max(10, boxBottom);
-
-  const boxTop = boxBottom + boxH;
-  const lineY = boxTop - boxH * 0.06;
-  page.drawLine({ start: { x: boxX, y: lineY }, end: { x: boxX + boxW, y: lineY }, thickness: 1, color: rgb(0.3, 0.25, 0.2) });
-
-  const sigAreaH = boxH * 0.48;
-  if (signatureDataUrl && signatureDataUrl.startsWith('data:image/png;base64,')) {
-    const pngBytes = Buffer.from(signatureDataUrl.split(',')[1], 'base64');
-    const png = await doc.embedPng(pngBytes);
-    const scale = Math.min(boxW / png.width, sigAreaH / png.height, 1);
-    const dims = png.scale(scale);
-    page.drawImage(png, { x: boxX, y: lineY - 4 - dims.height, width: dims.width, height: dims.height });
-  } else {
-    page.drawText(signerName || '', { x: boxX + 4, y: lineY - sigAreaH * 0.65, size: Math.min(20, sigAreaH * 0.55), font: bold, color: rgb(0.15, 0.11, 0.09) });
-  }
-
-  const lineGap = Math.max(9, boxH * 0.13);
-  let textY = boxBottom + boxH * 0.4;
-  page.drawText(`Signed by: ${signerName || ''}`, { x: boxX, y: textY, size: 10, font });
-  textY = Math.max(boxBottom, textY - lineGap);
-  page.drawText(`Date: ${signedAt}`, { x: boxX, y: textY, size: 9, font, color: rgb(0.4, 0.35, 0.3) });
-  textY = Math.max(boxBottom - 4, textY - lineGap * 0.85);
-  page.drawText(`IP: ${ip || 'n/a'}`, { x: boxX, y: textY, size: 8, font, color: rgb(0.5, 0.45, 0.4) });
 
   const outBytes = await doc.save();
   const outPath = join(DATA_DIR, 'contracts', `${shulId}-signed.pdf`);

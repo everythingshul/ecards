@@ -29,10 +29,8 @@
     <p class="small-muted">Please review your season participation agreement below, then sign to complete registration.</p>
     <iframe id="contract-frame" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px" src=""></iframe>
     <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
-    <input id="signer_name" placeholder="Type your full legal name">
-    <label>Signature <span class="req">*</span> <span class="small-muted">(draw with mouse or finger)</span></label>
-    <canvas id="sig-pad"></canvas>
-    <div style="margin-top:8px"><button type="button" class="btn btn-outline btn-sm" id="clear-sig">Clear Signature</button></div>
+    <input id="signer_name" placeholder="Type your full legal name" style="margin-bottom:16px">
+    <div id="sign-fields"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign & Submit Application</button>
     </div>
@@ -47,7 +45,8 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-let shulId = null, signToken = null, sigPad = null, currentSchema = [];
+let shulId = null, signToken = null, currentSchema = [];
+let contractFields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
 
 // Every field here — including ones that used to be hardcoded HTML (name,
 // address, Rav/Gabai info) — comes straight from whichever form is
@@ -82,11 +81,12 @@ qs('#apply-form').addEventListener('submit', async (e) => {
     }
     const { sign_token } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
     signToken = sign_token;
+    const { fields } = await api(`/shuls/contract/${signToken}`);
+    if (fields && fields.length) contractFields = fields;
     qs('#apply-form').style.display = 'none';
     qs('#contract-section').style.display = 'block';
     qs('#contract-frame').src = `/api/shuls/contract/${signToken}/pdf-preview`;
-    sigPad = initSignaturePad('sig-pad');
-    qs('#clear-sig').onclick = () => sigPad.clear();
+    renderSignFields(contractFields, qs('#sign-fields'));
   } catch (err) {
     toast(err.message, true);
     btn.disabled = false; btn.textContent = 'Continue to Contract';
@@ -96,10 +96,11 @@ qs('#apply-form').addEventListener('submit', async (e) => {
 qs('#sign-btn').addEventListener('click', async () => {
   const signerName = qs('#signer_name').value.trim();
   if (!signerName) return toast('Please type your full name', true);
-  if (!sigPad || sigPad.isEmpty()) return toast('Please draw your signature', true);
+  const values = collectSignValues(contractFields);
+  if (!values) return;
   const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   try {
-    await api(`/shuls/contract/${signToken}/sign`, { method: 'POST', body: { signer_name: signerName, signature_data: sigPad.toDataUrl() } });
+    await api(`/shuls/contract/${signToken}/sign`, { method: 'POST', body: { signer_name: signerName, values } });
     qs('#contract-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
     qs('#done-message').textContent = 'Thank you! Your contract has been signed. An administrator will review your application and email you a link to set up your account once approved.';
