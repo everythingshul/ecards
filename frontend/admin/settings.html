@@ -58,6 +58,12 @@ renderShell('/admin/settings', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveZipRestriction()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Shul Portal</h3>
+      <div class="checkbox-row"><input type="checkbox" id="shul-card-amount-visible"><label style="margin:0">Shuls can see the card amount on their own applicants</label></div>
+      <p class="small-muted">When off, the "Card $" column and field are hidden from the shul portal (list and applicant detail) but remain fully visible to admins.</p>
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveShulCardAmountVisible()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Homepage Popup</h3>
       <p class="small-muted">Shows once per visit on the public homepage. Turn it off and the homepage looks exactly as if it were never there.</p>
       <div class="checkbox-row"><input type="checkbox" id="popup-enabled"><label style="margin:0">Show popup on homepage</label></div>
@@ -264,6 +270,14 @@ async function loadPopup() {
 }
 window.savePopup = async () => {
   try { await api('/settings', { method: 'PUT', body: { homepage_popup_enabled: qs('#popup-enabled').checked ? '1' : '0', homepage_popup_message: qs('#popup-message').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadShulCardAmountVisible() {
+  const { settings } = await api('/settings');
+  // Defaults to visible (matches pre-toggle behavior) unless explicitly turned off.
+  qs('#shul-card-amount-visible').checked = settings.shul_card_amount_visible !== '0';
+}
+window.saveShulCardAmountVisible = async () => {
+  try { await api('/settings', { method: 'PUT', body: { shul_card_amount_visible: qs('#shul-card-amount-visible').checked ? '1' : '0' } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 window.downloadFullExport = () => downloadAuthed('/system-export', 'kipas-hair-bp-full-export.xlsx');
 
@@ -599,7 +613,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadPopup(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

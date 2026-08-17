@@ -28,6 +28,19 @@ function contactLine(a) {
   return `${esc(method)}${num ? ': ' + esc(num) : ''}${a.email ? '<br>' + esc(a.email) : ''}`;
 }
 
+// Slot usage banner — "used" mirrors the exact rule the server enforces when
+// a new applicant is submitted (routes/applicants.js: every non-rejected
+// applicant counts against the cap, since pending ones could still be approved).
+api(`/shuls/${Auth.user().shul_id}`).then(({ shul }) => {
+  if (!shul.slots_allocated) return;
+  const used = shul.applicants.filter(a => a.approval_status !== 'rejected').length;
+  const full = used >= shul.slots_allocated;
+  qs('#slots-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${full ? 'border-color:var(--danger)' : ''}">
+    <strong>Slots:</strong> ${used} of ${shul.slots_allocated} used (${Math.max(0, shul.slots_allocated - used)} remaining)
+    ${full ? ' <strong style="color:var(--danger)">All allocated slots are used.</strong>' : ''}
+  </div>`;
+}).catch(() => {});
+
 async function load() {
   const params = new URLSearchParams({ search: qs('#f-search').value || '' });
   try {
@@ -104,8 +117,7 @@ async function openApplicant(id) {
       <p><strong>Zip</strong><br>${esc(a.zip||'')}</p>
       <p><strong>Home for Yom Tov</strong><br>${a.home_for_yomtov?'Yes':'No'}</p>
       <p><strong>Comments</strong><br>${esc(a.comments||'')||'<span class="small-muted">None</span>'}</p>
-      <div class="divider"></div>
-      <p><strong>Card Amount</strong><br>${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>
+      ${'card_amount' in a ? `<div class="divider"></div><p><strong>Card Amount</strong><br>${a.card_amount!=null?fmtMoney(a.card_amount):'Not yet set'}</p>` : ''}
       <p class="small-muted">Editable fields are locked once reviewed by the administrator; contact your admin for changes.</p>
     `);
   } catch (err) { toast(err.message, true); }

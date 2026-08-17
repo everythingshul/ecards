@@ -26,8 +26,8 @@ renderShell('/admin/emails', `
       <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto">
-      <table><thead><tr><th>To</th><th>Subject</th><th>Status</th><th>Sent</th><th></th></tr></thead>
-      <tbody id="tbody-sent"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+      <table><thead><tr><th>To</th><th>Account</th><th>Subject</th><th>Status</th><th>Sent</th><th></th></tr></thead>
+      <tbody id="tbody-sent"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody></table>
     </div>
     <div class="paginator" id="pager-sent"></div>
   </div>
@@ -55,11 +55,19 @@ async function loadSent() {
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; loadSent(); }
+// Resolves recipient email -> linked account (shul/store/applicant/staff),
+// computed server-side per row since it's a live lookup, not a stored field.
+const ACCOUNT_TYPE_LABEL = { shul: 'Shul', store: 'Store', applicant: 'Applicant', user: 'Staff' };
+function accountCellHtml(account) {
+  if (!account) return '<span class="small-muted">&mdash;</span>';
+  return `${esc(ACCOUNT_TYPE_LABEL[account.type] || account.type)}: ${esc(account.label)}`;
+}
 function rowHtml(e) {
   const statusCls = e.status === 'sent' ? 'active' : (e.status === 'failed' ? 'rejected' : 'pending');
   const statusLabel = e.status === 'dry_run' ? 'dry run' : e.status;
   return `<tr>
     <td>${esc(e.to_email)}</td>
+    <td>${accountCellHtml(e.account)}</td>
     <td>${esc(e.subject || '')}</td>
     <td>${badge(statusLabel, statusCls)}</td>
     <td>${fmtDateTime(e.created_at)}</td>
@@ -76,6 +84,7 @@ window.viewEmail = async (id) => {
     const { email: e } = await api(`/emails/${id}`);
     const body = `
       <p><strong>To:</strong> ${esc(e.to_email)}</p>
+      <p><strong>Account:</strong> ${accountCellHtml(e.account)}</p>
       <p><strong>Subject:</strong> ${esc(e.subject || '')}</p>
       <p><strong>Status:</strong> ${badge(e.status === 'dry_run' ? 'dry run' : e.status, e.status === 'sent' ? 'active' : (e.status === 'failed' ? 'rejected' : 'pending'))}</p>
       ${e.error_message ? `<p style="color:var(--danger)"><strong>Error:</strong> ${esc(e.error_message)}</p>` : ''}

@@ -76,9 +76,17 @@ function seasonCapacityError(seasonId) {
 // flagged as a possible duplicate — from their side it should just look
 // like a normal pending/approved application. Applies to both the zip-code
 // auto-rejection below and any other rejection reason.
-function maskForShul(records, role) {
+function maskForShul(records, role, orgId) {
   if (role !== 'shul') return records;
-  const mask = (r) => ({ ...r, approval_status: r.approval_status === 'rejected' ? 'pending' : r.approval_status, duplicate_status: null, duplicate_of_applicant_id: null, is_paused: 0 });
+  // Card amount visibility is an admin-configurable toggle (Settings >
+  // Organization > Shul Portal) — defaults to visible, same as before the
+  // toggle existed, unless explicitly turned off.
+  const cardVisible = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_card_amount_visible'`).get(orgId)?.value !== '0';
+  const mask = (r) => {
+    const rec = { ...r, approval_status: r.approval_status === 'rejected' ? 'pending' : r.approval_status, duplicate_status: null, duplicate_of_applicant_id: null, is_paused: 0 };
+    if (!cardVisible) delete rec.card_amount;
+    return rec;
+  };
   return Array.isArray(records) ? records.map(mask) : mask(records);
 }
 
@@ -126,7 +134,7 @@ router.get('/', (req, res) => {
   const total = db.prepare(`SELECT COUNT(*) c FROM applicants a ${where}`).get(...params).c;
   const offset = (Math.max(1, +page) - 1) * +pageSize;
   const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
-  res.json({ applicants: maskForShul(redact(rows, req.permission.hidden_fields), req.user.role), total, page: +page, pageSize: +pageSize });
+  res.json({ applicants: maskForShul(redact(rows, req.permission.hidden_fields), req.user.role, req.user.org_id), total, page: +page, pageSize: +pageSize });
 });
 
 // Full-detail CSV export — every field, no pagination, respects the same
@@ -158,7 +166,7 @@ router.get('/:id', (req, res) => {
   const notes = req.user.role === 'shul' ? [] : db.prepare('SELECT n.*, u.first_name, u.last_name FROM applicant_notes n LEFT JOIN users u ON u.id=n.user_id WHERE applicant_id = ? ORDER BY n.created_at DESC').all(applicant.id);
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
   const flags = req.user.role === 'shul' ? [] : db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
-  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role), notes, cards, flags });
+  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags });
 });
 
 // Admin-only quick-contact: send a one-off SMS/email straight from an

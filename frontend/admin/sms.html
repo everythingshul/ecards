@@ -28,8 +28,8 @@ renderShell('/admin/sms', `
       <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto">
-      <table><thead><tr><th>Phone</th><th>Message</th><th>Status</th><th>Sent</th></tr></thead>
-      <tbody id="tbody-sent"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody></table>
+      <table><thead><tr><th>Phone</th><th>Account</th><th>Message</th><th>Status</th><th>Sent</th></tr></thead>
+      <tbody id="tbody-sent"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
     </div>
     <div class="paginator" id="pager-sent"></div>
   </div>
@@ -39,8 +39,8 @@ renderShell('/admin/sms', `
     <p class="small-muted">If your provider adds webhooks later, this Inbox is also ready to receive them directly at:</p>
     <p><code id="webhook-url" style="user-select:all"></code></p>
     <div class="card" style="padding:0;overflow-x:auto">
-      <table><thead><tr><th>From</th><th>Message</th><th>Received</th></tr></thead>
-      <tbody id="tbody-inbox"><tr><td colspan="3" class="empty-state">Loading…</td></tr></tbody></table>
+      <table><thead><tr><th>From</th><th>Account</th><th>Message</th><th>Received</th></tr></thead>
+      <tbody id="tbody-inbox"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody></table>
     </div>
     <div class="paginator" id="pager-inbox"></div>
   </div>
@@ -121,10 +121,17 @@ async function loadSent() {
   } catch (err) { toast(err.message, true); }
 }
 function changePage(d) { state.page += d; loadSent(); }
+// Resolves phone -> linked account (shul/store/applicant/staff), computed
+// server-side per row since it's a live lookup, not a stored field.
+const ACCOUNT_TYPE_LABEL = { shul: 'Shul', store: 'Store', applicant: 'Applicant', user: 'Staff' };
+function accountCellHtml(account) {
+  if (!account) return '<span class="small-muted">&mdash;</span>';
+  return `${esc(ACCOUNT_TYPE_LABEL[account.type] || account.type)}: ${esc(account.label)}`;
+}
 function sentRowHtml(m) {
   const statusCls = m.status === 'sent' ? 'active' : (m.status === 'failed' ? 'rejected' : 'pending');
   const statusLabel = m.status === 'mock' ? 'mock' : m.status;
-  return `<tr><td>${esc(m.phone)}</td><td>${esc(m.body || '')}</td><td>${badge(statusLabel, statusCls)}</td><td>${fmtDateTime(m.created_at)}</td></tr>`;
+  return `<tr><td>${esc(m.phone)}</td><td>${accountCellHtml(m.account)}</td><td>${esc(m.body || '')}</td><td>${badge(statusLabel, statusCls)}</td><td>${fmtDateTime(m.created_at)}</td></tr>`;
 }
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; loadSent(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; loadSent(); });
@@ -136,7 +143,7 @@ async function loadInbox() {
   const params = new URLSearchParams({ direction: 'inbound', page: inboxState.page, pageSize: inboxState.pageSize });
   try {
     const { messages, total } = await api('/sms?' + params);
-    qs('#tbody-inbox').innerHTML = messages.length ? messages.map(m => `<tr><td>${esc(m.phone)}</td><td>${esc(m.body || '')}</td><td>${fmtDateTime(m.created_at)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty-state">No incoming messages yet.</td></tr>';
+    qs('#tbody-inbox').innerHTML = messages.length ? messages.map(m => `<tr><td>${esc(m.phone)}</td><td>${accountCellHtml(m.account)}</td><td>${esc(m.body || '')}</td><td>${fmtDateTime(m.created_at)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty-state">No incoming messages yet.</td></tr>';
     const pages = Math.max(1, Math.ceil(total / inboxState.pageSize));
     qs('#pager-inbox').innerHTML = `<button class="btn btn-sm btn-outline" ${inboxState.page<=1?'disabled':''} onclick="changeInboxPage(-1)">Prev</button> Page ${inboxState.page} of ${pages} (${total} total) <button class="btn btn-sm btn-outline" ${inboxState.page>=pages?'disabled':''} onclick="changeInboxPage(1)">Next</button>`;
   } catch (err) { toast(err.message, true); }

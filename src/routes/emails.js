@@ -3,6 +3,7 @@ import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { sendMailChecked } from '../services/mail.js';
 import { sendCsv } from '../services/csv.js';
+import { findAccountByEmail } from '../utils/contactLookup.js';
 
 const router = Router();
 router.use(auth, requireAdmin); // internal team feature — staff/org_admin/super_admin only
@@ -18,19 +19,24 @@ router.get('/', (req, res) => {
   const offset = (Math.max(1, +page) - 1) * +pageSize;
   const rows = db.prepare(`SELECT id, to_email, subject, status, error_message, related_entity_type, related_entity_id, sent_by, created_at
     FROM emails_sent ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
-  res.json({ emails: rows, total });
+  const emails = rows.map(r => ({ ...r, account: findAccountByEmail(req.user.org_id, r.to_email) }));
+  res.json({ emails, total });
 });
 
 router.get('/export', (req, res) => {
   const rows = db.prepare(`SELECT to_email, subject, status, error_message, related_entity_type, related_entity_id, created_at
     FROM emails_sent WHERE org_id = ? ORDER BY created_at DESC`).all(req.user.org_id);
-  sendCsv(res, `sent-emails-${Date.now()}.csv`, rows, ['to_email', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
+  const withAccount = rows.map(r => {
+    const account = findAccountByEmail(req.user.org_id, r.to_email);
+    return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
+  });
+  sendCsv(res, `sent-emails-${Date.now()}.csv`, withAccount, ['to_email', 'account_type', 'account_name', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
 });
 
 router.get('/:id', (req, res) => {
   const email = db.prepare('SELECT * FROM emails_sent WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!email) return res.status(404).json({ error: 'Not found' });
-  res.json({ email });
+  res.json({ email: { ...email, account: findAccountByEmail(req.user.org_id, email.to_email) } });
 });
 
 // ============================= Templates =============================
