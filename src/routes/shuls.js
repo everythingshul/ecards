@@ -524,7 +524,14 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const jobId = uuid();
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
-  const season = db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(req.user.org_id);
+  // Defaults to the newest active season same as before; season_id lets an
+  // admin target a specific (e.g. older/already-superseded) season instead —
+  // for a one-time backfill import that shouldn't land in whatever season
+  // happens to be current right now.
+  const season = req.body.season_id
+    ? db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.body.season_id, req.user.org_id)
+    : db.prepare('SELECT * FROM seasons WHERE org_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1').get(req.user.org_id);
+  if (req.body.season_id && !season) return res.status(400).json({ error: 'Season not found' });
   const sendContracts = req.body.send_contracts === 'true' || req.body.send_contracts === true;
 
   // All-or-nothing: every row must have every field the live Shul

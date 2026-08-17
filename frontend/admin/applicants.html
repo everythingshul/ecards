@@ -183,6 +183,7 @@ async function openApplicant(id) {
         <label>Zip</label><input id="e-zip" value="${esc(a.zip||'')}" style="max-width:160px">
         <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-yomtov" ${a.home_for_yomtov?'checked':''}><label style="margin:0">Home for Yom Tov</label></div>
         <label>Card Amount ($)</label><input id="e-card" type="number" step="0.01" value="${a.card_amount ?? ''}">
+        ${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-provider-exempt" ${a.provider_exempt?'checked':''}><label style="margin:0">Never send to disccardpromos (one-time backfill import)</label></div>` : ''}
         <label>Comments</label><textarea id="e-comments" rows="3">${esc(a.comments||'')}</textarea>
         ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from Applicants > Duplicates.</div>` : ''}
       </div>
@@ -227,6 +228,8 @@ window.saveApplicant = async (id) => {
     city: qs('#e-city').value, state: qs('#e-state').value, zip: qs('#e-zip').value, home_for_yomtov: qs('#e-yomtov').checked,
     card_amount: qs('#e-card').value === '' ? null : +qs('#e-card').value, comments: qs('#e-comments').value,
   };
+  const providerExemptEl = qs('#e-provider-exempt');
+  if (providerExemptEl) body.provider_exempt = providerExemptEl.checked;
   // Skip shul_id only if the dropdown hasn't finished loading yet — normally
   // it's always pre-filled with the applicant's current shul, so this just
   // sends whatever's selected (unchanged or newly picked).
@@ -312,13 +315,14 @@ window.createApplicant = async () => {
 function openImportModal() {
   const body = `<p class="small-muted">Upload a CSV or Excel file using the template. The <code>shul_name</code> column must match an existing shul name exactly.</p>
     <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+    <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-provider-exempt"><label style="margin:0">One-time backfill for another season — never send these to disccardpromos (permanent, even if later approved/rejected)</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
   openModal('Mass Upload Applicants', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
 }
 window.runImport = async () => {
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
-  const fd = new FormData(); fd.append('file', file);
+  const fd = new FormData(); fd.append('file', file); fd.append('provider_exempt', qs('#import-provider-exempt').checked);
   try {
     const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +

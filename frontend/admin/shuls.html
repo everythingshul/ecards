@@ -258,9 +258,13 @@ window.createShul = async () => {
   try { await api('/shuls', { method: 'POST', body }); toast('Shul created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 
-function openImportModal() {
+async function openImportModal() {
+  let seasons = [];
+  try { ({ seasons } = await api('/seasons')); } catch { /* season picker just won't show options if this fails */ }
   const body = `<p class="small-muted">Upload a CSV or Excel file using the template. New shuls are matched for duplicates automatically; both accounts are paused if one is found.</p>
     <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+    <label style="margin-top:12px">Season <span class="small-muted">(for a one-time backfill of a past/other season — defaults to the current season)</span></label>
+    <select id="import-season">${seasons.map(s => `<option value="${s.id}" ${s.is_active ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
     <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-contracts"><label style="margin:0">Automatically email contracts to non-duplicate rows</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
   openModal('Mass Upload Shuls', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
@@ -269,6 +273,8 @@ window.runImport = async () => {
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
   const fd = new FormData(); fd.append('file', file); fd.append('send_contracts', qs('#import-contracts').checked);
+  const seasonId = qs('#import-season')?.value;
+  if (seasonId) fd.append('season_id', seasonId);
   try {
     const r = await api('/shuls/import', { method: 'POST', isForm: true, body: fd });
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +

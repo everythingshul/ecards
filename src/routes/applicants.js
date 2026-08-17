@@ -22,7 +22,7 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email',
-  'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount'];
+  'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount','provider_exempt'];
 
 // ============================= PUBLIC ==============================
 // Ezras Habayis applicants self-apply directly (no shul in between), so
@@ -309,10 +309,10 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   // admin-only (spec #5 for card_amount; shul_id because a shul reassigning
   // its own applicants to a different shul would be a data-integrity/scope
   // violation, not a legitimate self-service edit).
-  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount') : [...EDITABLE_FIELDS, 'shul_id'];
+  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount' && f !== 'provider_exempt') : [...EDITABLE_FIELDS, 'shul_id'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
-    const vals = sets.map(f => f === 'home_for_yomtov' ? (b[f] ? 1 : 0) : b[f]);
+    const vals = sets.map(f => (f === 'home_for_yomtov' || f === 'provider_exempt') ? (b[f] ? 1 : 0) : b[f]);
     db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, applicant.id);
     logAudit(req.user.org_id, req.user.id, 'update', 'applicant', applicant.id,
       Object.fromEntries(sets.map(f => [f, applicant[f]])), Object.fromEntries(sets.map((f, i) => [f, vals[i]])), req.ip);
@@ -386,7 +386,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   // same "external side-effect can fail without failing the action" pattern
   // as the approval email right above.
   let providerAccountError = null;
-  if (applicant.shul_id) {
+  if (applicant.shul_id && !applicant.provider_exempt) {
     try {
       const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
       const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
@@ -407,9 +407,11 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   // Organization > Gift Card Loading) via add-funds IS how a card actually
   // gets issued with an amount. Same best-effort pattern as the account
   // write above: skipped if that write failed (nothing to credit yet), and
-  // never blocks/undoes the approval itself.
+  // never blocks/undoes the approval itself. provider_exempt applicants
+  // (one-time backfill import — see POST /import) never reach either block,
+  // permanently, no matter how many times they're approved/rejected.
   let providerFundsError = null;
-  if (applicant.shul_id && !providerAccountError && amount > 0) {
+  if (applicant.shul_id && !applicant.provider_exempt && !providerAccountError && amount > 0) {
     const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
     if (!discountId) {
       providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
@@ -456,7 +458,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
     // Same best-effort account-write + fund-load as the single /:id/approve
     // route — see the comments there. A disccardpromos hiccup on one
     // applicant never stops the rest of the batch.
-    if (applicant.shul_id) {
+    if (applicant.shul_id && !applicant.provider_exempt) {
       let accountOk = false;
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
@@ -514,6 +516,12 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   const jobId = uuid();
   const forcedShul = req.user.role === 'shul' ? db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.user.shul_id) : null;
+  // One-time backfill flag (spec: "import shuls and applicants for another
+  // season, that should never load onto disccard") — every row in this
+  // import is marked provider_exempt, which the approve routes below check
+  // before making any disccardpromos call at all, permanently, regardless
+  // of what happens to the applicant afterward.
+  const providerExempt = req.body.provider_exempt === 'true' || req.body.provider_exempt === true ? 1 : 0;
 
   // All-or-nothing: every row must have every field the live Applicant
   // Application form currently requires, or nothing in the sheet is
@@ -550,11 +558,11 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
       // reports as a normal success so the submitting shul is never told.
       const initialStatus = isZipAllowed(req.user.org_id, r.zip) ? 'pending' : 'rejected';
       db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-          address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source, approval_status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload', ?)`)
+          address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, card_amount, comments, source, approval_status, provider_exempt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?, 'mass_upload', ?, ?)`)
         .run(id, req.user.org_id, shul.id, shul.season_id, generateApplicantExternalId(db), r.first_name, r.last_name, r.marital_status || '', normalizePhone(r.home_phone || ''), normalizePhone(r.husband_cell || ''), normalizePhone(r.wife_cell || ''), r.email || '',
           r.address || '', r.city || '', r.state || '', r.zip || '', r.preferred_contact_method || '', r.preferred_number || '', +r.num_children || 0,
-          /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '', initialStatus);
+          /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '', initialStatus, providerExempt);
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
       recordFormResponse(req.user.org_id, defaultForm, r, { type: 'applicant', id });

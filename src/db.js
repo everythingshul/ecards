@@ -611,6 +611,14 @@ safeAlter(`ALTER TABLE audit_log ADD COLUMN undo_entry_id TEXT`);
 // "already signed" displays; field_values is the complete record.
 safeAlter(`ALTER TABLE contracts ADD COLUMN field_values TEXT`);
 safeAlter(`ALTER TABLE documents ADD COLUMN field_values TEXT`);
+// Marks an applicant as permanently exempt from every disccardpromos write
+// (account create/update, add-funds, lock/unlock on reject/approve) — for a
+// one-time bulk import of a past/other season's real-world data that must
+// never touch the live gift-card provider, regardless of what happens to
+// the record afterward (approved, rejected, re-approved, etc.). Set at
+// import time (routes/applicants.js POST /import) and editable afterward by
+// an admin as a safety net.
+safeAlter(`ALTER TABLE applicants ADD COLUMN provider_exempt INTEGER DEFAULT 0`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
