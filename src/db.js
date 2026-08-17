@@ -410,6 +410,10 @@ CREATE TABLE IF NOT EXISTS forms (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Superseded by per-field required/admin_override living directly on
+-- forms.schema_json (see utils/formValidation.js) — kept only so an
+-- upgrading deploy doesn't lose the table out from under any lingering
+-- reference; nothing in the app writes or reads this anymore.
 CREATE TABLE IF NOT EXISTS form_field_settings (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id),
@@ -420,6 +424,28 @@ CREATE TABLE IF NOT EXISTS form_field_settings (
   is_visible INTEGER DEFAULT 1,
   UNIQUE(org_id, form_type, field_key)
 );
+
+-- Every form submission, whether or not the form is currently the "default"
+-- one feeding the Shuls/Applicants/Stores lists — a raw, exportable record
+-- of what was actually submitted, independent of whatever entity row it may
+-- also have created. form_name/form_type are denormalized (not just a FK)
+-- so a response stays meaningful even if the form itself is later edited or
+-- deleted. entity_type/entity_id are set when the submission also created a
+-- real shul/applicant/store record; null for a form that's just collecting
+-- responses.
+CREATE TABLE IF NOT EXISTS form_responses (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  form_id TEXT REFERENCES forms(id),
+  form_name TEXT,
+  form_type TEXT,
+  data_json TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_form_responses_org ON form_responses(org_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_form_responses_form ON form_responses(form_id);
 
 -- ===================== Imports / duplicate detection / audit =====================
 CREATE TABLE IF NOT EXISTS import_jobs (
@@ -643,12 +669,6 @@ if (orgCount === 0) {
     console.warn('[db] SEED_ADMIN_PASSWORD was not set — a random one-time password was generated above. Set SEED_ADMIN_PASSWORD (and SEED_ADMIN_EMAIL) in your deploy environment so re-seeding is intentional and predictable, not automatic.');
   }
 
-  // Default field requirement settings mirroring the spec.
-  const shulFields = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address'];
-  const applicantFields = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','shul_id','preferred_contact_method','num_children','home_for_yomtov'];
-  const insSetting = db.prepare(`INSERT OR IGNORE INTO form_field_settings (id, org_id, form_type, field_key, is_required, is_visible) VALUES (?,?,?,?,1,1)`);
-  for (const f of shulFields) insSetting.run(randomUUID(), defaultOrgId, 'shul', f);
-  for (const f of applicantFields) insSetting.run(randomUUID(), defaultOrgId, 'applicant', f);
 } else {
   defaultOrgId = db.prepare('SELECT id FROM organizations ORDER BY created_at LIMIT 1').get().id;
 }
@@ -657,29 +677,93 @@ if (orgCount === 0) {
 // Seed a `forms` row for each of the three built-in public application pages
 // (apply.html, apply-store.html, apply-ezras-habayis.html) so they show up
 // in Form Builder like any custom form and can be scheduled (opens_at/
-// closes_at) or deactivated from there. These pages keep their own
-// specialized submit routes (shuls.js POST /apply, etc. — contract signing,
-// Places autocomplete, the locked-shul auto-attach) rather than going
-// through the generic /forms/public/:slug/submit; this row is purely the
-// schedule/active-state record those routes check (see utils/formSchedule.js),
-// not a submission target. INSERT OR IGNORE on a UNIQUE slug makes this safe
-// to run on every boot, including for orgs that existed before this existed.
-const insDefaultForm = db.prepare(`INSERT OR IGNORE INTO forms (id, org_id, name, type, slug, schema_json, is_default, is_current_default) VALUES (?,?,?,?,?,?,1,1)`);
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Shul Registration', 'shul_application', 'shul-application', JSON.stringify([
-  { key: 'name_en', label: 'Shul Name', type: 'text', required: true }, { key: 'address', label: 'Address', type: 'text', required: true },
+// closes_at) or deactivated from there. Unlike before, these pages now
+// render their fields directly from this schema_json (see form-render.js,
+// shared by apply.html/apply-store.html/apply-ezras-habayis.html/form.html)
+// — an admin who edits the current-default form's fields here is editing
+// exactly what the public page shows, the same as any custom form. The
+// dedicated submit routes (shuls.js POST /apply, etc.) still handle the
+// entity-specific side effects (contract generation, the locked-shul
+// auto-attach, duplicate detection) that a generic form submission
+// wouldn't know how to do. INSERT OR IGNORE on a UNIQUE slug makes this
+// safe to run on every boot, including for orgs that existed before this did.
+const SEEDED_SHUL_SCHEMA = [
+  { key: 'name_en', label: 'Shul Name (English)', type: 'text', required: true },
+  { key: 'name_he', label: 'Shul Name (Hebrew)', type: 'text', required: false },
+  { key: 'address', label: 'Shul Address', type: 'text', required: true },
+  { key: 'city', label: 'City', type: 'text', required: true }, { key: 'state', label: 'State', type: 'text', required: true }, { key: 'zip', label: 'Zip', type: 'text', required: true },
   { key: 'ruv_first_name', label: 'Rav First Name', type: 'text', required: true }, { key: 'ruv_last_name', label: 'Rav Last Name', type: 'text', required: true },
-  { key: 'ruv_phone', label: 'Rav Phone', type: 'tel', required: true },
+  { key: 'ruv_phone', label: 'Rav Phone Number', type: 'tel', required: true },
+  { key: 'ruv_address', label: 'Rav Address', type: 'text', required: false }, { key: 'ruv_city', label: 'Rav City', type: 'text', required: false },
+  { key: 'ruv_state', label: 'Rav State', type: 'text', required: false }, { key: 'ruv_zip', label: 'Rav Zip', type: 'text', required: false },
   { key: 'gabai_first_name', label: 'Gabai First Name', type: 'text', required: true }, { key: 'gabai_last_name', label: 'Gabai Last Name', type: 'text', required: true },
-  { key: 'gabai_cell', label: 'Gabai Cell', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
-]));
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Store Application', 'store_application', 'store-application', JSON.stringify([
-  { key: 'name', label: 'Store Name', type: 'text', required: true }, { key: 'owner_name', label: 'Owner Name', type: 'text', required: false },
-  { key: 'owner_email', label: 'Owner Email', type: 'email', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
-]));
-insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'applicant_application', 'ezras-habayis-application', JSON.stringify([
+  { key: 'gabai_cell', label: 'Gabai Cell Number', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
+  { key: 'gabai_address', label: 'Gabai Address', type: 'text', required: false }, { key: 'gabai_city', label: 'Gabai City', type: 'text', required: false },
+  { key: 'gabai_state', label: 'Gabai State', type: 'text', required: false }, { key: 'gabai_zip', label: 'Gabai Zip', type: 'text', required: false },
+];
+const SEEDED_STORE_SCHEMA = [
+  { key: 'name', label: 'Store Name', type: 'text', required: true },
+  { key: 'address', label: 'Address', type: 'text', required: false }, { key: 'city', label: 'City', type: 'text', required: false },
+  { key: 'state', label: 'State', type: 'text', required: false }, { key: 'zip', label: 'Zip', type: 'text', required: false },
+  { key: 'phone', label: 'Store Phone', type: 'tel', required: false },
+  { key: 'manager_name', label: 'Manager Name', type: 'text', required: false }, { key: 'manager_phone', label: 'Manager Phone', type: 'tel', required: false },
+  { key: 'manager_email', label: 'Manager Email', type: 'email', required: false },
+  { key: 'owner_name', label: 'Owner Name', type: 'text', required: false }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
+  { key: 'owner_email', label: 'Owner Email', type: 'email', required: true },
+  { key: 'has_provider_account', label: 'We already have a disccardpromos.com (or equivalent) merchant account', type: 'checkbox', required: false },
+  { key: 'comments', label: 'Comments', type: 'textarea', required: false },
+];
+const SEEDED_APPLICANT_SCHEMA = [
   { key: 'first_name', label: 'First Name', type: 'text', required: true }, { key: 'last_name', label: 'Last Name', type: 'text', required: true },
+  { key: 'marital_status', label: 'Marital Status', type: 'select', required: false, options: [
+    { value: 'single', label: 'Single' }, { value: 'married', label: 'Married' }, { value: 'widowed', label: 'Widowed' }, { value: 'divorced', label: 'Divorced' } ] },
   { key: 'home_phone', label: 'Home Phone', type: 'tel', required: false }, { key: 'email', label: 'Email', type: 'email', required: false },
-]));
+  { key: 'husband_cell', label: 'Husband Cell', type: 'tel', required: false }, { key: 'wife_cell', label: 'Wife Cell', type: 'tel', required: false },
+  { key: 'preferred_contact_method', label: 'Preferred Contact Method', type: 'select', required: false, options: [
+    { value: 'phone', label: 'Phone' }, { value: 'text', label: 'Text' }, { value: 'email', label: 'Email' } ] },
+  { key: 'preferred_number', label: 'Number To Use', type: 'select', required: false, options: [
+    { value: 'home', label: 'Home' }, { value: 'husband', label: 'Husband' }, { value: 'wife', label: 'Wife' } ] },
+  { key: 'address', label: 'Address', type: 'text', required: false }, { key: 'city', label: 'City', type: 'text', required: false },
+  { key: 'state', label: 'State', type: 'text', required: false }, { key: 'zip', label: 'Zip', type: 'text', required: false },
+  { key: 'num_children', label: 'Number of Children', type: 'number', required: false, min: 0 },
+  { key: 'home_for_yomtov', label: 'Home for Yom Tov', type: 'select', required: false, options: [ { value: '1', label: 'Yes' }, { value: '0', label: 'No' } ] },
+  { key: 'comments', label: 'Comments', type: 'textarea', required: false },
+];
+const insDefaultForm = db.prepare(`INSERT OR IGNORE INTO forms (id, org_id, name, type, slug, schema_json, is_default, is_current_default) VALUES (?,?,?,?,?,?,1,1)`);
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Shul Registration', 'shul_application', 'shul-application', JSON.stringify(SEEDED_SHUL_SCHEMA));
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Store Application', 'store_application', 'store-application', JSON.stringify(SEEDED_STORE_SCHEMA));
+insDefaultForm.run(randomUUID(), defaultOrgId, 'Ezras Habayis Application', 'applicant_application', 'ezras-habayis-application', JSON.stringify(SEEDED_APPLICANT_SCHEMA));
+
+// One-time upgrade for deploys that already had these three seeded rows
+// from before this schema became the source of truth for the public pages'
+// actual fields (they used to only carry a handful of fields since nothing
+// read them beyond scheduling) — matched by exact equality against the old,
+// smaller seed content, so a row is only touched here if it was NEVER
+// edited through Form Builder. Anything an admin already customized is left
+// completely alone.
+{
+  const OLD_SHUL_SEED = JSON.stringify([
+    { key: 'name_en', label: 'Shul Name', type: 'text', required: true }, { key: 'address', label: 'Address', type: 'text', required: true },
+    { key: 'ruv_first_name', label: 'Rav First Name', type: 'text', required: true }, { key: 'ruv_last_name', label: 'Rav Last Name', type: 'text', required: true },
+    { key: 'ruv_phone', label: 'Rav Phone', type: 'tel', required: true },
+    { key: 'gabai_first_name', label: 'Gabai First Name', type: 'text', required: true }, { key: 'gabai_last_name', label: 'Gabai Last Name', type: 'text', required: true },
+    { key: 'gabai_cell', label: 'Gabai Cell', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
+  ]);
+  const OLD_STORE_SEED = JSON.stringify([
+    { key: 'name', label: 'Store Name', type: 'text', required: true }, { key: 'owner_name', label: 'Owner Name', type: 'text', required: false },
+    { key: 'owner_email', label: 'Owner Email', type: 'email', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
+  ]);
+  const OLD_APPLICANT_SEED = JSON.stringify([
+    { key: 'first_name', label: 'First Name', type: 'text', required: true }, { key: 'last_name', label: 'Last Name', type: 'text', required: true },
+    { key: 'home_phone', label: 'Home Phone', type: 'tel', required: false }, { key: 'email', label: 'Email', type: 'email', required: false },
+  ]);
+  const upgrade = db.prepare(`UPDATE forms SET schema_json = ?, updated_at = datetime('now') WHERE id = ?`);
+  for (const row of db.prepare(`SELECT id, type, schema_json FROM forms WHERE is_default = 1`).all()) {
+    if (row.type === 'shul_application' && row.schema_json === OLD_SHUL_SEED) upgrade.run(JSON.stringify(SEEDED_SHUL_SCHEMA), row.id);
+    else if (row.type === 'store_application' && row.schema_json === OLD_STORE_SEED) upgrade.run(JSON.stringify(SEEDED_STORE_SCHEMA), row.id);
+    else if (row.type === 'applicant_application' && row.schema_json === OLD_APPLICANT_SEED) upgrade.run(JSON.stringify(SEEDED_APPLICANT_SCHEMA), row.id);
+  }
+}
 
 // One-time-per-boot backfill: any form (built-in seed rows above, or an
 // older custom form created before season_id existed) that still has no

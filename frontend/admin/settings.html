@@ -18,7 +18,6 @@ renderShell('/admin/settings', `
   <div class="tabs">
     <button class="active" data-t="org">Organization</button>
     <button data-t="seasons">Seasons</button>
-    <button data-t="fields">Required Fields</button>
     <button data-t="documents">Documents</button>
     <button data-t="emails">Auto Emails</button>
     <button data-t="content">Site Content</button>
@@ -88,20 +87,6 @@ renderShell('/admin/settings', `
     <div class="card">
       <div class="flex-between"><h3 style="margin:0">Seasons</h3><button class="btn btn-sm btn-primary" onclick="openNewSeason()">+ New Season</button></div>
       <div id="seasons-list" style="margin-top:14px">Loading…</div>
-    </div>
-  </div>
-
-  <div id="panel-fields" style="display:none">
-    <div class="card">
-      <h3>Shul Application Required Fields</h3>
-      <p class="small-muted">Toggle which fields are required on the public shul form, and which fields admins may fill in even when normally locked.</p>
-      <div id="fields-shul"></div>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('shul')">Save</button>
-    </div>
-    <div class="card" style="margin-top:16px">
-      <h3>Applicant Submission Required Fields</h3>
-      <div id="fields-applicant"></div>
-      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveFields('applicant')">Save</button>
     </div>
   </div>
 
@@ -233,7 +218,7 @@ renderShell('/admin/settings', `
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','fields','documents','emails','content','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
+  ['org','seasons','documents','emails','content','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
   if (b.dataset.t === 'emails') loadEmailTemplates();
   if (b.dataset.t === 'content') loadContent();
   if (b.dataset.t === 'backups') loadBackups();
@@ -360,18 +345,36 @@ window.saveHeroSection = async () => {
     toast('Saved');
   } catch (err) { toast(err.message, true); }
 };
+// Two kinds of card: 'form' looks up a real form's own scheduling
+// (open/opens/closes) and renders it automatically on the homepage;
+// 'custom' is just whatever text is typed here — for anything on the
+// schedule that isn't itself a submittable form (a deadline reminder, an
+// event date, a note). Items saved before this distinction existed have no
+// `type` at all and are treated as 'form', same as they always behaved.
 function renderScheduleItems() {
   const options = allFormsForSchedule.map(f => `<option value="${esc(f.slug)}">${esc(f.name)}</option>`).join('');
-  qs('#schedule-items-list').innerHTML = scheduleItemsDraft.length ? scheduleItemsDraft.map((it, i) => `<div style="display:flex;gap:8px;align-items:center;margin:8px 0">
-      <input placeholder="Card label" value="${esc(it.label||'')}" style="flex:1" class="si-label" data-idx="${i}">
-      <select class="si-slug" data-idx="${i}" style="flex:1">${options}</select>
-      <button type="button" class="btn btn-sm btn-outline" onclick="removeScheduleItem(${i})">Remove</button>
-    </div>`).join('') : '<p class="small-muted">No cards — the schedule section will be empty.</p>';
+  qs('#schedule-items-list').innerHTML = scheduleItemsDraft.length ? scheduleItemsDraft.map((it, i) => {
+    const type = it.type || 'form';
+    return `<div class="card" style="margin:8px 0;padding:12px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="si-type" data-idx="${i}" style="max-width:180px"><option value="form" ${type==='form'?'selected':''}>Linked to a form</option><option value="custom" ${type==='custom'?'selected':''}>Custom</option></select>
+        <input placeholder="Card label" value="${esc(it.label||'')}" style="flex:1" class="si-label" data-idx="${i}">
+        <button type="button" class="btn btn-sm btn-outline" onclick="removeScheduleItem(${i})">Remove</button>
+      </div>
+      ${type === 'form'
+        ? `<select class="si-slug" data-idx="${i}" style="margin-top:8px">${options}</select>`
+        : `<input class="si-window" data-idx="${i}" placeholder="Window text (optional) — e.g. Opens September 1st" style="margin-top:8px">
+           <textarea class="si-description" data-idx="${i}" placeholder="Description (optional)" rows="2" style="margin-top:8px"></textarea>`}
+    </div>`;
+  }).join('') : '<p class="small-muted">No cards — the schedule section will be empty.</p>';
+  qsa('.si-type').forEach(el => el.addEventListener('change', () => { scheduleItemsDraft[+el.dataset.idx].type = el.value; renderScheduleItems(); }));
   qsa('.si-label').forEach(el => el.addEventListener('input', () => { scheduleItemsDraft[+el.dataset.idx].label = el.value; }));
   qsa('.si-slug').forEach(el => { el.value = scheduleItemsDraft[+el.dataset.idx].formSlug || ''; el.addEventListener('change', () => { scheduleItemsDraft[+el.dataset.idx].formSlug = el.value; }); });
+  qsa('.si-window').forEach(el => { el.value = scheduleItemsDraft[+el.dataset.idx].window || ''; el.addEventListener('input', () => { scheduleItemsDraft[+el.dataset.idx].window = el.value; }); });
+  qsa('.si-description').forEach(el => { el.value = scheduleItemsDraft[+el.dataset.idx].description || ''; el.addEventListener('input', () => { scheduleItemsDraft[+el.dataset.idx].description = el.value; }); });
 }
 window.addScheduleItem = () => {
-  scheduleItemsDraft.push({ label: '', formSlug: allFormsForSchedule[0]?.slug || '' });
+  scheduleItemsDraft.push({ type: 'form', label: '', formSlug: allFormsForSchedule[0]?.slug || '' });
   renderScheduleItems();
 };
 window.removeScheduleItem = (i) => {
@@ -379,7 +382,7 @@ window.removeScheduleItem = (i) => {
   renderScheduleItems();
 };
 window.saveScheduleSection = async () => {
-  const draft = scheduleItemsDraft.filter(it => it.label && it.formSlug);
+  const draft = scheduleItemsDraft.filter(it => it.label && ((it.type || 'form') === 'form' ? it.formSlug : true));
   try {
     await api('/settings', { method: 'PUT', body: {
       homepage_schedule_heading: qs('#content-schedule-heading').value,
@@ -454,9 +457,6 @@ window.saveOrg = async () => {
   try { await api('/orgs/me', { method: 'PUT', body }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
-const ALL_SHUL_FIELDS = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address'];
-const ALL_APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','shul_id','preferred_contact_method','num_children','home_for_yomtov'];
-
 async function loadSeasons() {
   const { seasons } = await api('/seasons');
   qs('#seasons-list').innerHTML = seasons.map(s => `<div class="card" style="margin-bottom:10px">
@@ -501,30 +501,6 @@ window.openNewSeason = () => {
 window.createSeason = async () => {
   const cap = qs('#s-cap').value;
   try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value, max_accepted_applicants: cap === '' ? null : +cap } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
-};
-
-async function loadFields() {
-  const [{ fields: shulFields }, { fields: appFields }] = await Promise.all([api('/settings/fields/shul'), api('/settings/fields/applicant')]);
-  renderFieldEditor('fields-shul', ALL_SHUL_FIELDS, shulFields);
-  renderFieldEditor('fields-applicant', ALL_APPLICANT_FIELDS, appFields);
-}
-function renderFieldEditor(containerId, allFields, saved) {
-  const map = Object.fromEntries(saved.map(f => [f.field_key, f]));
-  qs('#'+containerId).innerHTML = `<table><thead><tr><th>Field</th><th>Required</th><th>Admin Override</th><th>Visible</th></tr></thead><tbody>
-    ${allFields.map(f => { const s = map[f] || { is_required:0, is_admin_override:0, is_visible:1 };
-      return `<tr data-field="${f}"><td>${f}</td>
-        <td><input type="checkbox" class="fr-required" ${s.is_required?'checked':''}></td>
-        <td><input type="checkbox" class="fr-override" ${s.is_admin_override?'checked':''}></td>
-        <td><input type="checkbox" class="fr-visible" ${s.is_visible?'checked':''}></td></tr>`; }).join('')}
-  </tbody></table>`;
-}
-window.saveFields = async (type) => {
-  const containerId = type === 'shul' ? 'fields-shul' : 'fields-applicant';
-  const fields = qsa(`#${containerId} tr[data-field]`).map(tr => ({
-    field_key: tr.dataset.field, is_required: tr.querySelector('.fr-required').checked,
-    is_admin_override: tr.querySelector('.fr-override').checked, is_visible: tr.querySelector('.fr-visible').checked,
-  }));
-  try { await api(`/settings/fields/${type}`, { method: 'PUT', body: { fields } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
 async function loadContractText() {
@@ -626,7 +602,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

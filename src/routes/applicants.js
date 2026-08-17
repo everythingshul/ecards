@@ -11,9 +11,9 @@ import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '..
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
-import { getRequiredFields, validateRequiredFields } from '../utils/requiredFields.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
-import { getFormWindow, formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
+import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
+import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 
 const router = Router();
@@ -29,32 +29,41 @@ const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone',
 // season's locked system shul (see utils/ezrasHabayis.js).
 router.post('/apply-ezras-habayis', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const windowError = formWindowError(getFormWindow(orgId, 'applicant_application'));
+  const defaultForm = getDefaultForm(orgId, 'applicant_application');
+  const windowError = formWindowError(defaultForm);
   if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
   if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
   if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
   if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
-  if (!b.first_name || !b.last_name) return res.status(400).json({ error: 'First and last name are required' });
+  // The page itself is now a plain render of the live Applicant Application
+  // form's schema (see form-render.js) — every field here, required-ness
+  // included, comes from that schema, same as shuls.js/stores.js POST /apply.
+  const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
+  const errors = validateBySchema(schema, b, { isAdmin: false });
+  if (errors.length) return res.status(400).json({ error: errors[0] });
+  const { known: applicant, extra } = splitKnown(schema, b, APPLICANT_FIELDS);
+  if (!applicant.first_name || !applicant.last_name) return res.status(400).json({ error: 'First and last name are required' });
 
-  const shul = getOrCreateEzrasHabayisShul(orgId, getFormSeasonId(orgId, 'applicant_application'));
+  const shul = getOrCreateEzrasHabayisShul(orgId, defaultForm?.season_id || getFormSeasonId(orgId, 'applicant_application'));
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
 
   const id = uuid();
-  const initialStatus = isZipAllowed(orgId, b.zip) ? 'pending' : 'rejected';
-  // extra_notes: fields the admin added in the Form Builder beyond this
-  // page's fixed set (see frontend/js/app.js's attachExtraFormFields) —
-  // appended rather than overwriting whatever the applicant typed into the
-  // page's own free-text Comments box.
-  const comments = [b.comments, b.extra_notes].filter(Boolean).join(' | ');
+  const initialStatus = isZipAllowed(orgId, applicant.zip) ? 'pending' : 'rejected';
+  // Anything the admin added to the schema beyond the known DB columns
+  // (splitKnown above) lands in comments as free text, same as a generic
+  // custom form. b.extra_notes is a legacy fallback for the old
+  // fixed-fields-plus-bolt-ons page shape.
+  const comments = [applicant.comments, extra, b.extra_notes].filter(Boolean).join(' | ');
   db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
       address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'public_form', ?)`)
-    .run(id, orgId, shul.id, shul.season_id, generateApplicantExternalId(db), b.first_name, b.last_name, b.marital_status || '', b.home_phone || '', b.husband_cell || '', b.wife_cell || '', b.email || '',
-      b.address || '', b.city || '', b.state || '', b.zip || '', b.preferred_contact_method || '', b.preferred_number || '', +b.num_children || 0, b.home_for_yomtov ? 1 : 0, comments, initialStatus);
-  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
-  detectAndFlag(orgId, 'applicant', applicant);
+    .run(id, orgId, shul.id, shul.season_id, generateApplicantExternalId(db), applicant.first_name, applicant.last_name, applicant.marital_status || '', applicant.home_phone || '', applicant.husband_cell || '', applicant.wife_cell || '', applicant.email || '',
+      applicant.address || '', applicant.city || '', applicant.state || '', applicant.zip || '', applicant.preferred_contact_method || '', applicant.preferred_number || '', +applicant.num_children || 0, applicant.home_for_yomtov ? 1 : 0, comments, initialStatus);
+  const created = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
+  detectAndFlag(orgId, 'applicant', created);
+  recordFormResponse(orgId, defaultForm, b, { type: 'applicant', id });
   res.status(201).json({ ok: true, message: 'Application received. You will be contacted if any additional information is needed.' });
 });
 
@@ -240,14 +249,19 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   if (shul.slots_allocated && used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
-  // Admins filling out the form directly can bypass the org's configured
-  // required fields for this one submission (e.g. an incomplete record that
-  // needs to exist now and get filled in later) — shul-portal submitters
-  // can't set this, only admins.
-  const bypassRequired = req.user.role !== 'shul' && !!b.bypass_required;
+  // Same field set/required-ness the live Applicant Application form asks
+  // for (Form Builder), so a shul portal add, an admin add, and the public
+  // form are always asking the same questions. Admins get two levels of
+  // leniency: bypass_required skips every required field at once for this
+  // one submission (e.g. an incomplete record that needs to exist now and
+  // get filled in later); short of that, any individual field marked
+  // "Admin can override" in the builder is skipped automatically. A
+  // shul-portal submitter gets neither — only an admin.
+  const isAdminSubmitter = req.user.role !== 'shul';
+  const bypassRequired = isAdminSubmitter && !!b.bypass_required;
   if (!bypassRequired) {
-    const requiredErrors = validateRequiredFields([b], getRequiredFields(req.user.org_id, 'applicant').filter(f => f !== 'shul_id'));
-    if (requiredErrors.length) return res.status(400).json({ error: requiredErrors[0].error });
+    const errors = validateBySchema(getDefaultFormSchema(req.user.org_id, 'applicant_application'), b, { isAdmin: isAdminSubmitter });
+    if (errors.length) return res.status(400).json({ error: errors[0] });
   }
 
   const id = uuid();
@@ -264,6 +278,7 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
   const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
   logAudit(req.user.org_id, req.user.id, 'create', 'applicant', id, null, applicant, req.ip);
+  recordFormResponse(req.user.org_id, getDefaultForm(req.user.org_id, 'applicant_application'), b, { type: 'applicant', id });
   res.status(201).json({ applicant: maskForShul(applicant, req.user.role), duplicate: req.user.role === 'shul' ? false : !!flag });
 });
 
@@ -426,10 +441,17 @@ router.post('/:id/notes', (req, res) => {
 
 // CSV/XLSX bulk import (spec #1 "via XCLS and CSV files", #3 mass upload, #5 shul self-upload).
 // If the requester is a shul-portal user, shul_name is ignored — always their own shul.
+// Columns mirror whatever the live Applicant Application form currently
+// asks for (same schema the public/Ezras Habayis page and admin/shul-portal
+// add-applicant form all validate against), falling back to the static
+// list only if no default form is configured yet.
 router.get('/import/template', (req, res) => {
+  const schema = getDefaultFormSchema(req.user.org_id, 'applicant_application');
+  const known = schema.filter(f => APPLICANT_FIELDS.includes(f.key)).map(f => f.key);
+  const columns = known.length ? [...known.filter(k => k !== 'shul_id'), 'shul_name', 'card_amount'] : APPLICANT_IMPORT_COLUMNS;
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="applicant_import_template.csv"');
-  res.send(buildCsvTemplate(APPLICANT_IMPORT_COLUMNS));
+  res.send(buildCsvTemplate(columns));
 });
 
 router.post('/import', requirePermission('applicants', 'can_edit'), upload.single('file'), (req, res) => {
@@ -438,15 +460,19 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   const jobId = uuid();
   const forcedShul = req.user.role === 'shul' ? db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.user.shul_id) : null;
 
-  // All-or-nothing: every row must have every currently-required field
-  // (Settings > Required Fields) filled in, or nothing in the sheet is
-  // imported — no partial imports. The single-applicant form's "shul_id"
-  // requirement doesn't apply to sheet rows as-is: a shul-portal upload has
-  // its shul forced (nothing to check), and an admin upload identifies the
-  // shul by name (shul_name column), not id — so remap/drop accordingly.
-  let requiredFields = getRequiredFields(req.user.org_id, 'applicant').filter(f => f !== 'shul_id');
-  if (!forcedShul) requiredFields = [...requiredFields, 'shul_name'];
-  const requiredErrors = validateRequiredFields(rows, requiredFields);
+  // All-or-nothing: every row must have every field the live Applicant
+  // Application form currently requires, or nothing in the sheet is
+  // imported — no partial imports. An admin uploading a sheet gets the
+  // per-field "Admin can override" leniency the public form/shul-portal
+  // upload never does. shul_name isn't a form field (shul assignment isn't
+  // part of the intake questions) — checked separately, and only for an
+  // admin upload; a shul-portal upload's shul is always forced to their own.
+  const isAdminSubmitter = req.user.role !== 'shul';
+  const defaultForm = getDefaultForm(req.user.org_id, 'applicant_application');
+  const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
+  const schemaErrors = validateRowsBySchema(schema, rows, { isAdmin: isAdminSubmitter, skipKeys: ['shul_id'] });
+  const shulNameErrors = forcedShul ? [] : rows.map((r, i) => (!r.shul_name ? { row: i + 2, error: 'Missing required field: shul_name' } : null)).filter(Boolean);
+  const requiredErrors = [...schemaErrors, ...shulNameErrors].sort((a, b) => a.row - b.row);
   if (requiredErrors.length) {
     return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
   }
@@ -476,6 +502,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
           /^(y|yes|true|1)$/i.test(String(r.home_for_yomtov || '')) ? 1 : 0, r.card_amount ? +r.card_amount : null, r.comments || '', initialStatus);
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
+      recordFormResponse(req.user.org_id, defaultForm, r, { type: 'applicant', id });
       if (flag && req.user.role !== 'shul') dupes++; else success++;
     } catch (e) {
       errors.push({ row: i + 2, error: e.message });

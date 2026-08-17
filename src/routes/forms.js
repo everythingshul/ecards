@@ -9,11 +9,23 @@ import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { isZipAllowed } from './applicants.js';
 import { formWindowError, REQUIRED_MINIMUM_FIELDS } from '../utils/formSchedule.js';
+import { validateBySchema, recordFormResponse, splitKnown, APPLICANT_FIELDS, SHUL_FIELDS, STORE_FIELDS } from '../utils/formValidation.js';
+import { sendCsv } from '../services/csv.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 const FORMS_DIR = join(DATA_DIR, 'forms');
 
 const router = Router();
+
+// Strips admin-only config off a schema before it ever reaches a public
+// response — most importantly expectedAnswer (Form Builder: "Expected
+// Answer"), which must never be visible to whoever is filling the form out
+// (the whole point of the feature is that they can't see if they got it
+// "right"). admin_override is stripped too since it's meaningless outside
+// an admin submission context.
+function sanitizeSchemaForPublic(schema) {
+  return schema.map(({ expectedAnswer, admin_override, ...rest }) => rest);
+}
 
 // Public: fetch a form definition by slug to render (spec #12: form builder with
 // ability to set it public, groups, or individuals). Returns the form even when
@@ -24,7 +36,7 @@ const router = Router();
 router.get('/public/:slug', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE slug = ? AND is_active = 1').get(req.params.slug);
   if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
-  res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
+  res.json({ form: { ...form, schema_json: sanitizeSchemaForPublic(JSON.parse(form.schema_json)), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
 
 // Public: same as above but for the three built-in application pages
@@ -36,24 +48,8 @@ router.get('/public/:slug', (req, res) => {
 router.get('/public/default/:type', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE type = ? AND is_current_default = 1 AND is_active = 1').get(req.params.type);
   if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
-  res.json({ form: { ...form, schema_json: JSON.parse(form.schema_json), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
+  res.json({ form: { ...form, schema_json: sanitizeSchemaForPublic(JSON.parse(form.schema_json)), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
-
-// Splits submitted fields into whatever matches a known column for this
-// entity type vs. everything else (appended to comments so no data is ever
-// lost just because the builder let someone add an arbitrary field).
-function splitKnown(schema, body, known) {
-  const known_ = {}; const extra = [];
-  for (const f of schema) {
-    if (known.includes(f.key)) known_[f.key] = body[f.key];
-    else if (body[f.key]) extra.push(`${f.label || f.key}: ${body[f.key]}`);
-  }
-  return { known: known_, extra: extra.join(' | ') };
-}
-
-const APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','city','state','zip','shul_id','preferred_contact_method','preferred_number','num_children','home_for_yomtov'];
-const SHUL_FIELDS = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','gabai_first_name','gabai_last_name','gabai_cell','gabai_email'];
-const STORE_FIELDS = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email'];
 
 // Public: generic submission handler for custom forms built in the form
 // builder — one of applicant_application, shul_application, or
@@ -68,7 +64,8 @@ router.post('/public/:slug/submit', (req, res) => {
   if (windowError) return res.status(423).json({ error: windowError });
   const schema = JSON.parse(form.schema_json);
   const b = req.body || {};
-  for (const f of schema) if (f.required && !b[f.key]) return res.status(400).json({ error: `Missing required field: ${f.label || f.key}` });
+  const errors = validateBySchema(schema, b, { isAdmin: false });
+  if (errors.length) return res.status(400).json({ error: errors[0] });
 
   if (form.type === 'applicant_application') {
     const { known: applicant, extra } = splitKnown(schema, b, APPLICANT_FIELDS);
@@ -78,6 +75,7 @@ router.post('/public/:slug/submit', (req, res) => {
     if (shul.is_paused) return res.status(423).json({ error: 'This shul is currently paused' });
     const id = uuid();
     const initialStatus = isZipAllowed(form.org_id, applicant.zip) ? 'pending' : 'rejected';
+    const comments = [applicant.comments, extra].filter(Boolean).join(' | ');
     db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
         address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'public_form', ?)`)
@@ -85,7 +83,8 @@ router.post('/public/:slug/submit', (req, res) => {
         applicant.home_phone || '', applicant.husband_cell || '', applicant.wife_cell || '', applicant.email || '',
         applicant.address || '', applicant.city || '', applicant.state || '', applicant.zip || '',
         applicant.preferred_contact_method || '', applicant.preferred_number || '', +applicant.num_children || 0,
-        applicant.home_for_yomtov ? 1 : 0, extra, initialStatus);
+        applicant.home_for_yomtov ? 1 : 0, comments, initialStatus);
+    recordFormResponse(form.org_id, form, b, { type: 'applicant', id });
     return res.status(201).json({ ok: true, id });
   }
 
@@ -106,6 +105,7 @@ router.post('/public/:slug/submit', (req, res) => {
     const created = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
     if (extra) db.prepare('INSERT INTO shul_notes (id, shul_id, note) VALUES (?,?,?)').run(uuid(), id, extra);
     const flag = detectAndFlag(form.org_id, 'shul', created);
+    recordFormResponse(form.org_id, form, b, { type: 'shul', id });
     return res.status(201).json({ ok: true, id, duplicate: !!flag });
   }
 
@@ -113,11 +113,13 @@ router.post('/public/:slug/submit', (req, res) => {
     const { known: store, extra } = splitKnown(schema, b, STORE_FIELDS);
     if (!store.name || !store.owner_email) return res.status(400).json({ error: 'Form must include name and owner_email fields' });
     const id = uuid();
+    const comments = [store.comments, extra].filter(Boolean).join(' | ');
     db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
-        owner_name, owner_phone, owner_email, comments, setup_status, source)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending','application')`)
+        owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
       .run(id, form.org_id, store.name, store.address || '', store.city || '', store.state || '', store.zip || '', normalizePhone(store.phone || ''),
-        store.manager_name || '', normalizePhone(store.manager_phone || ''), store.manager_email || '', store.owner_name || '', normalizePhone(store.owner_phone || ''), store.owner_email, extra);
+        store.manager_name || '', normalizePhone(store.manager_phone || ''), store.manager_email || '', store.owner_name || '', normalizePhone(store.owner_phone || ''), store.owner_email, comments, store.has_provider_account ? 1 : 0);
+    recordFormResponse(form.org_id, form, b, { type: 'store', id });
     return res.status(201).json({ ok: true, id });
   }
 
@@ -174,6 +176,13 @@ router.put('/:id', (req, res) => {
     const conflict = db.prepare('SELECT 1 FROM forms WHERE slug = ? AND id != ?').get(slug, form.id);
     if (conflict) return res.status(409).json({ error: 'That slug is already in use' });
   }
+  // Every section (Shuls/Applicants/Stores) must always have a live default
+  // form — deactivating the one currently holding that spot would leave the
+  // fixed public page (and admin add/bulk-upload, which read the same
+  // schema) with nothing to render. Set a different form as default first.
+  if (is_active === false && form.is_current_default) {
+    return res.status(400).json({ error: 'This form is currently live for its section — set another form as default before deactivating it.' });
+  }
   // opens_at/closes_at: undefined leaves it as-is; explicit null/'' clears
   // the date (open-ended) — same pattern as seasons.js's max_accepted_applicants.
   const opensAt = opens_at === undefined ? undefined : (opens_at || null);
@@ -215,8 +224,36 @@ router.put('/:id/set-default', (req, res) => {
 router.delete('/:id', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
+  if (form.is_current_default) return res.status(400).json({ error: 'This form is currently live for its section — set another form as default before removing it.' });
   db.prepare('UPDATE forms SET is_active = 0 WHERE id = ?').run(form.id);
   res.json({ ok: true });
+});
+
+// Every submission to this form, raw — including ones that also created a
+// real shul/applicant/store row (see recordFormResponse() calls above and
+// in shuls.js/stores.js/applicants.js's dedicated /apply routes). This is
+// the exportable "response table" independent of whatever entity a
+// submission may or may not have created.
+router.get('/:id/responses', (req, res) => {
+  const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!form) return res.status(404).json({ error: 'Not found' });
+  const rows = db.prepare('SELECT * FROM form_responses WHERE form_id = ? ORDER BY created_at DESC').all(form.id);
+  res.json({ responses: rows.map(r => ({ ...r, data: JSON.parse(r.data_json || '{}') })) });
+});
+
+router.get('/:id/responses/export', (req, res) => {
+  const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!form) return res.status(404).json({ error: 'Not found' });
+  const rows = db.prepare('SELECT * FROM form_responses WHERE form_id = ? ORDER BY created_at DESC').all(form.id);
+  const schema = JSON.parse(form.schema_json || '[]').filter(f => !['header', 'image'].includes(f.type));
+  const columns = ['created_at', 'entity_type', 'entity_id', ...schema.map(f => f.key)];
+  const flat = rows.map(r => {
+    const data = JSON.parse(r.data_json || '{}');
+    const out = { created_at: r.created_at, entity_type: r.entity_type || '', entity_id: r.entity_id || '' };
+    for (const f of schema) out[f.key] = data[f.key] ?? '';
+    return out;
+  });
+  sendCsv(res, `${form.slug || 'form'}-responses-${Date.now()}.csv`, flat, columns);
 });
 
 export default router;

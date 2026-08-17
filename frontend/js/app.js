@@ -166,6 +166,22 @@ function renderShell(activeHref, contentHtml) {
       layoutNavOverflow();
     }).catch(() => {});
   }
+  if (['staff', 'org_admin', 'super_admin'].includes(role)) {
+    api('/dashboard/pending-counts').then(({ counts }) => {
+      const dot = () => '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-left:5px;vertical-align:middle"></span>';
+      const pages = { shuls: 'shuls', applicants: 'applicants', stores: 'stores' };
+      let changed = false;
+      for (const [key, path] of Object.entries(pages)) {
+        if (!counts[key]) continue;
+        const link = document.querySelector(`nav a[data-href$="/${path}"]`);
+        if (!link) continue;
+        link.title = `${link.title} — ${counts[key]} pending`;
+        link.querySelector('.nav-label').insertAdjacentHTML('beforeend', dot());
+        changed = true;
+      }
+      if (changed) layoutNavOverflow();
+    }).catch(() => {});
+  }
 }
 
 // On the wide (non-hamburger) header layout, the nav row hides links that
@@ -902,87 +918,63 @@ async function attachColumnCustomizer(buttonId, storageKey, columns, defaultOrde
 // forms.is_current_default) — looked up via /forms/public/default/:type
 // rather than by slug, since these pages are fixed at fixed URLs and the
 // slug is just an editable label for whichever form currently serves them,
-// not a route. Returns true if the form is open for submissions; on false,
-// it has already hidden `formSelector` and rendered a "not open yet"/
-// "closed" card in its place, so callers just need to bail out of their own
-// init logic. Missing/unreachable config (network hiccup, pre-migration
-// env) fails open — never block a real applicant because this one check
-// couldn't be made.
-async function guardFormWindow(type, formSelector) {
-  try {
-    const { windowError } = await api(`/forms/public/default/${type}`);
-    if (!windowError) return true;
-    const form = qs(formSelector);
-    if (form) {
-      const notice = document.createElement('div');
-      notice.className = 'card';
-      notice.style.textAlign = 'center';
-      notice.innerHTML = `<h3>Not accepting submissions</h3><p class="small-muted">${esc(windowError)}</p>`;
-      form.replaceWith(notice);
-    }
-    return false;
-  } catch { return true; }
-}
-
-// Renders one custom form-builder field for the fixed, hand-built public
-// pages (apply.html, apply-store.html, apply-ezras-habayis.html). These
-// pages have their own hardcoded field set, so this is only ever called
-// with fields the admin added *beyond* that set in the Form Builder — a
-// checkbox is the main use case ("I agree to the Terms and Conditions…"),
-// but any of the builder's other field types work too. Mirrors form.html's
-// fieldHtml() checkbox layout so the two renderers look consistent.
-function extraFieldHtml(f) {
-  // 'header'/'image' are presentational blocks, not real inputs — nothing to
-  // submit, so collectExtraFieldsText() below just skips them (no
-  // data-extra-key element to find).
+// Renders one form-builder field as public-facing HTML — shared by
+// form.html (custom slug-based forms) and the three fixed public pages
+// (apply.html/apply-store.html/apply-ezras-habayis.html), which render
+// their fields the same way now (fetched from GET /forms/public/default/
+// :type) instead of a hardcoded field set with extras bolted on separately
+// — every field an admin sees in the Form Builder for the live default form
+// is exactly what shows up here. Every real input also gets id=key
+// alongside name=key so page-specific wiring (Google Places autocomplete on
+// address/city/state/zip, for one) can still target known field keys
+// directly even though the fields themselves are fully dynamic now.
+// expectedAnswer (Form Builder: "Expected Answer") never reaches here in
+// the first place — routes/forms.js strips it before any public response —
+// so there's nothing to accidentally leak by rendering fields verbatim.
+// shulOptions is only used for the special shul_id field on the Applicant
+// Application form; pass [] anywhere else.
+function fieldHtml(f, shulOptions = []) {
   if (f.type === 'header') return `<h3 style="margin-top:22px">${esc(f.label || '')}</h3>`;
   if (f.type === 'image') return f.url ? `<img src="${esc(f.url)}" alt="${esc(f.label||'')}" style="max-width:100%;height:auto;margin:14px 0;border-radius:8px">` : '';
   const req = f.required ? 'required' : '';
-  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" data-extra-key="${esc(f.key)}" id="extra-${esc(f.key)}" ${req}><label style="margin:0" for="extra-${esc(f.key)}">${esc(f.label || f.key)}</label></div>`;
   const label = `<label>${esc(f.label || f.key)} ${f.required ? '<span class="req">*</span>' : ''}</label>`;
-  if (f.type === 'textarea') return `${label}<textarea data-extra-key="${esc(f.key)}" ${req}></textarea>`;
-  if (f.type === 'select') return `${label}<select data-extra-key="${esc(f.key)}" ${req}><option value=""></option>${(f.options || []).map(o => `<option>${esc(o)}</option>`).join('')}</select>`;
-  const inputType = f.type === 'number' ? 'number' : (f.type === 'email' ? 'email' : (f.type === 'tel' ? 'tel' : 'text'));
-  return `${label}<input type="${inputType}" data-extra-key="${esc(f.key)}" ${req}>`;
+  if (f.key === 'shul_id') return `${label}<select name="shul_id" id="shul_id" ${req}><option value="">Select your shul…</option>${shulOptions.map(s => `<option value="${s.id}">${esc(s.name_en)}</option>`).join('')}</select>`;
+  if (f.type === 'select') return `${label}<select name="${esc(f.key)}" id="${esc(f.key)}" ${req}><option value=""></option>${(f.options||[]).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select>`;
+  if (f.type === 'textarea') return `${label}<textarea name="${esc(f.key)}" id="${esc(f.key)}" ${req}></textarea>`;
+  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" name="${esc(f.key)}" id="${esc(f.key)}"><label style="margin:0" for="${esc(f.key)}">${esc(f.label||f.key)}</label></div>`;
+  if (f.type === 'number') {
+    const min = f.min !== undefined && f.min !== null && f.min !== '' ? ` min="${esc(f.min)}"` : '';
+    const max = f.max !== undefined && f.max !== null && f.max !== '' ? ` max="${esc(f.max)}"` : '';
+    return `${label}<input type="number" name="${esc(f.key)}" id="${esc(f.key)}" ${req}${min}${max}>`;
+  }
+  return `${label}<input type="${f.type==='email'?'email':(f.type==='tel'?'tel':'text')}" name="${esc(f.key)}" id="${esc(f.key)}" ${req}>`;
 }
 
 // Fetches whichever form is currently the live default for this section
 // (type = 'shul_application'/'store_application'/'applicant_application' —
-// see forms.is_current_default), filters out whatever the hardcoded page
-// already collects natively (knownKeys), and injects the rest — real fields
-// plus header/image blocks — into containerId, so anything added in the
-// Form Builder beyond the fixed set actually shows up on the real public
-// page instead of being silently ignored. Returns the extra-field schema
-// (possibly empty) for the submit handler to read values back out of via
-// collectExtraFieldsText(). Fails open (returns []) on any error — a
-// form-builder hiccup should never block a real applicant from submitting
-// the base form.
-async function attachExtraFormFields(type, containerId, knownKeys) {
+// see forms.is_current_default) and reports whether it's actually open for
+// submissions right now. Callers pass formSelector so, on a closed/not-yet-
+// open window, this can swap the real form out for a "not accepting
+// submissions" notice in place — same UX the old guardFormWindow gave, just
+// now sharing the one fetch every page already needs to render its fields.
+// Fails open on any error — a form-builder hiccup should never block a real
+// applicant from seeing/submitting the form.
+async function loadDefaultForm(type, formSelector) {
   try {
-    const { form } = await api(`/forms/public/default/${type}`);
-    const extra = (form.schema_json || []).filter(f => (f.type === 'header' || f.type === 'image') || (f.key && !knownKeys.includes(f.key)));
-    const container = qs('#' + containerId);
-    if (container) container.innerHTML = extra.map(extraFieldHtml).join('');
-    return extra;
-  } catch { return []; }
-}
-
-// Reads back whatever the admin filled into attachExtraFormFields()'s
-// rendered inputs and formats them as "Label: value | Label2: value2" —
-// same shape the form-builder's own generic submit handler (splitKnown() in
-// routes/forms.js) already produces, so extra data lands the same way
-// (appended to comments/notes) whether it came through the generic form
-// renderer or one of these hand-built pages. Unchecked checkboxes and blank
-// fields are omitted rather than recorded as empty.
-function collectExtraFieldsText(extraSchema, formEl) {
-  const parts = [];
-  for (const f of extraSchema) {
-    const el = formEl.querySelector(`[data-extra-key="${f.key}"]`);
-    if (!el) continue;
-    const value = el.type === 'checkbox' ? (el.checked ? 'Yes' : '') : el.value;
-    if (value) parts.push(`${f.label || f.key}: ${value}`);
-  }
-  return parts.join(' | ');
+    const { form, windowError } = await api(`/forms/public/default/${type}`);
+    if (windowError) {
+      const el = qs(formSelector);
+      if (el) {
+        const notice = document.createElement('div');
+        notice.className = 'card';
+        notice.style.textAlign = 'center';
+        notice.innerHTML = `<h3>Not accepting submissions</h3><p class="small-muted">${esc(windowError)}</p>`;
+        el.replaceWith(notice);
+      }
+      return null;
+    }
+    return form;
+  } catch { return null; }
 }
 
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.

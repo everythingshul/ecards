@@ -17,70 +17,7 @@
   </div>
 
   <form id="apply-form" class="card">
-    <div class="section-title">Applicant Information</div>
-    <div class="grid-2">
-      <div><label>First Name <span class="req">*</span></label><input name="first_name" required></div>
-      <div><label>Last Name <span class="req">*</span></label><input name="last_name" required></div>
-    </div>
-    <label>Marital Status</label>
-    <select name="marital_status">
-      <option value=""></option>
-      <option value="single">Single</option>
-      <option value="married">Married</option>
-      <option value="widowed">Widowed</option>
-      <option value="divorced">Divorced</option>
-    </select>
-
-    <div class="section-title">Contact Information</div>
-    <div class="grid-2">
-      <div><label>Home Phone</label><input name="home_phone"></div>
-      <div><label>Email</label><input name="email" type="email"></div>
-    </div>
-    <div class="grid-2">
-      <div><label>Husband Cell</label><input name="husband_cell"></div>
-      <div><label>Wife Cell</label><input name="wife_cell"></div>
-    </div>
-    <div class="grid-2">
-      <div><label>Preferred Contact Method</label>
-        <select name="preferred_contact_method">
-          <option value=""></option>
-          <option value="phone">Phone</option>
-          <option value="text">Text</option>
-          <option value="email">Email</option>
-        </select>
-      </div>
-      <div><label>Number To Use</label>
-        <select name="preferred_number">
-          <option value=""></option>
-          <option value="home">Home</option>
-          <option value="husband">Husband</option>
-          <option value="wife">Wife</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="section-title">Address</div>
-    <label>Address</label><input id="app_address" name="address" autocomplete="off">
-    <div class="grid-2">
-      <div><label>City</label><input id="app_city" name="city"></div>
-      <div><label>State</label><input id="app_state" name="state"></div>
-    </div>
-    <label>Zip</label><input id="app_zip" name="zip" style="max-width:160px">
-
-    <div class="section-title">Household</div>
-    <div class="grid-2">
-      <div><label>Number of Children</label><input name="num_children" type="number" min="0" value="0"></div>
-      <div><label>Home for Yom Tov</label>
-        <select name="home_for_yomtov">
-          <option value="1">Yes</option>
-          <option value="0">No</option>
-        </select>
-      </div>
-    </div>
-    <label>Comments</label><textarea name="comments" rows="3"></textarea>
-
-    <div id="extra-fields"></div>
-
+    <div id="dyn-fields"><p class="small-muted">Loading…</p></div>
     <div style="margin-top:26px;text-align:right">
       <button type="submit" class="btn btn-primary" id="submit-btn">Submit Application</button>
     </div>
@@ -95,22 +32,25 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-guardFormWindow('applicant_application', '#apply-form');
-
-const APPLICANT_KNOWN_KEYS = ['first_name','last_name','marital_status','home_phone','email','husband_cell','wife_cell',
-  'preferred_contact_method','preferred_number','address','city','state','zip','num_children','home_for_yomtov','comments'];
-const extraFieldsPromise = attachExtraFormFields('applicant_application', 'extra-fields', APPLICANT_KNOWN_KEYS);
-
-loadGoogleMaps().then(() => {
-  attachPlacesAutocomplete('app_address', { address:'app_address', city:'app_city', state:'app_state', zip:'app_zip' });
-});
+// Every field here comes straight from whichever form is currently live for
+// "Ezras Habayis Application" (Form Builder, type applicant_application) —
+// required-ness, labels, and even whether a field exists at all are 100%
+// admin-controlled there now. No shul_id field appears since Ezras Habayis
+// applicants auto-attach to the season's locked system shul server-side.
+(async () => {
+  const form = await loadDefaultForm('applicant_application', '#apply-form');
+  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  qs('#dyn-fields').innerHTML = form.schema_json.filter(f => f.key !== 'shul_id').map(f => fieldHtml(f)).join('');
+  loadGoogleMaps().then(() => {
+    attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip' });
+  });
+})();
 
 qs('#apply-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
-  const fd = new FormData(e.target);
-  const data = Object.fromEntries(fd.entries());
-  data.extra_notes = collectExtraFieldsText(await extraFieldsPromise, e.target);
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  qsa('input[type=checkbox]', e.target).forEach(c => data[c.name] = c.checked);
   try {
     await api('/applicants/apply-ezras-habayis', { method: 'POST', body: data });
     qs('#apply-form').style.display = 'none';

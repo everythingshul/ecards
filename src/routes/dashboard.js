@@ -10,6 +10,27 @@ const router = Router();
 // all (no portal page calls it — each has its own scoped dashboard).
 router.use(auth, requireAdmin);
 
+// Lightweight pending-counts for the nav notification dots — called on
+// every admin page load (see renderShell() in app.js), so this stays a
+// separate, minimal query rather than reusing the much heavier /stats
+// (which joins across cards/stores/duplicate flags too). Respects each
+// resource's view permission the same way /stats does, so a role that
+// can't see a resource never gets a dot for it.
+router.get('/pending-counts', (req, res) => {
+  const orgId = req.user.org_id;
+  const counts = {};
+  if (getPermission(req.user, 'shuls').can_view) {
+    counts.shuls = db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND status IN ('submitted','contract_sent','contract_signed')`).get(orgId).c;
+  }
+  if (getPermission(req.user, 'applicants').can_view) {
+    counts.applicants = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE org_id = ? AND approval_status = 'pending'`).get(orgId).c;
+  }
+  if (getPermission(req.user, 'stores').can_view) {
+    counts.stores = db.prepare(`SELECT COUNT(*) c FROM stores WHERE org_id = ? AND setup_status = 'pending'`).get(orgId).c;
+  }
+  res.json({ counts });
+});
+
 router.get('/stats', (req, res) => {
   const orgId = req.user.org_id;
   // Empty/absent season_id = "All Seasons" (the original, unscoped

@@ -17,36 +17,7 @@
   </div>
 
   <form id="apply-form" class="card">
-    <div class="section-title">Store Information</div>
-    <label>Store Name <span class="req">*</span></label><input name="name" required>
-    <label>Address</label><input id="store_address" name="address" autocomplete="off">
-    <div class="grid-2">
-      <div><label>City</label><input id="store_city" name="city"></div>
-      <div><label>State</label><input id="store_state" name="state"></div>
-    </div>
-    <label>Zip</label><input id="store_zip" name="zip" style="max-width:160px">
-    <label>Store Phone</label><input name="phone">
-
-    <div class="section-title">Manager</div>
-    <div class="grid-2">
-      <div><label>Manager Name</label><input name="manager_name"></div>
-      <div><label>Manager Phone</label><input name="manager_phone"></div>
-    </div>
-    <label>Manager Email</label><input name="manager_email">
-
-    <div class="section-title">Owner</div>
-    <div class="grid-2">
-      <div><label>Owner Name</label><input name="owner_name"></div>
-      <div><label>Owner Phone</label><input name="owner_phone"></div>
-    </div>
-    <label>Owner Email <span class="req">*</span></label><input name="owner_email" type="email" required>
-
-    <div class="checkbox-row" style="margin-top:16px"><input type="checkbox" id="has_account" name="has_provider_account"><label style="margin:0" for="has_account">We already have a disccardpromos.com (or equivalent) merchant account</label></div>
-
-    <label>Comments</label><textarea name="comments" rows="3"></textarea>
-
-    <div id="extra-fields"></div>
-
+    <div id="dyn-fields"><p class="small-muted">Loading…</p></div>
     <div style="margin-top:26px;text-align:right">
       <button type="submit" class="btn btn-primary" id="submit-btn">Submit Application</button>
     </div>
@@ -61,22 +32,23 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-guardFormWindow('store_application', '#apply-form');
-
-const STORE_KNOWN_KEYS = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','has_provider_account','comments'];
-const extraFieldsPromise = attachExtraFormFields('store_application', 'extra-fields', STORE_KNOWN_KEYS);
-
-loadGoogleMaps().then(() => {
-  attachPlacesAutocomplete('store_address', { address:'store_address', city:'store_city', state:'store_state', zip:'store_zip' });
-});
+// Every field here comes straight from whichever form is currently live for
+// "Store Application" (Form Builder) — required-ness, labels, and even
+// whether a field exists at all are 100% admin-controlled there now.
+(async () => {
+  const form = await loadDefaultForm('store_application', '#apply-form');
+  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  qs('#dyn-fields').innerHTML = form.schema_json.map(f => fieldHtml(f)).join('');
+  loadGoogleMaps().then(() => {
+    attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip' });
+  });
+})();
 
 qs('#apply-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
-  const fd = new FormData(e.target);
-  const data = Object.fromEntries(fd.entries());
-  data.has_provider_account = fd.get('has_provider_account') === 'on';
-  data.extra_notes = collectExtraFieldsText(await extraFieldsPromise, e.target);
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  qsa('input[type=checkbox]', e.target).forEach(c => data[c.name] = c.checked);
   try {
     const { message } = await api('/stores/apply', { method: 'POST', body: data });
     qs('#apply-form').style.display = 'none';

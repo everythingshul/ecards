@@ -17,52 +17,8 @@
   </div>
 
   <form id="apply-form" class="card">
-    <div class="section-title">Shul Information</div>
-    <div class="grid-2">
-      <div><label>Shul Name (English) <span class="req">*</span></label><input name="name_en" required></div>
-      <div><label>Shul Name (Hebrew)</label><input name="name_he" dir="rtl"></div>
-    </div>
-    <label>Shul Address <span class="req">*</span></label>
-    <input id="shul_address" name="address" required autocomplete="off">
-    <div class="grid-2">
-      <div><label>City <span class="req">*</span></label><input id="shul_city" name="city" required></div>
-      <div><label>State <span class="req">*</span></label><input id="shul_state" name="state" required></div>
-    </div>
-    <label>Zip <span class="req">*</span></label>
-    <input id="shul_zip" name="zip" required style="max-width:160px">
+    <div id="dyn-fields"><p class="small-muted">Loading…</p></div>
     <input type="hidden" id="shul_place_id" name="place_id"><input type="hidden" id="shul_lat" name="lat"><input type="hidden" id="shul_lng" name="lng">
-
-    <div class="section-title">Rav Information</div>
-    <div class="grid-2">
-      <div><label>First Name <span class="req">*</span></label><input name="ruv_first_name" required></div>
-      <div><label>Last Name <span class="req">*</span></label><input name="ruv_last_name" required></div>
-    </div>
-    <label>Phone Number <span class="req">*</span></label><input name="ruv_phone" required>
-    <label>Address</label><input id="ruv_address" name="ruv_address" autocomplete="off">
-    <div class="grid-2">
-      <div><label>City</label><input id="ruv_city" name="ruv_city"></div>
-      <div><label>State</label><input id="ruv_state" name="ruv_state"></div>
-    </div>
-    <label>Zip</label><input id="ruv_zip" name="ruv_zip" style="max-width:160px">
-
-    <div class="section-title">Gabai Information</div>
-    <div class="grid-2">
-      <div><label>First Name <span class="req">*</span></label><input name="gabai_first_name" required></div>
-      <div><label>Last Name <span class="req">*</span></label><input name="gabai_last_name" required></div>
-    </div>
-    <div class="grid-2">
-      <div><label>Cell Number <span class="req">*</span></label><input name="gabai_cell" required></div>
-      <div><label>Email <span class="req">*</span></label><input type="email" name="gabai_email" required></div>
-    </div>
-    <label>Address</label><input id="gabai_address" name="gabai_address" autocomplete="off">
-    <div class="grid-2">
-      <div><label>City</label><input id="gabai_city" name="gabai_city"></div>
-      <div><label>State</label><input id="gabai_state" name="gabai_state"></div>
-    </div>
-    <label>Zip</label><input id="gabai_zip" name="gabai_zip" style="max-width:160px">
-
-    <div id="extra-fields"></div>
-
     <div style="margin-top:26px;text-align:right">
       <button type="submit" class="btn btn-primary" id="submit-btn">Continue to Contract</button>
     </div>
@@ -91,26 +47,30 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-let shulId = null, signToken = null, sigPad = null;
+let shulId = null, signToken = null, sigPad = null, currentSchema = [];
 
-guardFormWindow('shul_application', '#apply-form');
-
-const SHUL_KNOWN_KEYS = ['name_en','name_he','address','city','state','zip','place_id','lat','lng',
-  'ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
-  'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
-const extraFieldsPromise = attachExtraFormFields('shul_application', 'extra-fields', SHUL_KNOWN_KEYS);
-
-loadGoogleMaps().then(() => {
-  attachPlacesAutocomplete('shul_address', { address:'shul_address', city:'shul_city', state:'shul_state', zip:'shul_zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });
-  attachPlacesAutocomplete('ruv_address', { address:'ruv_address', city:'ruv_city', state:'ruv_state', zip:'ruv_zip' });
-  attachPlacesAutocomplete('gabai_address', { address:'gabai_address', city:'gabai_city', state:'gabai_state', zip:'gabai_zip' });
-});
+// Every field here — including ones that used to be hardcoded HTML (name,
+// address, Rav/Gabai info) — comes straight from whichever form is
+// currently live for "Shul Registration" (Form Builder). Required-ness,
+// labels, and even whether a field exists at all are 100% admin-controlled
+// there now, not baked into this page.
+(async () => {
+  const form = await loadDefaultForm('shul_application', '#apply-form');
+  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  currentSchema = form.schema_json;
+  qs('#dyn-fields').innerHTML = currentSchema.map(f => fieldHtml(f)).join('');
+  loadGoogleMaps().then(() => {
+    attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });
+    attachPlacesAutocomplete('ruv_address', { address:'ruv_address', city:'ruv_city', state:'ruv_state', zip:'ruv_zip' });
+    attachPlacesAutocomplete('gabai_address', { address:'gabai_address', city:'gabai_city', state:'gabai_state', zip:'gabai_zip' });
+  });
+})();
 
 qs('#apply-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   const data = Object.fromEntries(new FormData(e.target).entries());
-  data.extra_notes = collectExtraFieldsText(await extraFieldsPromise, e.target);
+  qsa('input[type=checkbox]', e.target).forEach(c => data[c.name] = c.checked);
   try {
     const { shul, duplicate, message } = await api('/shuls/apply', { method: 'POST', body: data });
     shulId = shul.id;

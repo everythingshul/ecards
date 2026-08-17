@@ -5,7 +5,8 @@ import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendCsv } from '../services/csv.js';
 import { normalizePhone } from '../utils/phone.js';
-import { getFormWindow, formWindowError } from '../utils/formSchedule.js';
+import { formWindowError } from '../utils/formSchedule.js';
+import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, STORE_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 
 const router = Router();
@@ -13,24 +14,32 @@ const router = Router();
 // Public: store self-application (mirrors the shul public form) — spec #9 says
 // stores can be added by admin OR sign up themselves. Starts at setup_status
 // 'pending'; admin reviews and invites to the portal same as an admin-added store.
+// The page itself is now a plain render of the live Store Application form's
+// schema (see form-render.js) — every field here, required-ness included,
+// comes from that schema, same as shuls.js POST /apply.
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const windowError = formWindowError(getFormWindow(orgId, 'store_application'));
+  const defaultForm = getDefaultForm(orgId, 'store_application');
+  const windowError = formWindowError(defaultForm);
   if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
-  if (!b.name || !b.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });
+  const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
+  const errors = validateBySchema(schema, b, { isAdmin: false });
+  if (errors.length) return res.status(400).json({ error: errors[0] });
+  const { known: store, extra } = splitKnown(schema, b, STORE_FIELDS);
+  if (!store.name || !store.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });
   const id = uuid();
-  // extra_notes: fields the admin added in the Form Builder beyond this
-  // page's fixed set (see frontend/js/app.js's attachExtraFormFields) —
-  // appended rather than overwriting whatever the applicant typed into the
-  // page's own free-text Comments box.
-  const comments = [b.comments, b.extra_notes].filter(Boolean).join(' | ');
+  // Anything the admin added to the schema beyond the known DB columns
+  // lands in comments as free text, appended rather than overwriting
+  // whatever was typed into the form's own Comments field.
+  const comments = [store.comments, extra, b.extra_notes].filter(Boolean).join(' | ');
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
       owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
-    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
-      b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email,
-      comments, b.has_provider_account ? 1 : 0);
+    .run(id, orgId, store.name, store.address || '', store.city || '', store.state || '', store.zip || '', normalizePhone(store.phone || ''),
+      store.manager_name || '', normalizePhone(store.manager_phone || ''), store.manager_email || '', store.owner_name || '', normalizePhone(store.owner_phone || ''), store.owner_email,
+      comments, store.has_provider_account ? 1 : 0);
+  recordFormResponse(orgId, defaultForm, b, { type: 'store', id });
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
 });
 

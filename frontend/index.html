@@ -126,15 +126,26 @@
       return { label: 'Open now', cls: 'active' };
     }
 
+    // Schedule cards mix two kinds of item: 'form' ones look up a real form's
+    // scheduling (open/opens/closes) and render it automatically; 'custom'
+    // ones are just whatever text the admin typed, no form behind them at
+    // all — for anything on the schedule that isn't itself a submittable
+    // form (a deadline reminder, an event date, a note). Items with no
+    // explicit type predate this distinction and default to 'form', same as
+    // they always behaved.
     function renderSchedule(items) {
-      Promise.all(items.map(f => api(`/forms/public/${f.formSlug}`).then(r => ({ ...f, form: r.form })).catch(() => null)))
+      const withType = items.map(it => ({ type: 'form', ...it }));
+      Promise.all(withType.map(it => it.type === 'custom' ? Promise.resolve(it) : api(`/forms/public/${it.formSlug}`).then(r => ({ ...it, form: r.form })).catch(() => null)))
         .then(results => {
-          const cards = results.filter(Boolean).map(({ label, form }) => {
-            const status = windowStatus(form);
-            const window = form.opens_at || form.closes_at
-              ? `${form.opens_at ? 'Opens ' + fmtDate(form.opens_at) : ''}${form.opens_at && form.closes_at ? ' · ' : ''}${form.closes_at ? 'Closes ' + fmtDate(form.closes_at) : ''}`
+          const cards = results.filter(Boolean).map((it) => {
+            if (it.type === 'custom') {
+              return `<div class="schedule-card"><h3>${esc(it.label)}</h3>${it.window ? `<div class="window">${esc(it.window)}</div>` : ''}${it.description ? `<p class="small-muted" style="margin-top:8px">${esc(it.description)}</p>` : ''}</div>`;
+            }
+            const status = windowStatus(it.form);
+            const window = it.form.opens_at || it.form.closes_at
+              ? `${it.form.opens_at ? 'Opens ' + fmtDate(it.form.opens_at) : ''}${it.form.opens_at && it.form.closes_at ? ' · ' : ''}${it.form.closes_at ? 'Closes ' + fmtDate(it.form.closes_at) : ''}`
               : 'No set window — always open';
-            return `<div class="schedule-card"><h3>${esc(label)}</h3>${badge(status.label, status.cls)}<div class="window">${esc(window)}</div></div>`;
+            return `<div class="schedule-card"><h3>${esc(it.label)}</h3>${badge(status.label, status.cls)}<div class="window">${esc(window)}</div></div>`;
           });
           qs('#schedule-grid').innerHTML = cards.length ? cards.join('') : '<div class="schedule-card"><p class="small-muted">No schedule information available.</p></div>';
         });

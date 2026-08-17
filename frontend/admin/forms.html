@@ -51,6 +51,7 @@ async function load() {
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
           <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
+          <button class="btn btn-sm btn-outline" onclick="openResponses('${f.id}')">Responses</button>
           ${!f.is_current_default ? `<button class="btn btn-sm btn-outline" onclick="setDefaultForm('${f.id}')">Set as Default for ${esc(SECTION_LABEL[f.type]||f.type)}</button>` : ''}
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>
@@ -119,10 +120,23 @@ function formBody(existing = null) {
 // still live in the same schema array/order as real fields, so an admin can
 // interleave section headings and images between groups of fields.
 const BLOCK_TYPES = ['header', 'image'];
+// One option per line in the textarea, "value|label" (or just "label" to
+// use the same text for both) — round-tripped to/from field.options
+// ({value,label}[]) so a select field's real dropdown values can differ
+// from what's displayed (e.g. home_for_yomtov: 1|Yes).
+function optionsToText(options) { return (options || []).map(o => (o.value === o.label ? o.label : `${o.value}|${o.label}`)).join('\n'); }
+function parseOptionsText(text) {
+  return String(text || '').split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const idx = line.indexOf('|');
+    return idx === -1 ? { value: line, label: line } : { value: line.slice(0, idx).trim(), label: line.slice(idx + 1).trim() };
+  });
+}
 function renderFields() {
   qs('#field-list').innerHTML = fieldDraft.map((f, i) => {
     const isBlock = BLOCK_TYPES.includes(f.type);
     const isImage = f.type === 'image';
+    const isNumber = f.type === 'number';
+    const isSelect = f.type === 'select';
     return `<div class="card" style="margin:8px 0;padding:12px">
       <div class="grid-2">
         ${isBlock ? '' : `<div><label style="margin-top:0">Field Key</label><input value="${esc(f.key)}" onchange="fieldDraft[${i}].key=this.value"></div>`}
@@ -134,6 +148,23 @@ function renderFields() {
         </select></div>
         ${isBlock ? '' : `<div><label style="margin-top:0">Required</label><select onchange="fieldDraft[${i}].required=this.value==='1'"><option value="1" ${f.required?'selected':''}>Yes</option><option value="0" ${!f.required?'selected':''}>No</option></select></div>`}
       </div>
+      ${isBlock ? '' : `<div class="checkbox-row" style="margin-top:8px">
+        <input type="checkbox" id="fd-override-${i}" ${f.admin_override?'checked':''} onchange="fieldDraft[${i}].admin_override=this.checked">
+        <label style="margin:0" for="fd-override-${i}">Admin can override — skip this field's requirement when an admin adds/imports on someone's behalf</label>
+      </div>`}
+      ${isNumber ? `<div class="grid-2" style="margin-top:8px">
+        <div><label style="margin-top:0">Minimum <span class="small-muted">(optional)</span></label><input type="number" value="${f.min ?? ''}" onchange="fieldDraft[${i}].min=this.value===''?undefined:+this.value"></div>
+        <div><label style="margin-top:0">Maximum <span class="small-muted">(optional)</span></label><input type="number" value="${f.max ?? ''}" onchange="fieldDraft[${i}].max=this.value===''?undefined:+this.value"></div>
+      </div>` : ''}
+      ${isSelect ? `<div style="margin-top:8px">
+        <label style="margin-top:0">Options <span class="small-muted">(one per line — "value|label", or just a label to use it as both)</span></label>
+        <textarea rows="4" onchange="updateFieldOptions(${i}, this.value)">${esc(optionsToText(f.options))}</textarea>
+        <label style="margin-top:8px">Expected Answer <span class="small-muted">(optional — for review only, never shown to whoever fills out the form)</span></label>
+        <select onchange="fieldDraft[${i}].expectedAnswer=this.value||undefined">
+          <option value="">(none)</option>
+          ${(f.options||[]).map(o => `<option value="${esc(o.value)}" ${f.expectedAnswer===o.value?'selected':''}>${esc(o.label)}</option>`).join('')}
+        </select>
+      </div>` : ''}
       ${isImage ? `<div style="margin-top:8px">
         <input type="file" accept="image/*" onchange="uploadFieldImage(${i}, this)">
         ${f.url ? `<img src="${esc(f.url)}" style="max-width:200px;max-height:120px;display:block;margin-top:8px;border-radius:6px">` : '<p class="small-muted">No image uploaded yet.</p>'}
@@ -142,6 +173,7 @@ function renderFields() {
     </div>`;
   }).join('');
 }
+window.updateFieldOptions = (i, text) => { fieldDraft[i].options = parseOptionsText(text); renderFields(); };
 window.addField = () => { fieldDraft.push({ key: '', label: '', type: 'text', required: false }); renderFields(); };
 window.removeField = (i) => { fieldDraft.splice(i, 1); renderFields(); };
 window.uploadFieldImage = async (i, input) => {
@@ -159,6 +191,32 @@ window.uploadFieldImage = async (i, input) => {
 window.createForm = async () => {
   const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft, season_id: qs('#f-season').value };
   try { await api('/forms', { method: 'POST', body }); toast('Form created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
+};
+
+// Every raw submission to this form — the exportable "response table",
+// independent of whether the submission also created a real shul/applicant/
+// store record (see recordFormResponse() server-side). expectedAnswer is
+// admin-only config (see the field editor above) — it's checked here, on
+// the admin-only Responses view, and never sent to the public form itself
+// (routes/forms.js strips it before any public response).
+window.openResponses = async (id) => {
+  const f = formsCache.find(x => x.id === id);
+  if (!f) return;
+  try {
+    const { responses } = await api(`/forms/${id}/responses`);
+    const schema = f.schema_json.filter(fld => !['header', 'image'].includes(fld.type));
+    const body = responses.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Submitted</th><th>Record</th>${schema.map(fld => `<th>${esc(fld.label || fld.key)}</th>`).join('')}</tr></thead><tbody>
+        ${responses.map(r => `<tr><td>${fmtDateTime(r.created_at)}</td><td>${r.entity_type ? esc(r.entity_type) : '<span class="small-muted">response only</span>'}</td>
+          ${schema.map(fld => {
+            const val = r.data[fld.key];
+            const matched = fld.expectedAnswer !== undefined && fld.expectedAnswer !== '' && String(val ?? '') === String(fld.expectedAnswer);
+            return `<td>${esc(val ?? '')}${matched ? ' ' + badge('matches expected', 'active') : ''}</td>`;
+          }).join('')}
+        </tr>`).join('')}
+      </tbody></table></div>` : '<p class="small-muted">No responses yet.</p>';
+    const footer = `<button class="btn btn-outline btn-sm" onclick="downloadAuthed('/forms/${id}/responses/export','${esc(f.slug || 'form')}-responses.csv')">Export CSV</button>`;
+    openModal(`${f.name}: Responses (${responses.length})`, body, footer);
+  } catch (err) { toast(err.message, true); }
 };
 
 load();

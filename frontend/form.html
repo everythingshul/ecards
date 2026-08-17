@@ -20,30 +20,19 @@
 const slug = new URLSearchParams(location.search).get('slug');
 let shulOptions = [];
 
+let currentSchema = [];
 (async () => {
   if (!slug) { qs('#dyn-form').innerHTML = '<p>No form specified.</p>'; return; }
   try {
     const [{ form }, { shuls }] = await Promise.all([api(`/forms/public/${slug}`), api('/shuls/public/list')]);
     shulOptions = shuls;
+    currentSchema = form.schema_json;
     qs('#form-title').textContent = form.name;
-    qs('#dyn-form').innerHTML = form.schema_json.map(fieldHtml).join('') + `<div style="margin-top:22px;text-align:right"><button class="btn btn-primary">Submit</button></div>`;
+    qs('#dyn-form').innerHTML = currentSchema.map(f => fieldHtml(f, shulOptions)).join('') + `<div style="margin-top:22px;text-align:right"><button class="btn btn-primary">Submit</button></div>`;
   } catch (err) {
     qs('#dyn-form').innerHTML = `<p>${esc(err.message)}</p>`;
   }
 })();
-
-function fieldHtml(f) {
-  // 'header'/'image' are presentational blocks, not real inputs — nothing
-  // to submit, so no name/required attribute at all.
-  if (f.type === 'header') return `<h3 style="margin-top:22px">${esc(f.label || '')}</h3>`;
-  if (f.type === 'image') return f.url ? `<img src="${esc(f.url)}" alt="${esc(f.label||'')}" style="max-width:100%;height:auto;margin:14px 0;border-radius:8px">` : '';
-  const req = f.required ? 'required' : '';
-  const label = `<label>${esc(f.label || f.key)} ${f.required ? '<span class="req">*</span>' : ''}</label>`;
-  if (f.key === 'shul_id') return `${label}<select name="shul_id" ${req}><option value="">Select your shul…</option>${shulOptions.map(s => `<option value="${s.id}">${esc(s.name_en)}</option>`).join('')}</select>`;
-  if (f.type === 'textarea') return `${label}<textarea name="${esc(f.key)}" ${req}></textarea>`;
-  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" name="${esc(f.key)}" id="fld-${esc(f.key)}"><label style="margin:0" for="fld-${esc(f.key)}">${esc(f.label||f.key)}</label></div>`;
-  return `${label}<input type="${f.type==='number'?'number':(f.type==='email'?'email':(f.type==='tel'?'tel':'text'))}" name="${esc(f.key)}" ${req}>`;
-}
 
 qs('#dyn-form').addEventListener('submit', async (e) => {
   e.preventDefault();
