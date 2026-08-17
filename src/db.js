@@ -470,6 +470,22 @@ CREATE TABLE IF NOT EXISTS settings (
   PRIMARY KEY (org_id, key)
 );
 
+-- Anonymous pageview log for the public-facing site (home, apply forms,
+-- FAQ, contact, etc.) — powers the admin Analytics page. visitor_id is a
+-- random id the browser generates and stores in localStorage (see app.js's
+-- trackPageview()), not tied to any account, just enough to tell "one
+-- visitor, several pageviews" apart from "several different visitors."
+CREATE TABLE IF NOT EXISTS page_views (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  path TEXT NOT NULL,
+  referrer TEXT,
+  visitor_id TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_page_views_org ON page_views(org_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_page_views_path ON page_views(org_id, path);
+
 -- Public "Contact Us" form submissions.
 CREATE TABLE IF NOT EXISTS contact_submissions (
   id TEXT PRIMARY KEY,

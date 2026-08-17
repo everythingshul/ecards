@@ -29,7 +29,7 @@ renderShell('/admin/applicants', `
     <input id="f-search" placeholder="Search name, phone, email…">
     <select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
     <select id="f-marital"><option value="">Any marital status</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option><option value="divorced">Divorced</option></select>
-    <select id="f-yomtov"><option value="">Home for Yom Tov (any)</option><option value="1">Yes</option><option value="0">No</option></select>
+    <select id="f-shul"><option value="">All Shuls</option></select>
     <select id="f-season"></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
@@ -43,7 +43,7 @@ renderShell('/admin/applicants', `
   <div class="paginator" id="pager"></div>
 `);
 
-let state = { search:'', status:'', marital_status:'', home_for_yomtov:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
+let state = { search:'', status:'', marital_status:'', shul_id:'', season_id:'', sort:'created_at', dir:'DESC', page:1, pageSize:25 };
 let selected = new Set();
 
 // Every field a column can show, plus how to render it — the checkbox
@@ -124,7 +124,7 @@ function onCheck(e) {
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
-qs('#f-yomtov').addEventListener('change', () => { state.home_for_yomtov = qs('#f-yomtov').value; state.page = 1; load(); });
+qs('#f-shul').addEventListener('change', () => { state.shul_id = qs('#f-shul').value; state.page = 1; load(); });
 qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
@@ -344,9 +344,10 @@ window.resolveDup = async (id, action) => { try { await api(`/applicants/duplica
 
 attachColumnCustomizer('btn-columns', 'columns_applicants', APPLICANT_COLUMNS, DEFAULT_APPLICANT_COLUMNS, (order) => { activeColumns = order; renderThead(); load(); })
   .then(order => { activeColumns = order; renderThead(); load(); });
+populateShulFilter('f-shul');
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
 attachLiveRefresh('live-banner', async () => {
-  const params = new URLSearchParams({ search: state.search, status: state.status, marital_status: state.marital_status, home_for_yomtov: state.home_for_yomtov, season_id: state.season_id, pageSize: 1 });
+  const params = new URLSearchParams({ search: state.search, status: state.status, marital_status: state.marital_status, shul_id: state.shul_id, season_id: state.season_id, pageSize: 1 });
   const { total } = await api('/applicants?' + params);
   return total;
 }, load);

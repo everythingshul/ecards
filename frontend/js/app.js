@@ -75,6 +75,20 @@ async function downloadAuthed(path, fallbackFilename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Fire-and-forget pageview beacon for the public site (home, apply forms,
+// FAQ, contact, etc.) — powers the admin Analytics page. visitor_id is a
+// random id kept in localStorage purely to tell "one visitor, several
+// pageviews" apart from "several different visitors"; never sent anywhere
+// but our own /api/analytics/pageview, and carries no other identifying
+// information. Best-effort: never blocks or errors the page it's called from.
+function trackPageview() {
+  try {
+    let vid = localStorage.getItem('ec_visitor_id');
+    if (!vid) { vid = crypto.randomUUID(); localStorage.setItem('ec_visitor_id', vid); }
+    api('/analytics/pageview', { method: 'POST', body: { path: location.pathname + location.search, referrer: document.referrer, visitor_id: vid } }).catch(() => {});
+  } catch { /* analytics is best-effort, never block the page */ }
+}
+
 function toast(msg, isError = false) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }
@@ -94,6 +108,7 @@ function qsa(sel) { return Array.from(document.querySelectorAll(sel)); }
 
 const NAV_ITEMS = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: '&#9670;', resource: 'dashboard' },
+  { href: '/admin/analytics', label: 'Analytics', icon: '&#9670;', resource: 'dashboard' },
   { href: '/admin/shuls', label: 'Shuls', icon: '&#9670;', resource: 'shuls' },
   { href: '/admin/applicants', label: 'Applicants', icon: '&#9670;', resource: 'applicants' },
   { href: '/admin/cards', label: 'Cards & Transactions', icon: '&#9670;', resource: 'cards' },
@@ -355,6 +370,18 @@ async function populateSeasonFilter(selectId) {
     el.innerHTML = `<option value="">All Seasons</option>` + seasons.map(s => `<option value="${s.id}" ${active && s.id === active.id ? 'selected' : ''}>${esc(s.name)}${active && s.id === active.id ? ' (active)' : ''}</option>`).join('');
     return active?.id || '';
   } catch { return ''; }
+}
+
+// Same idea as populateSeasonFilter above, for a "filter by shul" dropdown —
+// unlike attachShulSelect (a single-select form field with a placeholder),
+// this always leads with an "All Shuls" option since it's a list filter.
+async function populateShulFilter(selectId) {
+  try {
+    const { shuls } = await api('/shuls/all-list');
+    const el = qs('#' + selectId);
+    if (!el) return;
+    el.innerHTML = `<option value="">All Shuls</option>` + shuls.map(s => `<option value="${s.id}">${esc(s.name_en)}</option>`).join('');
+  } catch { /* leave the dropdown with just "All Shuls" if the list fails to load */ }
 }
 
 // Shared "View Other Seasons" popup for shul/applicant/store detail views.
