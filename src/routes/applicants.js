@@ -336,7 +336,27 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
     }
   }
-  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError });
+  // disccardpromos has no separate "assign/activate a card" step — crediting
+  // a customer's balance against a configured Package (Settings >
+  // Organization > Gift Card Loading) via add-funds IS how a card actually
+  // gets issued with an amount. Same best-effort pattern as the account
+  // write above: skipped if that write failed (nothing to credit yet), and
+  // never blocks/undoes the approval itself.
+  let providerFundsError = null;
+  if (applicant.shul_id && !providerAccountError && amount > 0) {
+    const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
+    if (!discountId) {
+      providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
+    } else {
+      try {
+        await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount });
+      } catch (e) {
+        providerFundsError = e.message;
+        console.error('[giftcard] failed to load funds on approval:', e.message);
+      }
+    }
+  }
+  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
 });
 
 router.post('/:id/reject', requireAdmin, (req, res) => {
@@ -348,10 +368,11 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
 });
 
 // Mass approval — spec #5 "allow mass approval".
-router.post('/mass-approve', requireAdmin, (req, res) => {
+router.post('/mass-approve', requireAdmin, async (req, res) => {
   const { ids, card_amount } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
-  let approved = 0, skipped = 0, capReached = false;
+  const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
+  let approved = 0, skipped = 0, capReached = false, providerErrors = 0;
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant || applicant.is_paused) { skipped++; continue; }
@@ -365,8 +386,32 @@ router.post('/mass-approve', requireAdmin, (req, res) => {
     logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', id,
       { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
     approved++;
+    // Same best-effort account-write + fund-load as the single /:id/approve
+    // route — see the comments there. A disccardpromos hiccup on one
+    // applicant never stops the rest of the batch.
+    if (applicant.shul_id) {
+      let accountOk = false;
+      try {
+        const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
+        const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
+          externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
+          groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
+        });
+        if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
+        accountOk = true;
+      } catch (e) {
+        providerErrors++;
+        console.error('[giftcard] failed to write disccardpromos account on mass-approve:', e.message);
+      }
+      if (accountOk && amount > 0 && discountId) {
+        try { await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount }); }
+        catch (e) { providerErrors++; console.error('[giftcard] failed to load funds on mass-approve:', e.message); }
+      } else if (accountOk && amount > 0 && !discountId) {
+        providerErrors++;
+      }
+    }
   }
-  res.json({ approved, skipped, capReached });
+  res.json({ approved, skipped, capReached, providerErrors, providerErrorsHint: providerErrors && !discountId ? 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading).' : undefined });
 });
 
 router.post('/:id/notes', (req, res) => {

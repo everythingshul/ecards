@@ -104,11 +104,12 @@ export async function refundCard(orgId, { cardNum, amount }) {
 }
 
 // Credits amount onto a customer's balance against one of their `packages`
-// (discountId) — this is what actually loads money for a season, identified
+// (discountId) — this is what actually loads money onto a card, identified
 // by OUR applicant's external_id rather than a disccardpromos customer id.
-// NOT yet wired into the applicant-approval flow: we have no confirmed
-// mapping from our season records to their discount_id (see the Customers
-// section below for what's still open there).
+// Wired into applicant approval (routes/applicants.js) — per-season/package
+// mapping was explicitly ruled out; there's one org-wide Package/Discount ID
+// (Settings > Organization > Gift Card Loading, settings key
+// disccardpromos_discount_id) used for every approval regardless of season.
 export async function addFunds(orgId, { externalId, discountId, amount }) {
   if (isMockMode(orgId)) return { success: true, mock: true };
   return call(orgId, '/v1/add-funds/', { method: 'POST', body: JSON.stringify({

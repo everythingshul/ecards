@@ -139,7 +139,9 @@ qs('#btn-mass-approve').addEventListener('click', async () => {
     const body = { ids: Array.from(selected) };
     if (amount !== null && amount !== '') body.card_amount = +amount;
     const r = await api('/applicants/mass-approve', { method: 'POST', body });
-    toast(`Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`);
+    let msg = `Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`;
+    if (r.providerErrors) msg += ` — ${r.providerErrors} disccardpromos issue(s)${r.providerErrorsHint ? ': ' + r.providerErrorsHint : ''}`;
+    toast(msg, !!r.providerErrors);
     selected.clear(); load();
   } catch (err) { toast(err.message, true); }
 });
@@ -233,7 +235,7 @@ window.saveApplicant = async (id) => {
 window.approveApplicant = async (id) => {
   try {
     const r = await api(`/applicants/${id}/approve`, { method: 'POST' });
-    const issues = [r.emailError && `email failed: ${r.emailError}`, r.providerAccountError && `disccardpromos account failed: ${r.providerAccountError}`].filter(Boolean);
+    const issues = [r.emailError && `email failed: ${r.emailError}`, r.providerAccountError && `disccardpromos account failed: ${r.providerAccountError}`, r.providerFundsError && `card not loaded: ${r.providerFundsError}`].filter(Boolean);
     toast(issues.length ? `Approved, but ${issues.join('; ')}` : 'Approved', issues.length > 0);
     closeModal(); load();
   } catch (err) { toast(err.message, true); }

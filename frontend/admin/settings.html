@@ -51,6 +51,12 @@ renderShell('/admin/settings', `
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveSmsOwnNumber()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
+      <h3>Gift Card Loading (disccardpromos)</h3>
+      <p class="small-muted">disccardpromos loads money onto a card by crediting a customer's balance against one of their Packages — there's no separate "assign a card" step. Enter the Package/Discount ID to use; every approved applicant's card amount is loaded against this same package, regardless of season.</p>
+      <label>Package (Discount) ID</label><input id="org-discount_id" placeholder="e.g. 4821">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDiscountId()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
       <h3>Application Restrictions</h3>
       <label>Allowed Zip Codes <span class="small-muted">(comma-separated, leave blank to accept any zip code)</span></label>
       <textarea id="org-allowed_zips" rows="3" placeholder="e.g. 11201, 11211, 11213"></textarea>
@@ -262,6 +268,13 @@ async function loadSmsOwnNumber() {
 }
 window.saveSmsOwnNumber = async () => {
   try { await api('/settings', { method: 'PUT', body: { sms_own_number: qs('#org-sms_own_number').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadDiscountId() {
+  const { settings } = await api('/settings');
+  qs('#org-discount_id').value = settings.disccardpromos_discount_id || '';
+}
+window.saveDiscountId = async () => {
+  try { await api('/settings', { method: 'PUT', body: { disccardpromos_discount_id: qs('#org-discount_id').value.trim() } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 async function loadPopup() {
   const { settings } = await api('/settings');
@@ -613,7 +626,7 @@ window.runBackupNow = async () => {
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadFields(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>
