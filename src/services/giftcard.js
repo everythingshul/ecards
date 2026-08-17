@@ -44,7 +44,13 @@
 import { randomUUID } from 'crypto';
 
 const CONFIG = {
-  apiBase: process.env.DISCCARDPROMOS_API_BASE || '',
+  // Every call below does `${apiBase}${path}` with a path that already
+  // starts with '/' (e.g. '/org/customers/') — a trailing slash on the
+  // configured base (a very easy copy-paste mistake, e.g.
+  // 'https://api.disccardpromos.com/') would silently double it up into
+  // '...com//org/customers/', which many API gateways 404 on. Stripped here
+  // once so every caller is safe regardless of how the env var was entered.
+  apiBase: (process.env.DISCCARDPROMOS_API_BASE || '').replace(/\/+$/, ''),
   apiKey: process.env.DISCCARDPROMOS_API_KEY || '',
 };
 
