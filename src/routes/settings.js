@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
 import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields } from '../services/pdf.js';
+import { isMockMode } from '../services/giftcard.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 import { runBackup, listBackups, backupPath } from '../services/backup.js';
 
@@ -23,6 +24,17 @@ router.put('/', requireAdmin, (req, res) => {
     ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`);
   for (const [key, value] of Object.entries(req.body || {})) upsert.run(req.user.org_id, key, String(value ?? ''));
   res.json({ ok: true });
+});
+
+// Surfaces whether disccardpromos is actually live or silently running in
+// mock mode (both env vars must be set for it to be live — see
+// services/giftcard.js's isMockMode()) directly in the admin UI, since mock
+// mode returns fake success for every call with no error anywhere, so
+// there's otherwise no way to tell from inside the app that it's not real.
+router.get('/giftcard-status', (req, res) => {
+  const mockMode = isMockMode();
+  const missing = mockMode ? [!process.env.DISCCARDPROMOS_API_BASE && 'DISCCARDPROMOS_API_BASE', !process.env.DISCCARDPROMOS_API_KEY && 'DISCCARDPROMOS_API_KEY'].filter(Boolean) : [];
+  res.json({ mockMode, missing });
 });
 
 // Custom contract PDF — uploaded once, used as the base document for every

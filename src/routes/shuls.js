@@ -363,6 +363,16 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Manually move a shul back to 'submitted' (the pending-review state before
+// approve/reject) — for un-rejecting or un-approving one to reconsider it.
+router.post('/:id/set-pending', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE shuls SET status='submitted', updated_at=datetime('now') WHERE id=?`).run(shul.id);
+  logAudit(req.user.org_id, req.user.id, 'set-pending', 'shul', shul.id, { status: shul.status }, { status: 'submitted' }, req.ip);
+  res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id) });
+});
+
 // Generate + email the contract (spec #3: "always email them when there's a doc to sign").
 router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);

@@ -52,6 +52,21 @@ export function isMockMode() {
   return !CONFIG.apiBase || !CONFIG.apiKey;
 }
 
+// Loud, unmissable startup log — every mock-mode function below returns a
+// fake success silently (no error, no thrown exception), so a half-set
+// config (e.g. the API key deployed but not the base URL, or vice versa)
+// otherwise looks identical to a fully-working live integration: approvals
+// "succeed", accounts "get created", funds "get added" — nothing on
+// disccardpromos' side ever actually happens, and there is no other signal
+// that anything is wrong. This runs once at process start so it's the first
+// thing visible in the deploy's server logs.
+if (isMockMode()) {
+  const missing = [!CONFIG.apiBase && 'DISCCARDPROMOS_API_BASE', !CONFIG.apiKey && 'DISCCARDPROMOS_API_KEY'].filter(Boolean);
+  console.warn(`[giftcard] MOCK MODE — disccardpromos calls are simulated, nothing is sent to the real API. Missing env var(s): ${missing.join(', ')}.`);
+} else {
+  console.log(`[giftcard] disccardpromos LIVE mode — base ${CONFIG.apiBase}`);
+}
+
 async function call(orgId, path, opts = {}) {
   const cfg = CONFIG;
   if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured (running in mock mode; this should not be reached)');

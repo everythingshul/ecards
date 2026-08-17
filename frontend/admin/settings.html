@@ -52,6 +52,7 @@ renderShell('/admin/settings', `
     <div class="card" style="margin-top:16px">
       <h3>Gift Card Loading (disccardpromos)</h3>
       <p class="small-muted">disccardpromos loads money onto a card by crediting a customer's balance against one of their Packages — there's no separate "assign a card" step. Enter the Package/Discount ID to use; every approved applicant's card amount is loaded against this same package, regardless of season.</p>
+      <div id="giftcard-status" style="margin:10px 0"></div>
       <label>Package (Discount) ID</label><input id="org-discount_id" placeholder="e.g. 4821">
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDiscountId()">Save</button>
     </div>
@@ -257,6 +258,12 @@ window.saveSmsOwnNumber = async () => {
 async function loadDiscountId() {
   const { settings } = await api('/settings');
   qs('#org-discount_id').value = settings.disccardpromos_discount_id || '';
+  try {
+    const { mockMode, missing } = await api('/settings/giftcard-status');
+    qs('#giftcard-status').innerHTML = mockMode
+      ? `<div style="padding:8px 12px;border-radius:6px;background:#fde8e8;color:#7a1f1f;font-size:13px"><strong>MOCK MODE</strong> — nothing is actually sent to disccardpromos. Every approval "succeeds" but no account/card/funds are created on their side. Missing on the server: ${esc(missing.join(', ') || '(unknown)')}.</div>`
+      : `<div style="padding:8px 12px;border-radius:6px;background:#e8f5e9;color:#1b5e20;font-size:13px"><strong>LIVE</strong> — connected to disccardpromos.</div>`;
+  } catch { /* status check is best-effort, not worth blocking the page on */ }
 }
 window.saveDiscountId = async () => {
   try { await api('/settings', { method: 'PUT', body: { disccardpromos_discount_id: qs('#org-discount_id').value.trim() } }); toast('Saved'); } catch (err) { toast(err.message, true); }

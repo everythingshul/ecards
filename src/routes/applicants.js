@@ -306,6 +306,18 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
     logAudit(req.user.org_id, req.user.id, 'update', 'applicant', applicant.id,
       Object.fromEntries(sets.map(f => [f, applicant[f]])), Object.fromEntries(sets.map((f, i) => [f, vals[i]])), req.ip);
   }
+  res.json({ applicant: maskForShul(db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), req.user.role, req.user.org_id) });
+});
+
+// Manually move an applicant back to 'pending' — for un-rejecting one after
+// a decision was made too early/in error, or un-approving one to reconsider
+// (approved_by/approved_at/card_amount are left as-is so there's a record of
+// the prior decision; approving again overwrites them same as normal).
+router.post('/:id/set-pending', requireAdmin, (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
+  logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
 });
 
