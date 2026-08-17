@@ -16,6 +16,7 @@ import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
+import { lockApplicantCards } from '../services/cardSync.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -323,12 +324,13 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
 // a decision was made too early/in error, or un-approving one to reconsider
 // (approved_by/approved_at/card_amount are left as-is so there's a record of
 // the prior decision; approving again overwrites them same as normal).
-router.post('/:id/set-pending', requireAdmin, (req, res) => {
+router.post('/:id/set-pending', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
   logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
-  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id) });
+  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant.id);
+  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), cardLockErrors });
 });
 
 // Permanent deletion — full removal, not the pause/reject soft-states
@@ -420,12 +422,13 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
 });
 
-router.post('/:id/reject', requireAdmin, (req, res) => {
+router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
   logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
-  res.json({ ok: true });
+  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant.id);
+  res.json({ ok: true, cardLockErrors });
 });
 
 // Mass approval — spec #5 "allow mass approval".

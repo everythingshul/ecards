@@ -87,6 +87,18 @@ router.get('/:id', (req, res) => {
 // Assign the next card to an approved applicant (spec #7: "assign a card, they get
 // a random card and when they use the phone on the account to activate, it'll be
 // written onto their account. We set the amount").
+// NOTE on assign/activate/deactivate below: these call giftcard.assignCard/
+// activateCard/deactivateCard, which are explicitly documented in
+// services/giftcard.js as an UNVERIFIED placeholder (paths like
+// /cards/assign) — every endpoint actually confirmed against real
+// disccardpromos docs lives under /v1/ or /org/customers/, never /cards/,
+// and their own docs describe customers as already carrying their
+// `active_cards` rather than a separate "assign a card" call. In live mode
+// this almost certainly 404s against the real API. Wrapped in try/catch so
+// that failure surfaces as a real, readable error instead of the generic
+// "Internal server error" the unhandled-rejection catch-all in index.js
+// would otherwise return, which made this look like a silent/opaque
+// failure rather than a specific, fixable one.
 router.post('/assign', requireAdmin, async (req, res) => {
   const { applicant_id, amount } = req.body || {};
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(applicant_id, req.user.org_id);
@@ -94,7 +106,13 @@ router.post('/assign', requireAdmin, async (req, res) => {
   if (applicant.approval_status !== 'approved') return res.status(400).json({ error: 'Applicant must be approved before a card is assigned' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant is paused pending duplicate resolution' });
   const finalAmount = amount ?? applicant.card_amount ?? 0;
-  const result = await giftcard.assignCard(req.user.org_id, { applicantId: applicant.id, externalId: applicant.external_id, amount: finalAmount });
+  let result;
+  try {
+    result = await giftcard.assignCard(req.user.org_id, { applicantId: applicant.id, externalId: applicant.external_id, amount: finalAmount });
+  } catch (e) {
+    console.error('[cards] assign failed:', e.message);
+    return res.status(502).json({ error: `disccardpromos rejected the card assignment: ${e.message}` });
+  }
   const id = uuid();
   db.prepare(`INSERT INTO cards (id, org_id, applicant_id, season_id, card_number_masked, provider_card_id, status, amount, assigned_at)
     VALUES (?,?,?,?,?,?,'assigned',?,datetime('now'))`)
@@ -112,7 +130,13 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
   if (!card) return res.status(404).json({ error: 'Not found' });
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'Activation phone number is required' });
-  const result = await giftcard.activateCard(req.user.org_id, { providerCardId: card.provider_card_id, phone });
+  let result;
+  try {
+    result = await giftcard.activateCard(req.user.org_id, { providerCardId: card.provider_card_id, phone });
+  } catch (e) {
+    console.error('[cards] activate failed:', e.message);
+    return res.status(502).json({ error: `disccardpromos rejected the activation: ${e.message}` });
+  }
   db.prepare(`UPDATE cards SET status='activated', activation_phone=?, activated_at=? WHERE id=?`).run(normalizePhone(phone), result.activatedAt, card.id);
   db.prepare(`INSERT INTO card_transactions (id, card_id, type, amount, occurred_at) VALUES (?,?,?,0,?)`).run(uuid(), card.id, 'activation', result.activatedAt);
   res.json({ card: db.prepare('SELECT * FROM cards WHERE id = ?').get(card.id) });
@@ -121,7 +145,13 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
 router.post('/:id/deactivate', requireAdmin, async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
-  const result = await giftcard.deactivateCard(req.user.org_id, { providerCardId: card.provider_card_id, reason: req.body?.reason });
+  let result;
+  try {
+    result = await giftcard.deactivateCard(req.user.org_id, { providerCardId: card.provider_card_id, reason: req.body?.reason });
+  } catch (e) {
+    console.error('[cards] deactivate failed:', e.message);
+    return res.status(502).json({ error: `disccardpromos rejected the deactivation: ${e.message}` });
+  }
   db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=? WHERE id=?`).run(result.deactivatedAt, card.id);
   res.json({ ok: true });
 });

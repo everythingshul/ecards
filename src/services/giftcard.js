@@ -226,9 +226,19 @@ export async function listAllTransactions(orgId, { since }) {
 export async function findCustomerByExternalId(orgId, externalId) {
   if (isMockMode(orgId)) return null;
   try {
-    return await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/`);
+    const result = await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/`);
+    // Diagnostic for the "re-approving creates a duplicate customer instead
+    // of updating" report: if this fires and shows found=false/no id on an
+    // applicant that's been approved before, the by-external-id lookup
+    // itself is the thing not matching what create actually stored (wrong
+    // endpoint shape, or the real API doesn't echo external_id the way
+    // that path assumes) — upsertAccountForApproval below has no way to
+    // know that without this logged.
+    console.log(`[giftcard] findCustomerByExternalId(${externalId}) -> found id=${result?.id ?? '(none in response)'}`);
+    return result;
   } catch (e) {
-    if (e.status === 404) return null;
+    if (e.status === 404) { console.log(`[giftcard] findCustomerByExternalId(${externalId}) -> 404 not found`); return null; }
+    console.error(`[giftcard] findCustomerByExternalId(${externalId}) -> unexpected error (status ${e.status}): ${e.message}`);
     throw e;
   }
 }

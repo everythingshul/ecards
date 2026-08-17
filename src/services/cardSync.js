@@ -18,6 +18,32 @@ export async function syncOneCard(orgId, card) {
   return txns.length;
 }
 
+// Locks every active card an applicant holds — used when an applicant is
+// rejected or moved back to pending (spec: "rejecting or making a customer
+// pending should trigger a lock on the card by disccard"), so a card can't
+// keep being spent once the person behind it is no longer approved.
+// Best-effort per card, same pattern as the disccard account/funds writes
+// in routes/applicants.js's approve flow: a provider failure is collected
+// and returned to the caller to surface, but never blocks the status change
+// that triggered it (the local card row is still marked deactivated either
+// way, since "no longer approved" should never show a still-active card in
+// our own UI regardless of whether the provider call succeeded).
+export async function lockApplicantCards(orgId, applicantId) {
+  const cards = db.prepare(`SELECT * FROM cards WHERE applicant_id = ? AND status IN ('assigned','activated')`).all(applicantId);
+  const errors = [];
+  for (const card of cards) {
+    try {
+      const result = await giftcard.deactivateCard(orgId, { providerCardId: card.provider_card_id, reason: 'applicant no longer approved' });
+      db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=? WHERE id=?`).run(result.deactivatedAt, card.id);
+    } catch (e) {
+      console.error('[cardSync] failed to lock card', card.id, 'for applicant', applicantId, ':', e.message);
+      errors.push(e.message);
+      db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE id=?`).run(card.id);
+    }
+  }
+  return { lockedCount: cards.length, errors };
+}
+
 // Sweeps every assigned/activated card in an org. Used by the automatic
 // background interval (see index.js) and the "Sync All" button — this is
 // what makes card activity/store spend "live" without someone having to
