@@ -49,6 +49,16 @@ export function validateBySchema(schema, values, { isAdmin = false } = {}) {
   return errors;
 }
 
+// Whatever the live shul application form would still flag as missing on a
+// given shul row — shared by the public apply form's own validation, the
+// admin shul-edit response, and (see routes/applicants.js) the gate that
+// blocks a shul-portal user from submitting/re-enrolling any applicant
+// until their own shul record is complete (#147: a shul carried forward
+// into a new season with missing info must fill it in first).
+export function shulInfoErrors(orgId, shul) {
+  return validateBySchema(getDefaultFormSchema(orgId, 'shul_application'), shul, { isAdmin: false });
+}
+
 // Same check across every row of a bulk-upload sheet — one combined error
 // message per failing row, same shape the old validateRequiredFields
 // produced (row/error pairs), so the existing all-or-nothing "nothing

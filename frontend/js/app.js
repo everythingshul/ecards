@@ -125,6 +125,7 @@ const NAV_ITEMS = [
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard', label: 'My Applicants' },
   { href: '/shul-portal/upload', label: 'Bulk Upload' },
+  { href: '/shul-portal/shul-info', label: 'Shul Information' },
   { href: '/shul-portal/updates', label: 'Updates' },
 ];
 const STORE_NAV = [
@@ -163,6 +164,18 @@ function renderShell(activeHref, contentHtml) {
       if (!count) return;
       const link = document.querySelector('nav a[data-href$="/updates"]');
       if (link) link.querySelector('.nav-label').innerHTML += ` ${badge(String(count), 'active')}`;
+      layoutNavOverflow();
+    }).catch(() => {});
+  }
+  // Flags "Shul Information" in the nav whenever this shul's own record is
+  // missing something the live shul application form now requires — the
+  // same check that blocks applicant submission server-side (#147) — so a
+  // shul carried into a new season notices before they even try to submit.
+  if (role === 'shul') {
+    api(`/shuls/${user.shul_id}`).then(({ missingInfo }) => {
+      if (!missingInfo || !missingInfo.length) return;
+      const link = document.querySelector('nav a[data-href$="/shul-info"]');
+      if (link) link.querySelector('.nav-label').innerHTML += ` ${badge('!', 'rejected')}`;
       layoutNavOverflow();
     }).catch(() => {});
   }

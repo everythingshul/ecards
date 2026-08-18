@@ -11,7 +11,7 @@ import { parseSpreadsheet, buildXlsxTemplate, SHUL_IMPORT_COLUMNS } from '../ser
 import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
-import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
+import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, SHUL_FIELDS, shulInfoErrors } from '../utils/formValidation.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
@@ -266,7 +266,13 @@ router.get('/:id', (req, res) => {
   // even know this column exists, same boundary as shul_notes' contents
   // being an admin-facing thing (the shul just never has a UI for this one).
   if (req.user.role === 'shul') delete shulOut.permanent_comments;
-  res.json({ shul: shulOut, notes, contract, applicants, flags });
+  // What the live shul application form would still consider missing on
+  // this exact row — same schema-driven check the public apply form and
+  // admin approval already use (see #147: a shul carried into a new season
+  // needs to fill in anything genuinely missing before submitting
+  // applicants, e.g. a field that wasn't required last season but is now).
+  const missingInfo = shulInfoErrors(req.user.org_id, shul);
+  res.json({ shul: shulOut, notes, contract, applicants, flags, missingInfo });
 });
 
 // Admin-only quick-contact: send a one-off SMS/email straight from a shul's
@@ -432,21 +438,33 @@ router.post('/', requireAdmin, (req, res) => {
   res.status(201).json({ shul, duplicate: !!flag });
 });
 
-router.put('/:id', requireAdmin, (req, res) => {
+// A shul-portal user may edit their OWN shul row here too (self-service —
+// see #147: a shul carried into a new season with missing info has no
+// other way to complete it, since a shul-role user never gets requireAdmin
+// access). Restricted to the same contact/address fields the public apply
+// form itself asks for — never slots_allocated, permanent_comments, or
+// status, all of which stay strictly admin/internal.
+const SHUL_SELF_EDITABLE_FIELDS = ['name_en','name_he','address','city','state','zip','lat','lng','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
+  'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
+router.put('/:id', (req, res) => {
+  const isSelf = req.user.role === 'shul' && req.params.id === req.user.shul_id;
+  if (!isSelf && !['super_admin', 'org_admin', 'staff'].includes(req.user.role)) return res.status(403).json({ error: 'Admin access required' });
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
   if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
-  const fields = ['name_en','name_he','address','city','state','zip','lat','lng','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
-    'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip','slots_allocated','permanent_comments'];
+  const fields = isSelf ? SHUL_SELF_EDITABLE_FIELDS : [...SHUL_SELF_EDITABLE_FIELDS, 'slots_allocated', 'permanent_comments'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
     db.prepare(`UPDATE shuls SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...sets.map(f => b[f]), shul.id);
   }
   const updated = db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id);
   logAudit(req.user.org_id, req.user.id, 'update', 'shul', shul.id, shul, updated, req.ip);
-  res.json({ shul: updated });
+  const shulOut = { ...updated };
+  if (isSelf) delete shulOut.permanent_comments;
+  const missingInfo = shulInfoErrors(req.user.org_id, updated);
+  res.json({ shul: shulOut, missingInfo });
 });
 
 // Approve: sets slot allocation, creates the shul portal login, emails set-up link.

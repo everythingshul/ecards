@@ -14,6 +14,7 @@
 Auth.requireRole('shul');
 renderShell('/shul-portal/upload', `
   <h2>Bulk Upload Applicants</h2>
+  <div id="shul-info-banner"></div>
   <div class="card">
     <p class="small-muted">Download the template, fill it in (Excel .xlsx only — CSV isn't accepted, since it doesn't reliably support Hebrew text), then upload. You don't need to include a shul column: applicants are automatically assigned to your shul.</p>
     <button class="btn btn-outline btn-sm" onclick="downloadAuthed('/applicants/import/template','applicant_import_template.xlsx')">Download Template</button>
@@ -23,6 +24,20 @@ renderShell('/shul-portal/upload', `
     <div id="import-result" style="margin-top:16px"></div>
   </div>
 `);
+// Same shul-info-complete gate as the dashboard's "+ Add Applicant" (#147)
+// — a bulk upload is still submitting applicants, blocked server-side
+// either way, but shown up front here too rather than only after a failed
+// upload attempt.
+api(`/shuls/${Auth.user().shul_id}`).then(({ missingInfo }) => {
+  if (!missingInfo || !missingInfo.length) return;
+  qs('#shul-info-banner').innerHTML = `<div class="card" style="margin-bottom:16px;border-color:var(--danger)">
+    <strong>Your shul's information is incomplete.</strong> ${missingInfo.map(esc).join('; ')}.
+    You can't submit applicants until this is filled in.
+    <a href="/shul-portal/shul-info">Complete it now</a>.
+  </div>`;
+  const btn = qs('#btn-run-import');
+  btn.disabled = true; btn.title = 'Complete your shul information first';
+}).catch(() => {});
 window.runImport = async () => {
   const btn = qs('#btn-run-import');
   if (btn.disabled) return;

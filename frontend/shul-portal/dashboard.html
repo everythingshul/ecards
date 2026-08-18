@@ -14,6 +14,7 @@
 Auth.requireRole('shul');
 renderShell('/shul-portal/dashboard', `
   <div class="flex-between"><h2>My Applicants</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button></div>
+  <div id="shul-info-banner"></div>
   <div id="slots-banner"></div>
   <div id="reenroll-banner"></div>
   <div class="toolbar"><input id="f-search" placeholder="Search name…"></div>
@@ -36,7 +37,22 @@ function contactLine(a) {
 // carried-over applicants deliberately don't count yet — nobody's chosen to
 // re-enroll them — so pre-enrolling more candidates than there are slots
 // doesn't make the banner falsely show as already full.
-api(`/shuls/${Auth.user().shul_id}`).then(({ shul }) => {
+// missingInfo mirrors the same server-side gate that blocks any applicant
+// submission/re-enrollment for this shul (#147) — shown here up front, and
+// used to disable "+ Add Applicant" instead of letting the click round-trip
+// to the server just to find out.
+let shulInfoIncomplete = false;
+api(`/shuls/${Auth.user().shul_id}`).then(({ shul, missingInfo }) => {
+  if (missingInfo && missingInfo.length) {
+    shulInfoIncomplete = true;
+    qs('#shul-info-banner').innerHTML = `<div class="card" style="margin-bottom:16px;border-color:var(--danger)">
+      <strong>Your shul's information is incomplete.</strong> ${missingInfo.map(esc).join('; ')}.
+      You can't submit or re-enroll applicants until this is filled in.
+      <a href="/shul-portal/shul-info">Complete it now</a>.
+    </div>`;
+    const btn = qs('#btn-new');
+    btn.disabled = true; btn.title = 'Complete your shul information first';
+  }
   if (!shul.slots_allocated) return;
   const used = shul.applicants.filter(a => !['rejected', 'incomplete'].includes(a.approval_status)).length;
   const full = used >= shul.slots_allocated;

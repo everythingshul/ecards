@@ -13,7 +13,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
-import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
+import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS, shulInfoErrors } from '../utils/formValidation.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { lockApplicantCards, unlockApplicantCustomer } from '../services/cardSync.js';
@@ -250,6 +250,15 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(shulId, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Shul not found' });
   if (shul.is_paused) return res.status(423).json({ error: 'This shul account is paused and cannot submit applicants' });
+  // A shul (e.g. one carried forward into a new season — #147) can't submit
+  // ANY applicant until its own shul record is complete against the live
+  // shul application form. Admin-added applicants skip this — it's a
+  // self-service gate on the shul-portal submission path, not a rule about
+  // the shul row's state in general.
+  if (req.user.role === 'shul') {
+    const shulErrors = shulInfoErrors(req.user.org_id, shul);
+    if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before submitting applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+  }
   // 'incomplete' (carried-over, not yet re-enrolled) rows don't count as
   // used slots — see the identical check in complete-reenrollment below.
   const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(shulId).c;
@@ -348,7 +357,15 @@ router.post('/:id/complete-reenrollment', requirePermission('applicants', 'can_e
   // submissions (pending/approved) do — otherwise pre-enrolling more
   // candidates than there are slots would make ALL of them uncompletable
   // instead of leaving the shul free to pick which ones fill the slots.
-  const shul = db.prepare('SELECT slots_allocated FROM shuls WHERE id = ?').get(applicant.shul_id);
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(applicant.shul_id);
+  // Same shul-info-complete gate as a brand new submission (POST /) — a
+  // carried-forward shul with missing info can't re-enroll anyone until
+  // that's fixed either, since completing a re-enrollment is itself
+  // submitting an applicant for this season (#147).
+  if (req.user.role === 'shul' && shul) {
+    const shulErrors = shulInfoErrors(req.user.org_id, shul);
+    if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before re-enrolling applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+  }
   if (shul?.slots_allocated) {
     const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(applicant.shul_id).c;
     if (used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
@@ -662,6 +679,13 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   const jobId = uuid();
   const forcedShul = req.user.role === 'shul' ? db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.user.shul_id) : null;
+  // Same shul-info-complete gate as POST / and complete-reenrollment (#147)
+  // — a shul-portal bulk upload is still "submitting applicants," all-or-
+  // nothing like the rest of this route's validation.
+  if (forcedShul) {
+    const shulErrors = shulInfoErrors(req.user.org_id, forcedShul);
+    if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before submitting applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+  }
   // One-time backfill flag (spec: "import shuls and applicants for another
   // season, that should never load onto disccard") — every row in this
   // import is marked provider_exempt, which the approve routes below check
