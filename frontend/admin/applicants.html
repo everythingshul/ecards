@@ -31,6 +31,7 @@ renderShell('/admin/applicants', `
     <select id="f-marital"><option value="">Any marital status</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option><option value="divorced">Divorced</option></select>
     <select id="f-shul"><option value="">All Shuls</option></select>
     <select id="f-season"></select>
+    <select id="f-pagesize"><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="200">200 / page</option></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
   <div id="live-banner"></div>
@@ -126,6 +127,8 @@ qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status'
 qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
 qs('#f-shul').addEventListener('change', () => { state.shul_id = qs('#f-shul').value; state.page = 1; load(); });
 qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
+qs('#f-pagesize').value = state.pageSize;
+qs('#f-pagesize').addEventListener('change', () => { state.pageSize = +qs('#f-pagesize').value; state.page = 1; load(); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 qs('#btn-template').addEventListener('click', () => downloadAuthed('/applicants/import/template', 'applicant_import_template.xlsx'));

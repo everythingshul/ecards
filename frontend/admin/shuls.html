@@ -28,6 +28,7 @@ renderShell('/admin/shuls', `
     <select id="f-status"><option value="">All statuses</option><option value="submitted">Submitted</option><option value="contract_sent">Contract Sent</option><option value="contract_signed">Contract Signed</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
     <select id="f-season"></select>
     <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
+    <select id="f-pagesize"><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="200">200 / page</option></select>
     <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
   </div>
   <div id="live-banner"></div>
@@ -96,7 +97,7 @@ function changePage(d) { state.page += d; load(); }
 
 function rowHtml(s, cols) {
   return `<tr onclick="openShul('${s.id}')" style="cursor:pointer">
-    <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${s.id}" ${s.is_paused ? 'disabled' : ''}></td>
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${s.id}"></td>
     ${cols.map(c => `<td>${c.render(s)}</td>`).join('')}
     <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openShul('${s.id}')">View</button></td>
   </tr>`;
@@ -112,6 +113,8 @@ function onCheck(e) {
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
+qs('#f-pagesize').value = state.pageSize;
+qs('#f-pagesize').addEventListener('change', () => { state.pageSize = +qs('#f-pagesize').value; state.page = 1; load(); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 qs('#btn-template').addEventListener('click', () => downloadAuthed('/shuls/import/template', 'shul_import_template.xlsx'));
