@@ -1,10 +1,35 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { join } from 'path';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { db } from '../db.js';
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 export const CUSTOM_TEMPLATE_PATH = join(DATA_DIR, 'contracts', 'org-template.pdf');
+
+// pdf-lib's 14 built-in StandardFonts only support WinAnsi encoding — they
+// throw ("WinAnsi cannot encode...") on anything outside Latin-1, which
+// includes Hebrew (shul name_he, a signer's typed Hebrew name, etc.), both
+// very much expected input on this platform. Noto Sans Hebrew covers Basic
+// Latin as well as Hebrew, so one pair of embedded fonts (regular/bold)
+// handles every generated PDF and signature stamp instead of needing to
+// detect script per line and switch fonts mid-string. Resolved relative to
+// this file (not process.cwd()) since it's a bundled repo asset, not
+// per-deployment DATA_DIR content.
+const FONTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'fonts');
+const HEBREW_FONT_BYTES = readFileSync(join(FONTS_DIR, 'NotoSansHebrew-Regular.ttf'));
+const HEBREW_FONT_BOLD_BYTES = readFileSync(join(FONTS_DIR, 'NotoSansHebrew-Bold.ttf'));
+
+// Registers fontkit (required for embedding non-standard/Unicode fonts) and
+// embeds the regular+bold Hebrew-capable pair on a given PDFDocument. Each
+// PDFDocument instance needs its own embed call.
+async function embedUnicodeFonts(doc) {
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(HEBREW_FONT_BYTES);
+  const bold = await doc.embedFont(HEBREW_FONT_BOLD_BYTES);
+  return { font, bold };
+}
 
 export function hasCustomTemplate() { return existsSync(CUSTOM_TEMPLATE_PATH); }
 
@@ -34,8 +59,7 @@ export function getSignatureFields(orgId, kind) {
 async function buildSimplePdf({ heading, subheading, fieldLines, bodyText }) {
   const doc = await PDFDocument.create();
   let page = doc.addPage([612, 792]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { font, bold } = await embedUnicodeFonts(doc);
   const margin = 56;
   let y = 792 - margin;
 
@@ -182,8 +206,7 @@ export async function stampSignatureFields({ unsignedPath, shulId, fields, value
   const bytes = readFileSync(unsignedPath);
   const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { font, bold } = await embedUnicodeFonts(doc);
 
   const effectiveFields = fields && fields.length ? fields : [{ id: 'signature', type: 'signature' }];
   let metaDrawn = false;
