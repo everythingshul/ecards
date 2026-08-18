@@ -209,6 +209,13 @@ router.put('/:id', (req, res) => {
 router.put('/:id/set-default', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
+  // An inactive form can never serve as a section's live default — the
+  // public page's own lookup requires is_current_default AND is_active
+  // together (see GET /public/default/:type above), so switching to an
+  // inactive form here wouldn't show that form, it would just take the
+  // section's public page down entirely with a bare 404 until an admin
+  // notices and either activates this form or reassigns the section.
+  if (!form.is_active) return res.status(400).json({ error: 'Activate this form before setting it as the default — an inactive form can\'t serve as a section\'s live page.' });
   const required = REQUIRED_MINIMUM_FIELDS[form.type];
   if (required) {
     const schema = JSON.parse(form.schema_json);

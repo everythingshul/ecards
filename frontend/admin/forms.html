@@ -52,7 +52,7 @@ async function load() {
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
           <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
           <button class="btn btn-sm btn-outline" onclick="openResponses('${f.id}')">Responses</button>
-          ${!f.is_current_default ? `<button class="btn btn-sm btn-outline" onclick="setDefaultForm('${f.id}')">Set as Default for ${esc(SECTION_LABEL[f.type]||f.type)}</button>` : ''}
+          ${!f.is_current_default && f.is_active ? `<button class="btn btn-sm btn-outline" onclick="setDefaultForm('${f.id}')">Set as Default for ${esc(SECTION_LABEL[f.type]||f.type)}</button>` : ''}
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>
       </div>
