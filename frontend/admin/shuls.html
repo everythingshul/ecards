@@ -35,6 +35,7 @@ renderShell('/admin/shuls', `
       <option value="set-pending">Set to Pending</option>
       <option value="pause">Pause</option>
       <option value="unpause">Unpause</option>
+      <option value="carry-forward">Carry Forward to Season…</option>
       <option value="delete">Delete Permanently</option>
     </select>
     <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
@@ -169,7 +170,58 @@ const MASS_ACTIONS = {
     run: (ids) => api('/shuls/mass-delete-permanent', { method: 'POST', body: { ids } }),
     summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}` }),
   },
+  'carry-forward': {
+    confirm: null,
+    run: (ids) => openMassCarryForwardModal(ids),
+    summarize: r => {
+      let msg = `Carried forward ${r.carried} shul(s) with ${r.applicantsCarried} applicant(s), skipped ${r.skipped} shul(s)`;
+      if (r.applicantsSkipped) msg += ` (${r.applicantsSkipped} applicant(s) already carried into that season)`;
+      if (r.duplicatesFlagged) msg += ` — ${r.duplicatesFlagged} flagged as possible duplicate(s)`;
+      return { msg, isError: !!r.duplicatesFlagged };
+    },
+  },
 };
+
+// Same action as the single-shul "Carry Forward to Season…" button, run
+// across every selected shul at once — always carries ALL of each shul's
+// current-season applicants (no per-shul picker in a bulk action, same
+// reasoning as mass-approve's one uniform slots_allocated). Resolves to null
+// (aborting the mass-action, matching approve's cancelled-prompt behavior)
+// if the admin closes the modal without submitting.
+function openMassCarryForwardModal(ids) {
+  return new Promise(async (resolve) => {
+    let seasons = [];
+    try { ({ seasons } = await api('/seasons')); } catch { /* season list just won't show options if this fails */ }
+    const body = `<p class="small-muted">Carries all <strong>${ids.length}</strong> selected shul(s) — and every applicant currently under each — into a different season. Each shul reuses a matching shul there if one already exists (by Gabai email, else name), otherwise creates one, pre-approved, and emails a link to set up their account password and a link to sign that season's contract. Any applicant already carried into that season is skipped, not duplicated.</p>
+      <label>Target Season</label>
+      <select id="mcf-season">${seasons.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <label style="margin-top:12px">Slots Allocated <span class="small-muted">(applied to each shul that needs a new record created there)</span></label>
+      <input id="mcf-slots" type="number" value="0" style="max-width:160px">`;
+    openModal('Carry Forward to Season (Mass)', body, `<button class="btn btn-primary btn-sm" id="mcf-go">Carry Forward</button>`);
+    // openModal/closeModal don't offer an on-close hook, so a plain "click
+    // the backdrop or × instead of submitting" would leave this promise
+    // pending forever — watch for the modal actually leaving the DOM
+    // (however it happens) and resolve(null) then, same as approve's
+    // cancelled-prompt behavior aborts the mass-action cleanly.
+    let resolved = false;
+    const finish = (val) => { if (!resolved) { resolved = true; resolve(val); } };
+    const modalEl = document.getElementById('ec-modal');
+    const observer = new MutationObserver(() => {
+      if (modalEl && !document.body.contains(modalEl)) { observer.disconnect(); finish(null); }
+    });
+    observer.observe(document.body, { childList: true });
+    qs('#mcf-go').addEventListener('click', async () => {
+      const season_id = qs('#mcf-season')?.value;
+      if (!season_id) return toast('No season selected', true);
+      try {
+        const r = await api('/shuls/mass-carry-forward', { method: 'POST', body: { ids, season_id, slots_allocated: +qs('#mcf-slots').value || 0 } });
+        observer.disconnect();
+        closeModal();
+        finish(r);
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+}
 qs('#btn-mass-apply').addEventListener('click', async () => {
   const action = MASS_ACTIONS[qs('#mass-action').value];
   const ids = Array.from(selected);
@@ -389,7 +441,7 @@ window.openCarryForwardModal = async () => {
   if (!id) return;
   let seasons = [];
   try { ({ seasons } = await api('/seasons')); } catch { /* season list just won't show options if this fails */ }
-  const body = `<p class="small-muted">Carries <strong>${esc(name)}</strong> into a different season — reuses a matching shul there if one already exists (by Gabai email, else name), otherwise creates one, pre-approved, with a fresh portal invite.</p>
+  const body = `<p class="small-muted">Carries <strong>${esc(name)}</strong> into a different season — reuses a matching shul there if one already exists (by Gabai email, else name), otherwise creates one, pre-approved, and emails a link to set up their account password and a link to sign that season's contract. Each applicant can only be carried into a given season once — re-running this won't create duplicates.</p>
     <label>Target Season</label>
     <select id="cf-season">${seasons.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
     <label style="margin-top:12px">Slots Allocated <span class="small-muted">(only used if a new shul record is created for that season)</span></label>
@@ -409,7 +461,7 @@ window.runCarryForward = async () => {
   const applicant_ids = qsa('.cf-applicant').filter(c => c.checked).map(c => c.value);
   try {
     const r = await api(`/shuls/${id}/carry-forward`, { method: 'POST', body: { season_id: seasonId, slots_allocated: +qs('#cf-slots').value || 0, applicant_ids } });
-    qs('#cf-result').innerHTML = `<p><strong>${r.shulCreated ? 'Created' : 'Reused'}</strong> the shul in the target season, carried over <strong>${r.applicantsCarried}</strong> applicant(s) as needing re-enrollment.${r.emailError ? ` <span style="color:var(--danger)">Invite email failed: ${esc(r.emailError)}</span>` : ''}${r.duplicate ? ` <span style="color:var(--danger)">A possible duplicate was flagged in the target season — see Duplicates.</span>` : ''}</p>`;
+    qs('#cf-result').innerHTML = `<p><strong>${r.shulCreated ? 'Created' : 'Reused'}</strong> the shul in the target season, carried over <strong>${r.applicantsCarried}</strong> applicant(s) as needing re-enrollment${r.applicantsSkipped ? ` (${r.applicantsSkipped} already carried into that season, skipped)` : ''}.${r.emailError ? ` <span style="color:var(--danger)">Password setup email failed: ${esc(r.emailError)}</span>` : ''}${r.contractEmailError ? ` <span style="color:var(--danger)">Contract email failed: ${esc(r.contractEmailError)}</span>` : ''}${r.duplicate ? ` <span style="color:var(--danger)">A possible duplicate was flagged in the target season — see Duplicates.</span>` : ''}</p>`;
     load();
   } catch (err) { toast(err.message, true); }
 };

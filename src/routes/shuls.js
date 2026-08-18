@@ -328,32 +328,32 @@ router.get('/:id/other-seasons', requireAdmin, (req, res) => {
 // brand-new applicants. The shul completes each one via POST
 // /applicants/:id/complete-reenrollment, which is where required-field
 // validation against the *current* live form actually happens.
-router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
-  const source = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!source) return res.status(404).json({ error: 'Not found' });
-  const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.body?.season_id, req.user.org_id);
-  if (!targetSeason) return res.status(400).json({ error: 'Target season not found' });
-  if (targetSeason.id === source.season_id) return res.status(400).json({ error: 'Target season must be different from the shul\'s current season' });
+// Core of Carry Forward, shared by the single-shul route below and
+// /mass-carry-forward: brings one shul (and some/all of its current-season
+// applicants) into a different season without a fresh application. Returns
+// { error, status } on a validation failure, otherwise the full result.
+async function carryForwardShul(orgId, userId, source, targetSeason, { slotsAllocated, applicantIds, portalEmail, ip } = {}) {
+  if (targetSeason.id === source.season_id) return { error: 'Target season must be different from the shul\'s current season', status: 400 };
 
   let target = source.gabai_email
-    ? db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND gabai_email = ?').get(req.user.org_id, targetSeason.id, source.gabai_email)
-    : db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND name_en = ?').get(req.user.org_id, targetSeason.id, source.name_en);
+    ? db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND gabai_email = ?').get(orgId, targetSeason.id, source.gabai_email)
+    : db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND name_en = ?').get(orgId, targetSeason.id, source.name_en);
   let shulCreated = false;
   let emailError = null;
+  let contractEmailError = null;
   let flag = null;
   if (!target) {
-    const slots = req.body?.slots_allocated;
-    if (slots === undefined || slots === null) return res.status(400).json({ error: 'slots_allocated is required to carry this shul into a new season' });
+    if (slotsAllocated === undefined || slotsAllocated === null) return { error: 'slots_allocated is required to carry this shul into a new season', status: 400 };
     const id = uuid();
     db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip,
         ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip,
         gabai_first_name, gabai_last_name, gabai_cell, gabai_email, gabai_address, gabai_city, gabai_state, gabai_zip,
         status, source, slots_allocated, permanent_comments)
       VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, 'approved','carried_forward', ?, ?)`)
-      .run(id, req.user.org_id, targetSeason.id, source.name_en, source.name_he || '', source.address || '', source.city || '', source.state || '', source.zip || '',
+      .run(id, orgId, targetSeason.id, source.name_en, source.name_he || '', source.address || '', source.city || '', source.state || '', source.zip || '',
         source.ruv_first_name || '', source.ruv_last_name || '', source.ruv_phone || '', source.ruv_address || '', source.ruv_city || '', source.ruv_state || '', source.ruv_zip || '',
         source.gabai_first_name || '', source.gabai_last_name || '', source.gabai_cell || '', source.gabai_email || '', source.gabai_address || '', source.gabai_city || '', source.gabai_state || '', source.gabai_zip || '',
-        slots, source.permanent_comments || null);
+        slotsAllocated, source.permanent_comments || null);
     target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
     shulCreated = true;
 
@@ -361,7 +361,7 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     // existing account by email — e.g. this same shul carried forward
     // again next season — instead of crashing on users.email's UNIQUE
     // constraint; see ensureShulPortalUser for why).
-    let user = ensureShulPortalUser(req.user.org_id, target, req.body?.portal_email);
+    let user = ensureShulPortalUser(orgId, target, portalEmail);
     db.prepare('UPDATE shuls SET portal_user_id = ? WHERE id = ?').run(user.id, target.id);
     target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
 
@@ -372,13 +372,23 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     // every season it re-enrolled. source.id is excluded from candidates:
     // it's not a genuine duplicate, it's the very row this one was cloned
     // from on purpose, and every field matches it by construction.
-    flag = detectAndFlag(req.user.org_id, 'shul', target, [source.id]);
+    flag = detectAndFlag(orgId, 'shul', target, [source.id]);
     if (flag) target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
 
     const loginUrl = shulLoginUrl(user);
-    const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: target.name_en, loginUrl, slots });
-    ({ emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
+    const tmpl = renderSystemTemplate(orgId, 'accountApproved', { shulName: target.name_en, loginUrl, slots: slotsAllocated });
+    ({ emailError } = await sendMailChecked(orgId, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
     if (emailError) console.error('[mail] carry-forward invite email failed:', emailError);
+
+    // A carried-forward shul is pre-approved and ready to go, same as one
+    // approved normally — so it needs the same two links a normal approval
+    // sends: create-password (above) and sign-the-contract (here).
+    // setStatus:false keeps the shul 'approved' (carry-forward's whole
+    // point) instead of letting this flip it to 'contract_sent', which
+    // would drop it out of every "status='approved'" list — including the
+    // public shul picker applicants use to submit against it.
+    const contractResult = await sendContractForShul(orgId, target, portalEmail || target.gabai_email, { setStatus: false });
+    contractEmailError = contractResult.error || contractResult.emailError || null;
   }
 
   // shul_id alone is enough to scope to "this shul's current-season
@@ -387,11 +397,10 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
   // here is redundant and actively wrong whenever a shul's season_id is
   // NULL (an unmatched `= NULL` bind param never matches, even against
   // rows that are also NULL).
-  const ids = req.body?.applicant_ids;
-  const sourceApplicants = ids === 'all'
+  const sourceApplicants = applicantIds === 'all'
     ? db.prepare('SELECT * FROM applicants WHERE shul_id = ?').all(source.id)
-    : Array.isArray(ids) && ids.length
-      ? db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(source.id, ...ids)
+    : Array.isArray(applicantIds) && applicantIds.length
+      ? db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND id IN (${applicantIds.map(() => '?').join(',')})`).all(source.id, ...applicantIds)
       : [];
 
   // `comments` is deliberately NOT carried over — it's this season's
@@ -400,15 +409,67 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
   // shown to the shul) is the field that's actually meant to persist
   // across seasons, so that's what gets copied here instead.
   const insertApplicant = db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, permanent_comments, source, approval_status)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'carried_forward', 'incomplete')`);
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, permanent_comments, source, approval_status, carried_from_applicant_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'carried_forward', 'incomplete', ?)`);
+  // An applicant may only be carried into a given target season once —
+  // re-running carry-forward for the same shul/season (or selecting the
+  // same applicant again) must not pile up duplicate 'incomplete' rows for
+  // the same person. carried_from_applicant_id is set on every row this
+  // action creates, so "already carried into this season" is just "does a
+  // row already point back at this exact source applicant, in this season".
+  const alreadyCarried = db.prepare(`SELECT 1 FROM applicants WHERE season_id = ? AND carried_from_applicant_id = ?`);
+  let applicantsCarried = 0, applicantsSkipped = 0;
   for (const a of sourceApplicants) {
-    insertApplicant.run(uuid(), req.user.org_id, target.id, targetSeason.id, generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
+    if (alreadyCarried.get(targetSeason.id, a.id)) { applicantsSkipped++; continue; }
+    insertApplicant.run(uuid(), orgId, target.id, targetSeason.id, generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
       a.home_phone || '', a.husband_cell || '', a.wife_cell || '', a.email || '', a.address || '', a.city || '', a.state || '', a.zip || '',
-      a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.permanent_comments || null);
+      a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.permanent_comments || null, a.id);
+    applicantsCarried++;
   }
-  logAudit(req.user.org_id, req.user.id, 'carry-forward', 'shul', source.id, { season_id: source.season_id }, { target_shul_id: target.id, target_season_id: targetSeason.id, applicants_carried: sourceApplicants.length }, req.ip);
-  res.json({ shul: target, shulCreated, duplicate: !!flag, emailError, applicantsCarried: sourceApplicants.length });
+  logAudit(orgId, userId, 'carry-forward', 'shul', source.id, { season_id: source.season_id },
+    { target_shul_id: target.id, target_season_id: targetSeason.id, applicants_carried: applicantsCarried, applicants_skipped: applicantsSkipped }, ip);
+  return { shul: target, shulCreated, duplicate: !!flag, emailError, contractEmailError, applicantsCarried, applicantsSkipped };
+}
+
+router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
+  const source = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!source) return res.status(404).json({ error: 'Not found' });
+  const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.body?.season_id, req.user.org_id);
+  if (!targetSeason) return res.status(400).json({ error: 'Target season not found' });
+  const result = await carryForwardShul(req.user.org_id, req.user.id, source, targetSeason,
+    { slotsAllocated: req.body?.slots_allocated, applicantIds: req.body?.applicant_ids, portalEmail: req.body?.portal_email, ip: req.ip });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+// Bulk carry-forward: every selected shul (and ALL of its current-season
+// applicants — a per-shul applicant picker isn't practical in bulk, same
+// reasoning as mass-approve's one uniform slots_allocated) into one target
+// season. Shuls whose current season already IS the target, or that hit a
+// validation error (e.g. needing slots_allocated), are skipped rather than
+// failing the whole batch.
+router.post('/mass-carry-forward', requireAdmin, async (req, res) => {
+  const { ids, season_id, slots_allocated } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id);
+  if (!targetSeason) return res.status(400).json({ error: 'Target season not found' });
+  let carried = 0, skipped = 0, duplicatesFlagged = 0, applicantsCarried = 0, applicantsSkipped = 0;
+  const affectedIds = [], names = [];
+  for (const id of ids) {
+    const source = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!source) { skipped++; continue; }
+    const result = await carryForwardShul(req.user.org_id, req.user.id, source, targetSeason,
+      { slotsAllocated: slots_allocated, applicantIds: 'all', ip: req.ip });
+    if (result.error) { skipped++; continue; }
+    if (result.duplicate) duplicatesFlagged++;
+    applicantsCarried += result.applicantsCarried;
+    applicantsSkipped += result.applicantsSkipped;
+    affectedIds.push(result.shul.id); names.push(result.shul.name_en);
+    carried++;
+  }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-carry-forward', 'shul', affectedIds,
+    { skipped, duplicatesFlagged, applicantsCarried, applicantsSkipped, target_season_id: targetSeason.id, names }, req.ip);
+  res.json({ carried, skipped, duplicatesFlagged, applicantsCarried, applicantsSkipped });
 });
 
 router.post('/', requireAdmin, (req, res) => {
@@ -611,9 +672,15 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
 });
 
 // Generate + email the contract (spec #3: "always email them when there's a doc to sign").
-router.post('/:id/send-contract', requireAdmin, async (req, res) => {
-  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!shul) return res.status(404).json({ error: 'Not found' });
+// Generates a fresh unsigned contract for a shul and emails the signing
+// link. Refuses to overwrite an already-signed contract (see below) —
+// returns { error } instead in that case, never throws for that case.
+// setStatus controls whether the shul's status flips to 'contract_sent' —
+// the manual "Generate & Email Contract" route wants that (it's the normal
+// submitted -> contract_sent -> approved lifecycle), but carry-forward
+// creates its shul row pre-approved on purpose and calls this with
+// setStatus:false so sending the contract doesn't quietly undo that.
+async function sendContractForShul(orgId, shul, toEmail, { setStatus = true } = {}) {
   // The shul detail view always shows the *latest* contract row for this
   // shul (ORDER BY created_at DESC LIMIT 1) — creating a new one here
   // unconditionally would shadow an already-executed, legally-signed
@@ -626,25 +693,33 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   // (a separate, explicit, audited action) is the real way to redo one.
   const existingContract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
   if (existingContract?.status === 'signed') {
-    return res.status(409).json({ error: 'This shul already has a signed contract on file. Retract the existing signature first if you need to send a new one.' });
+    return { error: 'This shul already has a signed contract on file. Retract the existing signature first if you need to send a new one.' };
   }
-  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(orgId);
   const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(shul.season_id);
-  const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'contract_template_text'`).get(req.user.org_id);
+  const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'contract_template_text'`).get(orgId);
   const pdfPath = await generateContractPdf({ shul, season, templateText: templateSetting?.value, orgName: org.name });
   const token = uuid();
   const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
   const id = uuid();
   db.prepare(`INSERT INTO contracts (id, shul_id, season_id, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,?,?,'sent',?,?,datetime('now'))`).run(id, shul.id, shul.season_id, pdfPath, token, expires);
-  db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
+  if (setStatus) db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
   const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
-  const to = req.body.email || shul.gabai_email;
-  const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
-  const { emailError } = await sendMailChecked(req.user.org_id, to, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const tmpl = renderSystemTemplate(orgId, 'contractReady', { shulName: shul.name_en, signUrl });
+  const { emailError } = await sendMailChecked(orgId, toEmail, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
   if (emailError) console.error('[mail] contract email failed:', emailError);
+  return { contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError };
+}
+
+router.post('/:id/send-contract', requireAdmin, async (req, res) => {
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  const to = req.body.email || shul.gabai_email;
+  const result = await sendContractForShul(req.user.org_id, shul, to);
+  if (result.error) return res.status(409).json({ error: result.error });
   logAudit(req.user.org_id, req.user.id, 'send_contract', 'shul', shul.id, null, { to }, req.ip);
-  res.json({ ok: true, contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError });
+  res.json({ ok: true, contract: result.contract, emailError: result.emailError });
 });
 
 // Undo a signature — for a signed-in-error or outdated signature, not a

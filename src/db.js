@@ -624,6 +624,13 @@ safeAlter(`ALTER TABLE applicants ADD COLUMN provider_exempt INTEGER DEFAULT 0`)
 // routes/shuls.js POST /:id/carry-forward.
 safeAlter(`ALTER TABLE applicants ADD COLUMN permanent_comments TEXT`);
 safeAlter(`ALTER TABLE shuls ADD COLUMN permanent_comments TEXT`);
+// Points a carried-forward applicant row at the specific source row it was
+// cloned from (see routes/shuls.js POST /:id/carry-forward and
+// /mass-carry-forward) — lets carry-forward recognize "this exact applicant
+// was already carried into this exact target season" and skip re-inserting
+// a duplicate row, rather than creating a new incomplete copy every time the
+// action is re-run for the same shul/season pair.
+safeAlter(`ALTER TABLE applicants ADD COLUMN carried_from_applicant_id TEXT REFERENCES applicants(id)`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
