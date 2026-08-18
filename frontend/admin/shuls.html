@@ -237,6 +237,9 @@ async function openShul(id) {
           <div><label>State</label><input id="e-gabai_state" value="${esc(shul.gabai_state||'')}"></div>
         </div>
         <label>Zip</label><input id="e-gabai_zip" value="${esc(shul.gabai_zip||'')}" style="max-width:160px">
+        <div class="divider"></div>
+        <label>Permanent Comments (internal — carries forward to future seasons)</label>
+        <textarea id="e-permanent_comments" rows="3">${esc(shul.permanent_comments||'')}</textarea>
         ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from the Shuls > Duplicates review.</div>` : ''}
       </div>
       <div id="tab-notes" style="display:none">
@@ -275,7 +278,7 @@ async function openShul(id) {
 
 window.saveShul = async (id) => {
   const fields = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip',
-    'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
+    'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip','permanent_comments'];
   const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
   body.slots_allocated = +qs('#e-slots_allocated').value;
   try { await api(`/shuls/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }

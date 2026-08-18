@@ -312,7 +312,7 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   // admin-only (spec #5 for card_amount; shul_id because a shul reassigning
   // its own applicants to a different shul would be a data-integrity/scope
   // violation, not a legitimate self-service edit).
-  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount' && f !== 'provider_exempt') : [...EDITABLE_FIELDS, 'shul_id'];
+  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount' && f !== 'provider_exempt') : [...EDITABLE_FIELDS, 'shul_id', 'permanent_comments'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
     const vals = sets.map(f => (f === 'home_for_yomtov' || f === 'provider_exempt') ? (b[f] ? 1 : 0) : b[f]);
