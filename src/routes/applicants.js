@@ -250,7 +250,9 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(shulId, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Shul not found' });
   if (shul.is_paused) return res.status(423).json({ error: 'This shul account is paused and cannot submit applicants' });
-  const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status != 'rejected'`).get(shulId).c;
+  // 'incomplete' (carried-over, not yet re-enrolled) rows don't count as
+  // used slots — see the identical check in complete-reenrollment below.
+  const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(shulId).c;
   if (shul.slots_allocated && used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
   const capError = seasonCapacityError(shul.season_id);
   if (capError) return res.status(400).json({ error: capError });
@@ -337,6 +339,20 @@ router.post('/:id/complete-reenrollment', requirePermission('applicants', 'can_e
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'shul' && applicant.shul_id !== req.user.shul_id) return res.status(403).json({ error: 'Not your applicant' });
   if (applicant.approval_status !== 'incomplete') return res.status(400).json({ error: 'This applicant is not pending re-enrollment' });
+  // Same allocated-slots gate as a brand new submission (POST /) — a shul
+  // can have more carried-forward "incomplete" applicants pre-enrolled than
+  // it has slots for this season (the admin may carry everyone over so the
+  // shul can pick which ones to re-enroll), so completing them one at a
+  // time must still stop once slots run out. Other still-incomplete rows
+  // (nobody's chosen them yet) don't count as "used" — only real
+  // submissions (pending/approved) do — otherwise pre-enrolling more
+  // candidates than there are slots would make ALL of them uncompletable
+  // instead of leaving the shul free to pick which ones fill the slots.
+  const shul = db.prepare('SELECT slots_allocated FROM shuls WHERE id = ?').get(applicant.shul_id);
+  if (shul?.slots_allocated) {
+    const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(applicant.shul_id).c;
+    if (used >= shul.slots_allocated) return res.status(400).json({ error: `This shul has used all ${shul.slots_allocated} allocated slot(s) for this season` });
+  }
   const b = req.body || {};
   if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
   if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);

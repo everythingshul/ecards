@@ -30,11 +30,15 @@ function contactLine(a) {
 }
 
 // Slot usage banner — "used" mirrors the exact rule the server enforces when
-// a new applicant is submitted (routes/applicants.js: every non-rejected
-// applicant counts against the cap, since pending ones could still be approved).
+// a new applicant is submitted or a carried-over one is completed
+// (routes/applicants.js: every pending/approved applicant counts against
+// the cap, since pending ones could still be approved). Still-"incomplete"
+// carried-over applicants deliberately don't count yet — nobody's chosen to
+// re-enroll them — so pre-enrolling more candidates than there are slots
+// doesn't make the banner falsely show as already full.
 api(`/shuls/${Auth.user().shul_id}`).then(({ shul }) => {
   if (!shul.slots_allocated) return;
-  const used = shul.applicants.filter(a => a.approval_status !== 'rejected').length;
+  const used = shul.applicants.filter(a => !['rejected', 'incomplete'].includes(a.approval_status)).length;
   const full = used >= shul.slots_allocated;
   qs('#slots-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${full ? 'border-color:var(--danger)' : ''}">
     <strong>Slots:</strong> ${used} of ${shul.slots_allocated} used (${Math.max(0, shul.slots_allocated - used)} remaining)
