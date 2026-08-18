@@ -340,6 +340,7 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     : db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND name_en = ?').get(req.user.org_id, targetSeason.id, source.name_en);
   let shulCreated = false;
   let emailError = null;
+  let flag = null;
   if (!target) {
     const slots = req.body?.slots_allocated;
     if (slots === undefined || slots === null) return res.status(400).json({ error: 'slots_allocated is required to carry this shul into a new season' });
@@ -363,6 +364,17 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     let user = ensureShulPortalUser(req.user.org_id, target, req.body?.portal_email);
     db.prepare('UPDATE shuls SET portal_user_id = ? WHERE id = ?').run(user.id, target.id);
     target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
+
+    // Every other shul-creation path (public apply, admin create, import)
+    // runs duplicate detection on the new row — carrying a shul forward into
+    // a new season creates a real new row too and was missing this check, so
+    // a shul that's actually a duplicate of some other shul went untracked
+    // every season it re-enrolled. source.id is excluded from candidates:
+    // it's not a genuine duplicate, it's the very row this one was cloned
+    // from on purpose, and every field matches it by construction.
+    flag = detectAndFlag(req.user.org_id, 'shul', target, [source.id]);
+    if (flag) target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
+
     const loginUrl = shulLoginUrl(user);
     const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: target.name_en, loginUrl, slots });
     ({ emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
@@ -396,7 +408,7 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
       a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.permanent_comments || null);
   }
   logAudit(req.user.org_id, req.user.id, 'carry-forward', 'shul', source.id, { season_id: source.season_id }, { target_shul_id: target.id, target_season_id: targetSeason.id, applicants_carried: sourceApplicants.length }, req.ip);
-  res.json({ shul: target, shulCreated, emailError, applicantsCarried: sourceApplicants.length });
+  res.json({ shul: target, shulCreated, duplicate: !!flag, emailError, applicantsCarried: sourceApplicants.length });
 });
 
 router.post('/', requireAdmin, (req, res) => {

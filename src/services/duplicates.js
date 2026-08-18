@@ -19,8 +19,13 @@ function pauseAccountsFor(entityType, entityId, matchedId) {
 // Checks a shul against existing shuls in the same org (any season — "shouldn't
 // need to upload everyone again", so duplicates are detected across seasons too).
 // Matches on: normalized name+city, or same Rav phone, or same Gabai email.
-export function checkShulDuplicate(orgId, shul) {
-  const candidates = db.prepare(`SELECT * FROM shuls WHERE org_id = ? AND id != ?`).all(orgId, shul.id);
+// excludeIds lets a caller rule out a specific candidate that's known to be
+// the same record on purpose (e.g. carry-forward's own source shul, which
+// necessarily matches every field of the row it just generated) rather than
+// a genuine second entry of the same real-world shul.
+export function checkShulDuplicate(orgId, shul, excludeIds = []) {
+  const ids = [shul.id, ...excludeIds];
+  const candidates = db.prepare(`SELECT * FROM shuls WHERE org_id = ? AND id NOT IN (${ids.map(() => '?').join(',')})`).all(orgId, ...ids);
   for (const c of candidates) {
     let reason = null;
     if (norm(c.name_en) === norm(shul.name_en) && norm(c.city) === norm(shul.city) && norm(shul.name_en)) reason = 'Same shul name + city';
@@ -57,9 +62,11 @@ export function checkApplicantDuplicate(orgId, applicant) {
 }
 
 // Runs the appropriate check, and if found: flags it, pauses both accounts, returns the flag row.
-// If not found: returns null and leaves the record active.
-export function detectAndFlag(orgId, entityType, entity) {
-  const match = entityType === 'shul' ? checkShulDuplicate(orgId, entity) : checkApplicantDuplicate(orgId, entity);
+// If not found: returns null and leaves the record active. excludeIds (shul only,
+// see checkShulDuplicate) lets a caller rule out a record known to be the same
+// entity on purpose, like carry-forward's own source shul.
+export function detectAndFlag(orgId, entityType, entity, excludeIds = []) {
+  const match = entityType === 'shul' ? checkShulDuplicate(orgId, entity, excludeIds) : checkApplicantDuplicate(orgId, entity);
   if (!match) return null;
   const id = uuid();
   db.prepare(`INSERT INTO duplicate_flags (id, org_id, entity_type, entity_id, matched_entity_id, reason, status)

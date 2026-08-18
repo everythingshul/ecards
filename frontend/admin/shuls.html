@@ -409,7 +409,7 @@ window.runCarryForward = async () => {
   const applicant_ids = qsa('.cf-applicant').filter(c => c.checked).map(c => c.value);
   try {
     const r = await api(`/shuls/${id}/carry-forward`, { method: 'POST', body: { season_id: seasonId, slots_allocated: +qs('#cf-slots').value || 0, applicant_ids } });
-    qs('#cf-result').innerHTML = `<p><strong>${r.shulCreated ? 'Created' : 'Reused'}</strong> the shul in the target season, carried over <strong>${r.applicantsCarried}</strong> applicant(s) as needing re-enrollment.${r.emailError ? ` <span style="color:var(--danger)">Invite email failed: ${esc(r.emailError)}</span>` : ''}</p>`;
+    qs('#cf-result').innerHTML = `<p><strong>${r.shulCreated ? 'Created' : 'Reused'}</strong> the shul in the target season, carried over <strong>${r.applicantsCarried}</strong> applicant(s) as needing re-enrollment.${r.emailError ? ` <span style="color:var(--danger)">Invite email failed: ${esc(r.emailError)}</span>` : ''}${r.duplicate ? ` <span style="color:var(--danger)">A possible duplicate was flagged in the target season — see Duplicates.</span>` : ''}</p>`;
     load();
   } catch (err) { toast(err.message, true); }
 };
