@@ -127,6 +127,39 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Mass activate/deactivate. Deactivating your own account in a batch would
+// lock you out mid-batch with no per-row confirmation to catch it (unlike
+// the single-user Deactivate button, which is a deliberate click on that
+// one person) — skipped here rather than silently including it.
+router.post('/mass-deactivate', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    if (id === req.user.id) { skipped++; continue; }
+    const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!user) { skipped++; continue; }
+    db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(user.id);
+    logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 0 }, req.ip);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
+router.post('/mass-activate', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!user) { skipped++; continue; }
+    db.prepare('UPDATE users SET is_active = 1 WHERE id = ?').run(user.id);
+    logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 1 }, req.ip);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
 // Permanent deletion — distinct from the deactivate above. Blocked for your
 // own account (avoid accidental self-lockout) and for the org's last
 // super_admin (avoid an org with nobody able to manage it). Every other
@@ -169,6 +202,44 @@ router.delete('/:id/permanent', (req, res) => {
   // undoing this gets the account back and re-grants permissions from there.
   logAudit(req.user.org_id, req.user.id, 'delete', 'user', user.id, user, null, req.ip);
   res.json({ ok: true });
+});
+
+router.post('/mass-delete-permanent', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  const nullOut = (table, column, userId) => db.prepare(`UPDATE ${table} SET ${column} = NULL WHERE ${column} = ?`).run(userId);
+  let deleted = 0, skipped = 0;
+  for (const id of ids) {
+    if (id === req.user.id) { skipped++; continue; }
+    const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!user) { skipped++; continue; }
+    if (user.role === 'super_admin') {
+      const otherSuperAdmins = db.prepare(`SELECT COUNT(*) c FROM users WHERE org_id = ? AND role = 'super_admin' AND id != ? AND is_active = 1`).get(req.user.org_id, user.id).c;
+      if (!otherSuperAdmins) { skipped++; continue; }
+    }
+    db.prepare('DELETE FROM permissions WHERE user_id = ?').run(user.id);
+    db.prepare('DELETE FROM user_assignments WHERE user_id = ?').run(user.id);
+    nullOut('shuls', 'portal_user_id', user.id);
+    nullOut('shul_notes', 'user_id', user.id);
+    nullOut('season_notes', 'user_id', user.id);
+    nullOut('documents', 'created_by', user.id);
+    nullOut('emails_sent', 'sent_by', user.id);
+    nullOut('email_templates', 'created_by', user.id);
+    nullOut('sms_messages', 'sent_by', user.id);
+    nullOut('sms_templates', 'created_by', user.id);
+    nullOut('updates', 'created_by', user.id);
+    nullOut('applicants', 'approved_by', user.id);
+    nullOut('applicant_notes', 'user_id', user.id);
+    nullOut('stores', 'portal_user_id', user.id);
+    nullOut('import_jobs', 'created_by', user.id);
+    nullOut('duplicate_flags', 'resolved_by', user.id);
+    nullOut('tasks', 'assigned_to', user.id);
+    nullOut('tasks', 'created_by', user.id);
+    db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    logAudit(req.user.org_id, req.user.id, 'delete', 'user', user.id, user, null, req.ip);
+    deleted++;
+  }
+  res.json({ deleted, skipped });
 });
 
 function upsertPermission(userId, p) {

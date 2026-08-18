@@ -21,22 +21,69 @@ const HIDABLE_FIELDS = {
 renderShell('/admin/users', `
   <div class="flex-between"><h2>Users & Permissions</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Invite User</button></div>
   <p class="small-muted">Control which pages each internal user can see, whether they can edit/export, and which individual fields (e.g. applicant names) are hidden from them.</p>
+  <div class="toolbar">
+    <select id="mass-action">
+      <option value="deactivate">Deactivate</option>
+      <option value="activate">Activate</option>
+      <option value="delete">Delete Permanently</option>
+    </select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
+  </div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th style="width:34px"><input type="checkbox" id="chk-all"></th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
+let selected = new Set();
 
 async function load() {
   try {
     const { users } = await api('/users');
     qs('#tbody').innerHTML = users.map(u => `<tr>
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${u.id}"></td>
       <td>${esc(u.first_name)} ${esc(u.last_name)}</td><td>${esc(u.email)}</td><td style="text-transform:capitalize">${esc(u.role.replace('_',' '))}</td>
       <td>${u.is_paused ? badge('paused','paused') : (u.is_active ? badge('active','active') : badge('inactive','rejected'))}</td>
       <td><button class="btn btn-sm btn-outline" onclick="openUser('${u.id}')">Manage</button></td>
     </tr>`).join('');
+    qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
   } catch (err) { toast(err.message, true); }
 }
+qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
+function onCheck(e) {
+  const id = e.target.dataset.id;
+  if (e.target.checked) selected.add(id); else selected.delete(id);
+  qs('#btn-mass-apply').textContent = `Apply to Selected (${selected.size})`;
+  qs('#btn-mass-apply').disabled = selected.size === 0;
+}
+const MASS_ACTIONS = {
+  deactivate: {
+    confirm: n => `Deactivate ${n} selected user(s)? They will be blocked from signing in, but their accounts and history stay on file. Your own account is always skipped even if selected.`,
+    run: (ids) => api('/users/mass-deactivate', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deactivated ${r.updated}, skipped ${r.skipped}` }),
+  },
+  activate: {
+    confirm: n => `Activate ${n} selected user(s)?`,
+    run: (ids) => api('/users/mass-activate', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Activated ${r.updated}, skipped ${r.skipped}` }),
+  },
+  delete: {
+    confirm: n => `Permanently delete ${n} selected user(s)? This cannot be undone. Their notes/sent emails/tasks stay on file, but the accounts themselves are gone. Your own account and the org's last active super admin are always skipped even if selected.`,
+    run: (ids) => api('/users/mass-delete-permanent', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}` }),
+  },
+};
+qs('#btn-mass-apply').addEventListener('click', async () => {
+  const action = MASS_ACTIONS[qs('#mass-action').value];
+  const ids = Array.from(selected);
+  if (action.confirm && !confirm(action.confirm(ids.length))) return;
+  try {
+    const r = await action.run(ids);
+    if (!r) return;
+    const { msg, isError } = action.summarize(r);
+    toast(msg, !!isError);
+    selected.clear(); load();
+  } catch (err) { toast(err.message, true); }
+});
 
 function permRow(resource, p) {
   const fields = HIDABLE_FIELDS[resource];
