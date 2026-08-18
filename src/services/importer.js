@@ -9,10 +9,13 @@ export function parseSpreadsheet(buffer, filename = '') {
   return xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
 }
 
-export function buildCsvTemplate(columns) {
-  const header = columns.join(',');
-  const sample = columns.map(c => '').join(',');
-  return header + '\n' + sample + '\n';
+// Downloadable blank import template — xlsx, not CSV, since CSV doesn't
+// reliably round-trip Hebrew text (shul/applicant names) on re-upload.
+export function buildXlsxTemplate(columns) {
+  const wb = xlsx.utils.book_new();
+  const sheet = xlsx.utils.aoa_to_sheet([columns]);
+  xlsx.utils.book_append_sheet(wb, sheet, 'Sheet1');
+  return xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 export const SHUL_IMPORT_COLUMNS = [

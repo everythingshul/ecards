@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { sendMailChecked } from '../services/mail.js';
-import { sendCsv } from '../services/csv.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { findAccountByEmail } from '../utils/contactLookup.js';
 
 const router = Router();
@@ -30,7 +30,7 @@ router.get('/export', (req, res) => {
     const account = findAccountByEmail(req.user.org_id, r.to_email);
     return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
   });
-  sendCsv(res, `sent-emails-${Date.now()}.csv`, withAccount, ['to_email', 'account_type', 'account_name', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
+  sendXlsx(res, `sent-emails-${Date.now()}.xlsx`, withAccount, ['to_email', 'account_type', 'account_name', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
 });
 
 router.get('/:id', (req, res) => {

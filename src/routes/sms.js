@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms, getOwnSmsNumber } from '../services/sms.js';
-import { sendCsv } from '../services/csv.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { findAccountByPhone } from '../utils/contactLookup.js';
 
 const router = Router();
@@ -94,7 +94,7 @@ router.get('/export', (req, res) => {
     const account = findAccountByPhone(req.user.org_id, r.phone);
     return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
   });
-  sendCsv(res, `sms-messages-${Date.now()}.csv`, withAccount, ['direction', 'phone', 'account_type', 'account_name', 'body', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
+  sendXlsx(res, `sms-messages-${Date.now()}.xlsx`, withAccount, ['direction', 'phone', 'account_type', 'account_name', 'body', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
 });
 
 // ============================= Templates =============================

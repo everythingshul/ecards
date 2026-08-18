@@ -3,7 +3,7 @@ import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
-import { sendCsv } from '../services/csv.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, STORE_FIELDS } from '../utils/formValidation.js';
@@ -83,7 +83,7 @@ router.get('/export', requirePermission('stores', 'can_export'), (req, res) => {
     const totals = db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END),0) total_purchases, COALESCE(SUM(CASE WHEN type='refund' THEN amount ELSE 0 END),0) total_refunds FROM card_transactions WHERE store_id = ?`).get(s.id);
     return { ...s, total_purchases: totals.total_purchases, total_refunds: totals.total_refunds };
   });
-  sendCsv(res, `stores-${Date.now()}.csv`, redact(withSpend, req.permission.hidden_fields));
+  sendXlsx(res, `stores-${Date.now()}.xlsx`, redact(withSpend, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {

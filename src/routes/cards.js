@@ -3,7 +3,7 @@ import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import * as giftcard from '../services/giftcard.js';
-import { sendCsv } from '../services/csv.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { syncOneCard, syncAllCards } from '../services/cardSync.js';
 import { normalizePhone } from '../utils/phone.js';
 
@@ -44,7 +44,7 @@ router.get('/export', requirePermission('cards', 'can_export'), (req, res) => {
   const rows = db.prepare(`SELECT c.*, a.first_name, a.last_name, a.email, s.name_en as shul_name
     FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN shuls s ON s.id=a.shul_id
     ${where} ORDER BY c.created_at DESC`).all(...params);
-  sendCsv(res, `cards-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
+  sendXlsx(res, `cards-${Date.now()}.xlsx`, redact(rows, req.permission.hidden_fields));
 });
 
 // Per-shul rollup: how much of the money loaded onto that shul's applicants'
@@ -190,7 +190,7 @@ router.get('/transactions/export', requirePermission('cards', 'can_export'), (re
   const rows = db.prepare(`SELECT t.*, a.first_name, a.last_name, c.card_number_masked, s.name as resolved_store_name
     FROM card_transactions t JOIN cards c ON c.id=t.card_id LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN stores s ON s.id=t.store_id
     ${where} ORDER BY t.occurred_at DESC`).all(...params);
-  sendCsv(res, `transactions-${Date.now()}.csv`, rows);
+  sendXlsx(res, `transactions-${Date.now()}.xlsx`, rows);
 });
 
 // All transactions across the org — "see all transactions they make in stores,

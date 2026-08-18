@@ -25,7 +25,7 @@ renderShell('/admin/sms', `
     <div class="toolbar">
       <input id="f-search" placeholder="Search phone or message…">
       <select id="f-status"><option value="">All statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="mock">Mock (no provider)</option></select>
-      <button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button>
+      <button class="btn btn-outline btn-sm" id="btn-export">Export Excel</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto">
       <table><thead><tr><th>Phone</th><th>Account</th><th>Message</th><th>Status</th><th>Sent</th></tr></thead>
@@ -135,7 +135,7 @@ function sentRowHtml(m) {
 }
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; loadSent(); }, 350));
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; loadSent(); });
-qs('#btn-export').addEventListener('click', () => downloadAuthed('/sms/export', 'sms-messages.csv'));
+qs('#btn-export').addEventListener('click', () => downloadAuthed('/sms/export', 'sms-messages.xlsx'));
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 let inboxState = { page: 1, pageSize: 25 };

@@ -7,8 +7,8 @@ import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
-import { parseSpreadsheet, buildCsvTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
-import { sendCsv } from '../services/csv.js';
+import { parseSpreadsheet, buildXlsxTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
@@ -49,6 +49,19 @@ function ensureShulPortalUser(orgId, shul, portalEmailOverride) {
   db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, role, shul_id, invite_token, invite_expires, is_active)
     VALUES (?,?,?,?,?,'shul',?,?,?,0)`).run(uid, orgId, email, shul.gabai_first_name, shul.gabai_last_name, shul.id, token, expires);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+}
+
+// A reused already-active portal user (returning shul, same gabai email —
+// see ensureShulPortalUser) has no invite_token to accept; send them
+// straight to login instead of a broken /accept-invite?token=null link.
+// Otherwise mints and persists a fresh invite token. Shared by approve,
+// carry-forward, and mass-approve so this branch only lives in one place.
+function shulLoginUrl(user) {
+  if (user.is_active) return `${process.env.APP_URL || ''}/login`;
+  const token = uuid();
+  const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+  db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
+  return `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
 }
 
 // ============================= PUBLIC ==============================
@@ -236,7 +249,7 @@ router.get('/export', requirePermission('shuls', 'can_export'), (req, res) => {
     params.push(like, like, like, like, like);
   }
   const rows = db.prepare(`SELECT * FROM shuls ${where} ORDER BY created_at DESC`).all(...params);
-  sendCsv(res, `shuls-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
+  sendXlsx(res, `shuls-${Date.now()}.xlsx`, redact(rows, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {
@@ -360,15 +373,7 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     let user = ensureShulPortalUser(req.user.org_id, target, req.body?.portal_email);
     db.prepare('UPDATE shuls SET portal_user_id = ? WHERE id = ?').run(user.id, target.id);
     target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
-    let loginUrl;
-    if (user.is_active) {
-      loginUrl = `${process.env.APP_URL || ''}/login`;
-    } else {
-      const token = uuid();
-      const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
-      db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
-      loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
-    }
+    const loginUrl = shulLoginUrl(user);
     const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: target.name_en, loginUrl, slots });
     ({ emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
     if (emailError) console.error('[mail] carry-forward invite email failed:', emailError);
@@ -445,19 +450,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   let user = ensureShulPortalUser(req.user.org_id, shul, req.body.portal_email);
   db.prepare(`UPDATE shuls SET status='approved', slots_allocated=?, portal_user_id=?, updated_at=datetime('now') WHERE id=?`)
     .run(slots, user.id, shul.id);
-  // A reused already-active user (returning shul, same gabai email — see
-  // ensureShulPortalUser) has no invite_token to accept; send them straight
-  // to login instead of a broken /accept-invite?token=null link.
-  let loginUrl;
-  if (user.is_active) {
-    loginUrl = `${process.env.APP_URL || ''}/login`;
-  } else {
-    const token = uuid();
-    const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
-    db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
-  }
+  const loginUrl = shulLoginUrl(user);
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
   if (emailError) console.error('[mail] shul approval email failed:', emailError);
@@ -492,6 +485,32 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
   db.prepare(`UPDATE shuls SET status='rejected', updated_at=datetime('now') WHERE id=?`).run(shul.id);
   logAudit(req.user.org_id, req.user.id, 'reject', 'shul', shul.id, shul, null, req.ip);
   res.json({ ok: true });
+});
+
+// Bulk approve, mirroring applicants' /mass-approve: one uniform
+// slots_allocated applied to every selected shul (a per-shul prompt isn't
+// practical for a bulk action). Paused shuls (unresolved duplicate flag,
+// same rule as the single-shul approve route) are skipped, not blocked.
+router.post('/mass-approve', requireAdmin, async (req, res) => {
+  const { ids, slots_allocated } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (slots_allocated === undefined || slots_allocated === null) return res.status(400).json({ error: 'slots_allocated is required to approve' });
+  let approved = 0, skipped = 0, emailErrors = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul || shul.is_paused) { skipped++; continue; }
+    let user = ensureShulPortalUser(req.user.org_id, shul, null);
+    db.prepare(`UPDATE shuls SET status='approved', slots_allocated=?, portal_user_id=?, updated_at=datetime('now') WHERE id=?`)
+      .run(slots_allocated, user.id, shul.id);
+    const loginUrl = shulLoginUrl(user);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: slots_allocated });
+    const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+    if (emailError) { emailErrors++; console.error('[mail] mass-approve shul email failed:', emailError); }
+    logAudit(req.user.org_id, req.user.id, 'approve', 'shul', shul.id, shul, { slots_allocated }, req.ip);
+    approved++;
+  }
+  res.json({ approved, skipped, emailErrors });
 });
 
 // Manually move a shul back to 'submitted' (the pending-review state before
@@ -642,13 +661,14 @@ router.get('/import/template', requireAdmin, (req, res) => {
   const schema = JSON.parse(getDefaultForm(req.user.org_id, 'shul_application')?.schema_json || '[]');
   const known = schema.filter(f => SHUL_FIELDS.includes(f.key)).map(f => f.key);
   const columns = known.length ? [...known, 'slots_allocated'] : SHUL_IMPORT_COLUMNS;
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="shul_import_template.csv"');
-  res.send(buildCsvTemplate(columns));
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="shul_import_template.xlsx"');
+  res.send(buildXlsxTemplate(columns));
 });
 
 router.post('/import', requireAdmin, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (!/\.xlsx$/i.test(req.file.originalname || '')) return res.status(400).json({ error: 'Only .xlsx files are accepted (CSV does not reliably support Hebrew text).' });
   const jobId = uuid();
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   // Defaults to the newest active season same as before; season_id lets an

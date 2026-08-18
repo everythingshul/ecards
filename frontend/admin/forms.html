@@ -214,7 +214,7 @@ window.openResponses = async (id) => {
           }).join('')}
         </tr>`).join('')}
       </tbody></table></div>` : '<p class="small-muted">No responses yet.</p>';
-    const footer = `<button class="btn btn-outline btn-sm" onclick="downloadAuthed('/forms/${id}/responses/export','${esc(f.slug || 'form')}-responses.csv')">Export CSV</button>`;
+    const footer = `<button class="btn btn-outline btn-sm" onclick="downloadAuthed('/forms/${id}/responses/export','${esc(f.slug || 'form')}-responses.xlsx')">Export Excel</button>`;
     openModal(`${f.name}: Responses (${responses.length})`, body, footer);
   } catch (err) { toast(err.message, true); }
 };

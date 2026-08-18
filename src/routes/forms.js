@@ -10,7 +10,7 @@ import { generateApplicantExternalId } from '../utils/externalId.js';
 import { isZipAllowed } from './applicants.js';
 import { formWindowError, REQUIRED_MINIMUM_FIELDS } from '../utils/formSchedule.js';
 import { validateBySchema, recordFormResponse, splitKnown, APPLICANT_FIELDS, SHUL_FIELDS, STORE_FIELDS } from '../utils/formValidation.js';
-import { sendCsv } from '../services/csv.js';
+import { sendXlsx } from '../services/xlsx.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 const FORMS_DIR = join(DATA_DIR, 'forms');
@@ -253,7 +253,7 @@ router.get('/:id/responses/export', (req, res) => {
     for (const f of schema) out[f.key] = data[f.key] ?? '';
     return out;
   });
-  sendCsv(res, `${form.slug || 'form'}-responses-${Date.now()}.csv`, flat, columns);
+  sendXlsx(res, `${form.slug || 'form'}-responses-${Date.now()}.xlsx`, flat, columns);
 });
 
 export default router;

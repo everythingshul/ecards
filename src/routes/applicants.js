@@ -7,8 +7,8 @@ import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
 import * as giftcard from '../services/giftcard.js';
-import { parseSpreadsheet, buildCsvTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
-import { sendCsv } from '../services/csv.js';
+import { parseSpreadsheet, buildXlsxTemplate, APPLICANT_IMPORT_COLUMNS } from '../services/importer.js';
+import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
@@ -164,7 +164,7 @@ router.get('/export', requirePermission('applicants', 'can_export'), (req, res) 
     params.push(like, like, like, like, like, like, like);
   }
   const rows = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id ${where} ORDER BY a.created_at DESC`).all(...params);
-  sendCsv(res, `applicants-${Date.now()}.csv`, redact(rows, req.permission.hidden_fields));
+  sendXlsx(res, `applicants-${Date.now()}.xlsx`, redact(rows, req.permission.hidden_fields));
 });
 
 router.get('/:id', (req, res) => {
@@ -553,13 +553,14 @@ router.get('/import/template', (req, res) => {
   const schema = getDefaultFormSchema(req.user.org_id, 'applicant_application');
   const known = schema.filter(f => APPLICANT_FIELDS.includes(f.key)).map(f => f.key);
   const columns = known.length ? [...known.filter(k => k !== 'shul_id'), 'shul_name', 'card_amount'] : APPLICANT_IMPORT_COLUMNS;
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="applicant_import_template.csv"');
-  res.send(buildCsvTemplate(columns));
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="applicant_import_template.xlsx"');
+  res.send(buildXlsxTemplate(columns));
 });
 
 router.post('/import', requirePermission('applicants', 'can_edit'), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (!/\.xlsx$/i.test(req.file.originalname || '')) return res.status(400).json({ error: 'Only .xlsx files are accepted (CSV does not reliably support Hebrew text).' });
   const rows = parseSpreadsheet(req.file.buffer, req.file.originalname);
   const jobId = uuid();
   const forcedShul = req.user.role === 'shul' ? db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.user.shul_id) : null;

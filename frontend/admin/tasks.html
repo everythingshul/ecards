@@ -13,7 +13,7 @@
 <script>
 Auth.requireAdmin();
 renderShell('/admin/tasks', `
-  <div class="flex-between"><h2>Tasks</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-export">Export CSV</button><button class="btn btn-primary btn-sm" id="btn-new">+ New Task</button></div></div>
+  <div class="flex-between"><h2>Tasks</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-export">Export Excel</button><button class="btn btn-primary btn-sm" id="btn-new">+ New Task</button></div></div>
   <div class="toolbar">
     <select id="f-assigned"><option value="">Everyone</option><option value="me">Assigned to Me</option></select>
     <select id="f-status"><option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="done">Done</option></select>
@@ -96,7 +96,7 @@ qs('#btn-export').addEventListener('click', () => {
   if (qs('#f-assigned').value) params.set('assigned_to', qs('#f-assigned').value);
   if (qs('#f-status').value) params.set('status', qs('#f-status').value);
   if (qs('#f-overdue').checked) params.set('overdue', 'true');
-  downloadAuthed('/tasks/export?' + params, 'tasks.csv');
+  downloadAuthed('/tasks/export?' + params, 'tasks.xlsx');
 });
 window.createTask = async () => {
   const title = qs('#tk-title').value.trim();

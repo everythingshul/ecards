@@ -53,14 +53,14 @@ function showCardsTab(name) {
 qs('#tab-cards-btn').addEventListener('click', () => showCardsTab('cards'));
 qs('#tab-txns-btn').addEventListener('click', () => showCardsTab('txns'));
 qs('#tab-byshul-btn').addEventListener('click', () => showCardsTab('byshul'));
-qs('#btn-export-cards').addEventListener('click', () => downloadAuthed('/cards/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'cards.csv'));
+qs('#btn-export-cards').addEventListener('click', () => downloadAuthed('/cards/export?' + new URLSearchParams({ search: state.search, status: state.status }), 'cards.xlsx'));
 qs('#btn-sync-all').addEventListener('click', async () => {
   const btn = qs('#btn-sync-all'); btn.disabled = true; btn.textContent = 'Syncing…';
   try { const r = await api('/cards/sync-all', { method: 'POST' }); toast(`Checked ${r.cardsChecked} card(s), synced ${r.transactionsSynced} new transaction(s)`); loadCards(); }
   catch (err) { toast(err.message, true); }
   finally { btn.disabled = false; btn.textContent = 'Sync All Now'; }
 });
-qs('#btn-export-txns').addEventListener('click', () => downloadAuthed('/cards/transactions/export', 'transactions.csv'));
+qs('#btn-export-txns').addEventListener('click', () => downloadAuthed('/cards/transactions/export', 'transactions.xlsx'));
 
 async function loadCards() {
   const params = new URLSearchParams(Object.fromEntries(Object.entries(state).filter(([,v]) => v !== '')));
