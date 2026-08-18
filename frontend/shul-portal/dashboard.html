@@ -15,6 +15,7 @@ Auth.requireRole('shul');
 renderShell('/shul-portal/dashboard', `
   <div class="flex-between"><h2>My Applicants</h2><button class="btn btn-primary btn-sm" id="btn-new">+ Add Applicant</button></div>
   <div id="slots-banner"></div>
+  <div id="reenroll-banner"></div>
   <div class="toolbar"><input id="f-search" placeholder="Search name…"></div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table><thead><tr><th>ID</th><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
@@ -45,7 +46,11 @@ async function load() {
   const params = new URLSearchParams({ search: qs('#f-search').value || '' });
   try {
     const { applicants, total } = await api('/applicants?' + params);
-    qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
+    const needsReenrollment = applicants.filter(a => a.approval_status === 'incomplete');
+    qs('#reenroll-banner').innerHTML = needsReenrollment.length
+      ? `<div class="card" style="margin-bottom:16px;border-color:var(--danger)"><strong>${needsReenrollment.length}</strong> carried-over applicant(s) need re-enrollment — click one below to review and complete their information for this season.</div>`
+      : '';
+    qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer${a.approval_status==='incomplete'?';background:rgba(183,28,28,.06)':''}">
         <td><code>${esc(a.external_id||'')}</code></td>
         <td><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused?' '+badge('paused','paused'):''}</td>
         <td>${esc(a.marital_status||'')}</td><td>${contactLine(a)}</td><td>${a.num_children??0}</td>
@@ -79,9 +84,44 @@ window.createApplicant = async () => {
 // (plus status/card, which answer "what happened to it") — nothing an admin
 // added internally (notes, duplicate-flag reasoning) is ever included; the
 // API already withholds those entirely for the shul role.
+// Carried over from a previous season (see admin's "Carry Forward to
+// Season" action) — not a real submission yet. Renders the live Applicant
+// Application form, pre-filled with whatever's already known, and requires
+// completing every field the form currently requires before it counts as a
+// real submission for this season (and this shul's allocated slots).
+async function openReenrollment(a) {
+  let form;
+  try { ({ form } = await api('/forms/public/default/applicant_application')); } catch { /* falls through to the error below */ }
+  if (!form) { toast('Could not load the application form — try again shortly.', true); return; }
+  const schema = form.schema_json;
+  openModal(`Complete Re-enrollment: ${esc(a.first_name)} ${esc(a.last_name)}`,
+    `<p class="small-muted">This applicant was carried over from a previous season. Please review and fill in anything missing before submitting.</p>
+     <form id="reenroll-form">${schema.map(f => fieldHtml(f)).join('')}</form>`,
+    `<button class="btn btn-primary btn-sm" onclick="submitReenrollment('${a.id}')">Submit</button>`);
+  // Pre-fill every field the schema rendered with whatever this applicant
+  // already has on file (fieldHtml doesn't set values itself).
+  for (const f of schema) {
+    const el = qs('#' + f.key);
+    if (!el || a[f.key] === undefined || a[f.key] === null) continue;
+    if (f.type === 'checkbox') el.checked = !!a[f.key];
+    else el.value = a[f.key];
+  }
+}
+window.submitReenrollment = async (id) => {
+  const fd = new FormData(qs('#reenroll-form'));
+  const body = {};
+  for (const [k, v] of fd.entries()) body[k] = v;
+  qsa('input[type=checkbox]', qs('#reenroll-form')).forEach(c => body[c.name] = c.checked);
+  try {
+    await api(`/applicants/${id}/complete-reenrollment`, { method: 'POST', body });
+    toast('Re-enrollment submitted');
+    closeModal(); load();
+  } catch (err) { toast(err.message, true); }
+};
 async function openApplicant(id) {
   try {
     const { applicant: a } = await api(`/applicants/${id}`);
+    if (a.approval_status === 'incomplete') return openReenrollment(a);
     openModal(`${a.first_name} ${a.last_name}`, `
       <div class="grid-2">
         <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>

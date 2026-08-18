@@ -320,6 +320,43 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
   res.json({ applicant: maskForShul(db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), req.user.role, req.user.org_id) });
 });
 
+// Turns a carried-forward applicant (approval_status='incomplete' — see
+// POST /shuls/:id/carry-forward) into a real submission for this season.
+// This is where required-field validation actually happens for a
+// carried-over record — against the *live* form schema, so a field that
+// wasn't required last season but is now genuinely blocks completion, same
+// as any other submission. Body fields not provided fall back to whatever
+// was already copied over from last season. Applies the same shul-blind
+// zip rule as every other submission path (isZipAllowed) since this is the
+// moment the record actually becomes a real applicant for this season.
+router.post('/:id/complete-reenrollment', requirePermission('applicants', 'can_edit'), (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role === 'shul' && applicant.shul_id !== req.user.shul_id) return res.status(403).json({ error: 'Not your applicant' });
+  if (applicant.approval_status !== 'incomplete') return res.status(400).json({ error: 'This applicant is not pending re-enrollment' });
+  const b = req.body || {};
+  if (b.home_phone !== undefined) b.home_phone = normalizePhone(b.home_phone);
+  if (b.husband_cell !== undefined) b.husband_cell = normalizePhone(b.husband_cell);
+  if (b.wife_cell !== undefined) b.wife_cell = normalizePhone(b.wife_cell);
+  const merged = { ...applicant, ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) };
+  const schema = getDefaultFormSchema(req.user.org_id, 'applicant_application');
+  const errors = validateBySchema(schema, merged, { isAdmin: false });
+  if (errors.length) return res.status(400).json({ error: errors[0] });
+  if (!merged.first_name || !merged.last_name) return res.status(400).json({ error: 'First and last name are required' });
+
+  const initialStatus = isZipAllowed(req.user.org_id, merged.zip) ? 'pending' : 'rejected';
+  db.prepare(`UPDATE applicants SET first_name=?, last_name=?, marital_status=?, home_phone=?, husband_cell=?, wife_cell=?, email=?,
+      address=?, city=?, state=?, zip=?, preferred_contact_method=?, preferred_number=?, num_children=?, home_for_yomtov=?, comments=?,
+      approval_status=?, updated_at=datetime('now') WHERE id=?`)
+    .run(merged.first_name, merged.last_name, merged.marital_status || '', merged.home_phone || '', merged.husband_cell || '', merged.wife_cell || '', merged.email || '',
+      merged.address || '', merged.city || '', merged.state || '', merged.zip || '', merged.preferred_contact_method || '', merged.preferred_number || '',
+      +merged.num_children || 0, merged.home_for_yomtov ? 1 : 0, merged.comments || '', initialStatus, applicant.id);
+  const updated = db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id);
+  detectAndFlag(req.user.org_id, 'applicant', updated);
+  logAudit(req.user.org_id, req.user.id, 'complete-reenrollment', 'applicant', applicant.id, { approval_status: 'incomplete' }, { approval_status: initialStatus }, req.ip);
+  res.json({ applicant: maskForShul(db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), req.user.role, req.user.org_id) });
+});
+
 // Manually move an applicant back to 'pending' — for un-rejecting one after
 // a decision was made too early/in error, or un-approving one to reconsider
 // (approved_by/approved_at/card_amount are left as-is so there's a record of

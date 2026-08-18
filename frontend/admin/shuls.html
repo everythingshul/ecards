@@ -176,6 +176,7 @@ async function openShul(id) {
     `;
     const footer = `
       <button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Shul', '/shuls/${id}/other-seasons', 'openShul')">View Other Seasons</button>
+      <button class="btn btn-outline btn-sm" onclick="openCarryForwardModal()">Carry Forward to Season…</button>
       <button class="btn btn-outline btn-sm" onclick="openQuickTaskModal('shul','${id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">+ Add Task</button>
       ${shul.is_paused ? `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',false)">Unpause</button>` : `<button class="btn btn-outline btn-sm" onclick="pauseToggle('${id}',true)">Pause</button>`}
       ${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" style="color:#b71c1c;border-color:#b71c1c" onclick="deleteShul('${id}')">Delete Permanently</button>` : ''}
@@ -183,6 +184,7 @@ async function openShul(id) {
       ${shul.status !== 'approved' ? `<button class="btn btn-outline btn-sm" onclick="rejectShul('${id}')">Reject</button><button class="btn btn-primary btn-sm" onclick="approveShul('${id}')">Approve</button>` : `<button class="btn btn-outline btn-sm" onclick="resendWelcome('${id}')">Resend Welcome Email</button>`}
       ${shul.portal_user_id && ['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${shul.portal_user_id}','${esc(shul.name_en).replace(/'/g,"\\'")}')">Set Password</button>` : ''}
       <button class="btn btn-primary btn-sm" onclick="saveShul('${id}')">Save</button>`;
+    carryForwardContext = { id, name: shul.name_en, applicants };
     openModal(shul.name_en, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
@@ -286,6 +288,43 @@ window.runImport = async () => {
       qs('#import-result').innerHTML = `<p style="color:var(--danger)"><strong>${esc(err.message)}</strong></p><ul>${err.data.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>`;
     } else toast(err.message, true);
   }
+};
+
+// Carry-forward: a shul (and some/all of its current applicants) into a
+// different season without a fresh application. carryForwardContext is set
+// by openShul() right before its modal opens, since the applicant list and
+// shul name/id are already loaded there — avoids re-fetching or trying to
+// smuggle a JSON blob through an onclick attribute (shul/applicant names
+// can contain quotes that would break out of it).
+let carryForwardContext = null;
+window.openCarryForwardModal = async () => {
+  const { id, name, applicants } = carryForwardContext || {};
+  if (!id) return;
+  let seasons = [];
+  try { ({ seasons } = await api('/seasons')); } catch { /* season list just won't show options if this fails */ }
+  const body = `<p class="small-muted">Carries <strong>${esc(name)}</strong> into a different season — reuses a matching shul there if one already exists (by Gabai email, else name), otherwise creates one, pre-approved, with a fresh portal invite.</p>
+    <label>Target Season</label>
+    <select id="cf-season">${seasons.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+    <label style="margin-top:12px">Slots Allocated <span class="small-muted">(only used if a new shul record is created for that season)</span></label>
+    <input id="cf-slots" type="number" value="0" style="max-width:160px">
+    <label style="margin-top:14px">Applicants to carry over <span class="small-muted">(they'll need to complete any missing info before counting as a real submission)</span></label>
+    <div style="margin-bottom:6px"><button type="button" class="btn btn-outline btn-sm" onclick="qsa('.cf-applicant').forEach(c=>c.checked=true)">Select All</button> <button type="button" class="btn btn-outline btn-sm" onclick="qsa('.cf-applicant').forEach(c=>c.checked=false)">Select None</button></div>
+    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">
+      ${applicants.length ? applicants.map(a => `<div class="checkbox-row"><input type="checkbox" class="cf-applicant" value="${a.id}" checked><label style="margin:0">${esc(a.first_name)} ${esc(a.last_name)} ${badge(a.approval_status, a.approval_status)}</label></div>`).join('') : '<p class="small-muted">This shul has no applicants in its current season.</p>'}
+    </div>
+    <div id="cf-result" style="margin-top:14px"></div>`;
+  openModal('Carry Forward to Season', body, `<button class="btn btn-primary btn-sm" onclick="runCarryForward()">Carry Forward</button>`);
+};
+window.runCarryForward = async () => {
+  const { id } = carryForwardContext || {};
+  const seasonId = qs('#cf-season')?.value;
+  if (!seasonId) return toast('No season selected', true);
+  const applicant_ids = qsa('.cf-applicant').filter(c => c.checked).map(c => c.value);
+  try {
+    const r = await api(`/shuls/${id}/carry-forward`, { method: 'POST', body: { season_id: seasonId, slots_allocated: +qs('#cf-slots').value || 0, applicant_ids } });
+    qs('#cf-result').innerHTML = `<p><strong>${r.shulCreated ? 'Created' : 'Reused'}</strong> the shul in the target season, carried over <strong>${r.applicantsCarried}</strong> applicant(s) as needing re-enrollment.${r.emailError ? ` <span style="color:var(--danger)">Invite email failed: ${esc(r.emailError)}</span>` : ''}</p>`;
+    load();
+  } catch (err) { toast(err.message, true); }
 };
 
 let dupFlagsCache = [];

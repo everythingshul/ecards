@@ -14,11 +14,42 @@ import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
+import { generateApplicantExternalId } from '../utils/externalId.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const REQUIRED_SHUL_FIELDS = ['name_en', 'address', 'city', 'state', 'zip', 'ruv_first_name', 'ruv_last_name', 'ruv_phone', 'gabai_first_name', 'gabai_last_name', 'gabai_cell', 'gabai_email'];
+
+// Finds-or-creates the portal login for a shul record being approved (or
+// carried forward, which pre-approves) — used by POST /:id/approve and
+// POST /:id/carry-forward. A shul row tied to THIS exact id never has a
+// user yet (it's brand new), but `users.email` is UNIQUE org-wide, so a
+// returning shul re-approved in a new season under the same gabai email
+// would otherwise crash on the INSERT (their email is already taken by
+// last season's user row) — this is the entirely normal case of a shul
+// coming back the following year, not an edge case. When an existing user
+// with that email is found, its shul_id is simply repointed at the new
+// row (one login, whichever season's shul row it currently points to —
+// same model as everywhere else: portal access tracks one specific shul
+// row, not "the shul" as a recurring identity) instead of trying to make a
+// second account with the same email.
+function ensureShulPortalUser(orgId, shul, portalEmailOverride) {
+  let user = db.prepare('SELECT * FROM users WHERE shul_id = ?').get(shul.id);
+  if (user) return user;
+  const email = portalEmailOverride || shul.gabai_email;
+  const existing = email ? db.prepare('SELECT * FROM users WHERE org_id = ? AND email = ?').get(orgId, email) : null;
+  if (existing) {
+    db.prepare('UPDATE users SET shul_id = ? WHERE id = ?').run(shul.id, existing.id);
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id);
+  }
+  const token = uuid();
+  const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+  const uid = uuid();
+  db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, role, shul_id, invite_token, invite_expires, is_active)
+    VALUES (?,?,?,?,?,'shul',?,?,?,0)`).run(uid, orgId, email, shul.gabai_first_name, shul.gabai_last_name, shul.id, token, expires);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+}
 
 // ============================= PUBLIC ==============================
 // Public shul onboarding form submission. No auth — this is the form referenced
@@ -275,6 +306,99 @@ router.get('/:id/other-seasons', requireAdmin, (req, res) => {
   res.json({ matches });
 });
 
+// Carries a shul (and, optionally, some or all of its current applicants)
+// forward into a different season — for a returning shul the admin already
+// knows, rather than making them fill out a fresh application. `id` is the
+// SOURCE shul (the season they're currently in); target_season_id is where
+// they're going. Reuses an existing shul record in the target season if one
+// already matches (same heuristic as GET /:id/other-seasons — gabai email,
+// falling back to name) so this is safe to run more than once without
+// creating duplicates; otherwise creates a new one, pre-approved (this is a
+// deliberate admin action on a known shul, not a fresh review queue entry)
+// with the same portal-account-creation logic as the normal approve route.
+// Carried-over applicants land as approval_status='incomplete' — not a real
+// submission yet — with whatever fields are already known copied over;
+// nothing about them (card, disccardpromos account, etc.) carries forward,
+// since that's all specific to last season. They still count against the
+// shul's slots immediately (same "not rejected" rule as everywhere else)
+// so the shul can't out-enroll their allocation by mixing carried-over and
+// brand-new applicants. The shul completes each one via POST
+// /applicants/:id/complete-reenrollment, which is where required-field
+// validation against the *current* live form actually happens.
+router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
+  const source = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!source) return res.status(404).json({ error: 'Not found' });
+  const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.body?.season_id, req.user.org_id);
+  if (!targetSeason) return res.status(400).json({ error: 'Target season not found' });
+  if (targetSeason.id === source.season_id) return res.status(400).json({ error: 'Target season must be different from the shul\'s current season' });
+
+  let target = source.gabai_email
+    ? db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND gabai_email = ?').get(req.user.org_id, targetSeason.id, source.gabai_email)
+    : db.prepare('SELECT * FROM shuls WHERE org_id = ? AND season_id = ? AND name_en = ?').get(req.user.org_id, targetSeason.id, source.name_en);
+  let shulCreated = false;
+  let emailError = null;
+  if (!target) {
+    const slots = req.body?.slots_allocated;
+    if (slots === undefined || slots === null) return res.status(400).json({ error: 'slots_allocated is required to carry this shul into a new season' });
+    const id = uuid();
+    db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip,
+        ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip,
+        gabai_first_name, gabai_last_name, gabai_cell, gabai_email, gabai_address, gabai_city, gabai_state, gabai_zip,
+        status, source, slots_allocated)
+      VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, 'approved','carried_forward', ?)`)
+      .run(id, req.user.org_id, targetSeason.id, source.name_en, source.name_he || '', source.address || '', source.city || '', source.state || '', source.zip || '',
+        source.ruv_first_name || '', source.ruv_last_name || '', source.ruv_phone || '', source.ruv_address || '', source.ruv_city || '', source.ruv_state || '', source.ruv_zip || '',
+        source.gabai_first_name || '', source.gabai_last_name || '', source.gabai_cell || '', source.gabai_email || '', source.gabai_address || '', source.gabai_city || '', source.gabai_state || '', source.gabai_zip || '',
+        slots);
+    target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
+    shulCreated = true;
+
+    // Same portal-account logic as the normal approve route (reuses an
+    // existing account by email — e.g. this same shul carried forward
+    // again next season — instead of crashing on users.email's UNIQUE
+    // constraint; see ensureShulPortalUser for why).
+    let user = ensureShulPortalUser(req.user.org_id, target, req.body?.portal_email);
+    db.prepare('UPDATE shuls SET portal_user_id = ? WHERE id = ?').run(user.id, target.id);
+    target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(target.id);
+    let loginUrl;
+    if (user.is_active) {
+      loginUrl = `${process.env.APP_URL || ''}/login`;
+    } else {
+      const token = uuid();
+      const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+      db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
+      loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
+    }
+    const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: target.name_en, loginUrl, slots });
+    ({ emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
+    if (emailError) console.error('[mail] carry-forward invite email failed:', emailError);
+  }
+
+  // shul_id alone is enough to scope to "this shul's current-season
+  // applicants" — every applicant under a given shul row already belongs to
+  // that row's one season by construction, so an extra season_id filter
+  // here is redundant and actively wrong whenever a shul's season_id is
+  // NULL (an unmatched `= NULL` bind param never matches, even against
+  // rows that are also NULL).
+  const ids = req.body?.applicant_ids;
+  const sourceApplicants = ids === 'all'
+    ? db.prepare('SELECT * FROM applicants WHERE shul_id = ?').all(source.id)
+    : Array.isArray(ids) && ids.length
+      ? db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(source.id, ...ids)
+      : [];
+
+  const insertApplicant = db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'carried_forward', 'incomplete')`);
+  for (const a of sourceApplicants) {
+    insertApplicant.run(uuid(), req.user.org_id, target.id, targetSeason.id, generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
+      a.home_phone || '', a.husband_cell || '', a.wife_cell || '', a.email || '', a.address || '', a.city || '', a.state || '', a.zip || '',
+      a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.comments || '');
+  }
+  logAudit(req.user.org_id, req.user.id, 'carry-forward', 'shul', source.id, { season_id: source.season_id }, { target_shul_id: target.id, target_season_id: targetSeason.id, applicants_carried: sourceApplicants.length }, req.ip);
+  res.json({ shul: target, shulCreated, emailError, applicantsCarried: sourceApplicants.length });
+});
+
 router.post('/', requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
@@ -318,19 +442,22 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   const slots = req.body?.slots_allocated;
   if (slots === undefined || slots === null) return res.status(400).json({ error: 'slots_allocated is required to approve' });
 
-  let user = db.prepare('SELECT * FROM users WHERE shul_id = ?').get(shul.id);
-  if (!user) {
-    const email = req.body.portal_email || shul.gabai_email;
-    const token = uuid();
-    const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
-    const uid = uuid();
-    db.prepare(`INSERT INTO users (id, org_id, email, first_name, last_name, role, shul_id, invite_token, invite_expires, is_active)
-      VALUES (?,?,?,?,?,'shul',?,?,?,0)`).run(uid, req.user.org_id, email, shul.gabai_first_name, shul.gabai_last_name, shul.id, token, expires);
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
-  }
+  let user = ensureShulPortalUser(req.user.org_id, shul, req.body.portal_email);
   db.prepare(`UPDATE shuls SET status='approved', slots_allocated=?, portal_user_id=?, updated_at=datetime('now') WHERE id=?`)
     .run(slots, user.id, shul.id);
-  const loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${user.invite_token}`;
+  // A reused already-active user (returning shul, same gabai email — see
+  // ensureShulPortalUser) has no invite_token to accept; send them straight
+  // to login instead of a broken /accept-invite?token=null link.
+  let loginUrl;
+  if (user.is_active) {
+    loginUrl = `${process.env.APP_URL || ''}/login`;
+  } else {
+    const token = uuid();
+    const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+    db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
+  }
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots });
   const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
   if (emailError) console.error('[mail] shul approval email failed:', emailError);
