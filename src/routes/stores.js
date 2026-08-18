@@ -7,7 +7,7 @@ import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, STORE_FIELDS } from '../utils/formValidation.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 
 const router = Router();
@@ -150,13 +150,15 @@ router.post('/mass-set-status', requireAdmin, (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (!STORE_STATUSES.includes(setup_status)) return res.status(400).json({ error: `setup_status must be one of: ${STORE_STATUSES.join(', ')}` });
   let updated = 0, skipped = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!store) { skipped++; continue; }
     db.prepare('UPDATE stores SET setup_status = ? WHERE id = ?').run(setup_status, store.id);
-    logAudit(req.user.org_id, req.user.id, 'update', 'store', store.id, { setup_status: store.setup_status }, { setup_status }, req.ip);
+    affectedIds.push(store.id); names.push(store.name);
     updated++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-set-status', 'store', affectedIds, { skipped, setup_status, names }, req.ip);
   res.json({ updated, skipped });
 });
 
@@ -186,6 +188,7 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!store) { skipped++; continue; }
@@ -197,9 +200,10 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
       db.prepare('DELETE FROM stores WHERE id = ?').run(store.id);
     });
     del();
-    logAudit(req.user.org_id, req.user.id, 'delete', 'store', store.id, store, null, req.ip);
+    affectedIds.push(store.id); names.push(store.name);
     deleted++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-delete', 'store', affectedIds, { skipped, names }, req.ip);
   res.json({ deleted, skipped });
 });
 

@@ -14,7 +14,7 @@ import { generateApplicantExternalId } from '../utils/externalId.js';
 import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, getDefaultFormSchema, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, APPLICANT_FIELDS } from '../utils/formValidation.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { lockApplicantCards, unlockApplicantCustomer } from '../services/cardSync.js';
 
@@ -96,6 +96,9 @@ function maskForShul(records, role, orgId) {
   const mask = (r) => {
     const rec = { ...r, approval_status: r.approval_status === 'rejected' ? 'pending' : r.approval_status, duplicate_status: null, duplicate_of_applicant_id: null, is_paused: 0 };
     if (!cardVisible) delete rec.card_amount;
+    // Internal-only, not a configurable hidden field — a shul should never
+    // even know this column exists, same boundary as applicant_notes.
+    delete rec.permanent_comments;
     return rec;
   };
   return Array.isArray(records) ? records.map(mask) : mask(records);
@@ -374,15 +377,17 @@ router.post('/mass-set-pending', requireAdmin, async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let updated = 0, skipped = 0, cardLockErrors = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant) { skipped++; continue; }
     db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
-    logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
     const { errors } = await lockApplicantCards(req.user.org_id, applicant);
     if (errors?.length) cardLockErrors++;
+    affectedIds.push(applicant.id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
     updated++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-set-pending', 'applicant', affectedIds, { skipped, names }, req.ip);
   res.json({ updated, skipped, cardLockErrors });
 });
 
@@ -424,6 +429,7 @@ router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0, cardLockErrors = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant) { skipped++; continue; }
@@ -438,9 +444,10 @@ router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
       db.prepare('DELETE FROM applicants WHERE id = ?').run(applicant.id);
     });
     del();
-    logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
+    affectedIds.push(applicant.id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
     deleted++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-delete', 'applicant', affectedIds, { skipped, names }, req.ip);
   res.json({ deleted, skipped, cardLockErrors });
 });
 
@@ -527,15 +534,17 @@ router.post('/mass-reject', requireAdmin, async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let rejected = 0, skipped = 0, cardLockErrors = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant) { skipped++; continue; }
     db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
-    logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
     const { errors } = await lockApplicantCards(req.user.org_id, applicant);
     if (errors?.length) cardLockErrors++;
+    affectedIds.push(applicant.id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
     rejected++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-reject', 'applicant', affectedIds, { skipped, names }, req.ip);
   res.json({ rejected, skipped, cardLockErrors });
 });
 
@@ -545,6 +554,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
   let approved = 0, skipped = 0, capReached = false, providerErrors = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!applicant || applicant.is_paused) { skipped++; continue; }
@@ -555,8 +565,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
     }
     const amount = card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
     db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`).run(req.user.id, amount, id);
-    logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', id,
-      { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
+    affectedIds.push(id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
     approved++;
     // Same best-effort account-write + fund-load as the single /:id/approve
     // route — see the comments there. A disccardpromos hiccup on one
@@ -586,6 +595,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
       }
     }
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-approve', 'applicant', affectedIds, { skipped, capReached, providerErrors, names }, req.ip);
   res.json({ approved, skipped, capReached, providerErrors, providerErrorsHint: providerErrors && !discountId ? 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading).' : undefined });
 });
 
@@ -687,6 +697,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   }
 
   let success = 0, dupes = 0, updated = 0; const errors = [];
+  const createdIds = [], createdNames = [], updatedIds = [], updatedNames = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const existing = rowExisting[i];
@@ -698,7 +709,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
         if (yomtovRaw !== '') { sets.push('home_for_yomtov'); vals.push(/^(y|yes|true|1)$/i.test(yomtovRaw) ? 1 : 0); }
         if (sets.length) {
           db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
-          logAudit(req.user.org_id, req.user.id, 'update', 'applicant', existing.id, Object.fromEntries(sets.map(f => [f, existing[f]])), Object.fromEntries(sets.map((f, idx) => [f, vals[idx]])), req.ip);
+          updatedIds.push(existing.id); updatedNames.push(`${existing.first_name} ${existing.last_name}`.trim());
         }
         updated++;
       } catch (e) {
@@ -729,7 +740,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
       recordFormResponse(req.user.org_id, defaultForm, r, { type: 'applicant', id });
-      logAudit(req.user.org_id, req.user.id, 'create', 'applicant', id, null, applicant, req.ip);
+      createdIds.push(id); createdNames.push(`${applicant.first_name} ${applicant.last_name}`.trim());
       if (flag && req.user.role !== 'shul') dupes++; else success++;
     } catch (e) {
       errors.push({ row: i + 2, error: e.message });
@@ -738,6 +749,8 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   db.prepare(`INSERT INTO import_jobs (id, org_id, entity_type, file_name, status, total_rows, success_count, error_count, duplicate_count, error_log, created_by)
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'applicants', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
+  logMassAudit(req.user.org_id, req.user.id, 'mass-import', 'applicant', [...createdIds, ...updatedIds],
+    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames] }, req.ip);
   res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 

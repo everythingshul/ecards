@@ -46,6 +46,24 @@ export function logAudit(orgId, userId, action, entityType, entityId, before, af
   return id;
 }
 
+// One audit_log row for an entire bulk action (mass-approve, mass-delete, a
+// whole mass-upload job, ...) instead of one row per record it touched — a
+// 300-row import or a 50-shul mass-approve used to flood Recent Actions with
+// that many individual entries from a single click. entity_id is
+// deliberately null (there's no single record this row is "about"); `ids`
+// and whatever else the caller has on hand (skipped count, display names,
+// the uniform value applied, ...) live in after_json instead. Never
+// undoable — action names passed here are never added to UNDOABLE_ACTIONS,
+// so getRecentActions' undoable check fails on the action name alone;
+// reversing dozens of different records' worth of changes through the
+// single-entity restore mechanism below isn't something this generically
+// supports. No-ops (returns null) if nothing was actually affected — a mass
+// action that skipped every row isn't worth a log entry.
+export function logMassAudit(orgId, userId, action, entityType, ids, extra, ip) {
+  if (!ids || !ids.length) return null;
+  return logAudit(orgId, userId, action, entityType, null, null, { ids, count: ids.length, ...extra }, ip);
+}
+
 // Last N hours of audit_log for an org, newest first, with the acting user's
 // name attached. `null` user_id (public form submissions, system actions)
 // shows as "System".

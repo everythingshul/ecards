@@ -619,6 +619,16 @@ safeAlter(`ALTER TABLE documents ADD COLUMN field_values TEXT`);
 // import time (routes/applicants.js POST /import) and editable afterward by
 // an admin as a safety net.
 safeAlter(`ALTER TABLE applicants ADD COLUMN provider_exempt INTEGER DEFAULT 0`);
+// Internal-only note that survives Carry Forward to a new season, unlike
+// the regular `comments` field (submitted with the application, shown to
+// the shul, and deliberately blank again on a carried-forward row — each
+// season is its own fresh submission) or shul_notes (a dated log, tied to
+// one specific shul row, never copied to the next season's row either).
+// Never exposed to a shul/store/public view — admin-only, same boundary as
+// notes. Set/edited from the admin detail modal; copied verbatim by
+// routes/shuls.js POST /:id/carry-forward.
+safeAlter(`ALTER TABLE applicants ADD COLUMN permanent_comments TEXT`);
+safeAlter(`ALTER TABLE shuls ADD COLUMN permanent_comments TEXT`);
 
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —

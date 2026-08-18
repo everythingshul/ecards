@@ -27,6 +27,12 @@ renderShell('/admin/audit', `
 
 const ENTITY_LABELS = { shul: 'shul', applicant: 'applicant', store: 'store', season: 'season', task: 'task', user: 'user', card: 'card' };
 const ACTION_VERBS = { create: 'Created', update: 'Updated', delete: 'Deleted', approve: 'Approved', reject: 'Rejected', undo: 'Reversed a change to', login: 'Signed in', esign: 'Signed', send_contract: 'Sent a contract to', retract_signature: 'Retracted a signature on', resolve_duplicate: 'Resolved a duplicate flag on' };
+// Mass actions (bulk buttons + spreadsheet imports) log one audit_log row
+// per click/upload instead of one per affected record — entity_id is null,
+// and the record ids/names/counts live in after_json instead of a normal
+// before/after diff. Rendered with their own headline/detail below rather
+// than forced through headline()/changeList(), which assume a single entity.
+const MASS_VERBS = { 'mass-approve': 'Approved', 'mass-reject': 'Rejected', 'mass-set-pending': 'Set to pending', 'mass-delete': 'Deleted', 'mass-import': 'Imported', 'mass-set-status': 'Updated status for', 'mass-deactivate': 'Deactivated', 'mass-activate': 'Activated' };
 const FIELD_LABELS = {
   approval_status: 'Status', card_amount: 'Card Amount', is_active: 'Active', first_name: 'First Name', last_name: 'Last Name',
   name_en: 'Name', name: 'Name', role: 'Role', phone: 'Phone', slots_allocated: 'Slots', email: 'Email', home_phone: 'Home Phone',
@@ -75,20 +81,61 @@ function changeList(a) {
   </ul>`;
 }
 
+// One row for an entire bulk action instead of the per-field diff a
+// single-entity row gets — there's no one "before" to show, just how many
+// records were touched, how many were skipped, and (when the backend sent
+// them) which ones by name.
+function massHeadline(a) {
+  const label = ENTITY_LABELS[a.entity_type] || a.entity_type;
+  const after = a.after || {};
+  if (a.action === 'mass-import') {
+    const created = after.created || 0, updated = after.updated || 0, total = created + updated;
+    const plural = total === 1 ? label : label + 's';
+    const parts = [];
+    if (created) parts.push(`${created} created`);
+    if (updated) parts.push(`${updated} updated`);
+    return `Imported ${total} ${plural}${parts.length ? ' — ' + parts.join(', ') : ''}`;
+  }
+  const verb = MASS_VERBS[a.action] || (a.action.replace(/^mass-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+  const count = after.count || 0;
+  return `${verb} ${count} ${count === 1 ? label : label + 's'}`;
+}
+function massDetail(a) {
+  const after = a.after || {};
+  const bits = [];
+  if (after.skipped) bits.push(`${after.skipped} skipped`);
+  if (after.duplicates) bits.push(`${after.duplicates} flagged as duplicates`);
+  if (after.errors) bits.push(`${after.errors} errors`);
+  if (after.capReached) bits.push('season cap reached');
+  if (after.providerErrors) bits.push(`${after.providerErrors} gift-card provider errors`);
+  if (after.emailErrors) bits.push(`${after.emailErrors} email errors`);
+  if (after.cardLockErrors) bits.push(`${after.cardLockErrors} card-lock errors`);
+  let html = bits.length ? `<div class="small-muted" style="margin-top:6px">${esc(bits.join(' · '))}</div>` : '';
+  const names = (after.names || []).filter(Boolean);
+  if (names.length) {
+    const shown = names.slice(0, 15).join(', ');
+    html += `<div class="small-muted" style="margin-top:4px">${esc(shown)}${names.length > 15 ? esc(`, +${names.length - 15} more`) : ''}</div>`;
+  }
+  return html;
+}
+
 async function load() {
   const hours = qs('#f-hours').value;
   const { actions } = await api(`/audit/recent?hours=${hours}`);
-  qs('#actions-list').innerHTML = actions.length ? actions.map(a => `<div class="card" style="margin-bottom:8px;padding:14px 16px">
+  qs('#actions-list').innerHTML = actions.length ? actions.map(a => {
+    const isMass = a.action.startsWith('mass-');
+    return `<div class="card" style="margin-bottom:8px;padding:14px 16px">
       <div class="flex-between">
         <div>
-          <strong>${headline(a)}</strong>${a.undone_at ? ' ' + badge('undone', 'inactive') : ''}
-          ${changeList(a)}
+          <strong>${isMass ? esc(massHeadline(a)) : headline(a)}</strong>${a.undone_at ? ' ' + badge('undone', 'inactive') : ''}
+          ${isMass ? massDetail(a) : changeList(a)}
           <div class="small-muted" style="margin-top:8px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}</div>
         </div>
         ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}', false)">Undo</button>` : ''}
         ${a.redoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.undo_entry_id}', true)">Redo</button>` : ''}
       </div>
-    </div>`).join('') : '<p class="small-muted">No actions in this window.</p>';
+    </div>`;
+  }).join('') : '<p class="small-muted">No actions in this window.</p>';
 }
 window.undoAction = async (id, isRedo) => {
   if (!confirm(isRedo ? 'Redo this action? This brings the change back.' : 'Undo this action? This restores the affected record to how it was right before this change.')) return;

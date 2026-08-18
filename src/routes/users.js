@@ -5,7 +5,7 @@ import { auth, requireRole } from '../middleware/auth.js';
 import { assign, unassign } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { normalizePhone } from '../utils/phone.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, logMassAudit } from '../services/audit.js';
 
 const router = Router();
 const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms', 'users', 'settings'];
@@ -135,14 +135,16 @@ router.post('/mass-deactivate', (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let updated = 0, skipped = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     if (id === req.user.id) { skipped++; continue; }
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!user) { skipped++; continue; }
     db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(user.id);
-    logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 0 }, req.ip);
+    affectedIds.push(user.id); names.push(`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email);
     updated++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-deactivate', 'user', affectedIds, { skipped, names }, req.ip);
   res.json({ updated, skipped });
 });
 
@@ -150,13 +152,15 @@ router.post('/mass-activate', (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let updated = 0, skipped = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!user) { skipped++; continue; }
     db.prepare('UPDATE users SET is_active = 1 WHERE id = ?').run(user.id);
-    logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 1 }, req.ip);
+    affectedIds.push(user.id); names.push(`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email);
     updated++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-activate', 'user', affectedIds, { skipped, names }, req.ip);
   res.json({ updated, skipped });
 });
 
@@ -209,6 +213,7 @@ router.post('/mass-delete-permanent', (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   const nullOut = (table, column, userId) => db.prepare(`UPDATE ${table} SET ${column} = NULL WHERE ${column} = ?`).run(userId);
   let deleted = 0, skipped = 0;
+  const affectedIds = [], names = [];
   for (const id of ids) {
     if (id === req.user.id) { skipped++; continue; }
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
@@ -236,9 +241,10 @@ router.post('/mass-delete-permanent', (req, res) => {
     nullOut('tasks', 'assigned_to', user.id);
     nullOut('tasks', 'created_by', user.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
-    logAudit(req.user.org_id, req.user.id, 'delete', 'user', user.id, user, null, req.ip);
+    affectedIds.push(user.id); names.push(`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email);
     deleted++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-delete', 'user', affectedIds, { skipped, names }, req.ip);
   res.json({ deleted, skipped });
 });
 

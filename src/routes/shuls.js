@@ -12,7 +12,7 @@ import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
 import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 
@@ -261,7 +261,12 @@ router.get('/:id', (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
   const applicants = db.prepare('SELECT id, first_name, last_name, approval_status FROM applicants WHERE shul_id = ?').all(shul.id);
   const flags = db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='shul' AND (entity_id = ? OR matched_entity_id = ?) AND status='open'`).all(shul.id, shul.id);
-  res.json({ shul: redact(shul, req.permission.hidden_fields), notes, contract, applicants, flags });
+  const shulOut = redact(shul, req.permission.hidden_fields);
+  // Internal-only, not a configurable hidden field — a shul should never
+  // even know this column exists, same boundary as shul_notes' contents
+  // being an admin-facing thing (the shul just never has a UI for this one).
+  if (req.user.role === 'shul') delete shulOut.permanent_comments;
+  res.json({ shul: shulOut, notes, contract, applicants, flags });
 });
 
 // Admin-only quick-contact: send a one-off SMS/email straight from a shul's
@@ -357,12 +362,12 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
     db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip,
         ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip,
         gabai_first_name, gabai_last_name, gabai_cell, gabai_email, gabai_address, gabai_city, gabai_state, gabai_zip,
-        status, source, slots_allocated)
-      VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, 'approved','carried_forward', ?)`)
+        status, source, slots_allocated, permanent_comments)
+      VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, 'approved','carried_forward', ?, ?)`)
       .run(id, req.user.org_id, targetSeason.id, source.name_en, source.name_he || '', source.address || '', source.city || '', source.state || '', source.zip || '',
         source.ruv_first_name || '', source.ruv_last_name || '', source.ruv_phone || '', source.ruv_address || '', source.ruv_city || '', source.ruv_state || '', source.ruv_zip || '',
         source.gabai_first_name || '', source.gabai_last_name || '', source.gabai_cell || '', source.gabai_email || '', source.gabai_address || '', source.gabai_city || '', source.gabai_state || '', source.gabai_zip || '',
-        slots);
+        slots, source.permanent_comments || null);
     target = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
     shulCreated = true;
 
@@ -392,13 +397,18 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
       ? db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND id IN (${ids.map(() => '?').join(',')})`).all(source.id, ...ids)
       : [];
 
+  // `comments` is deliberately NOT carried over — it's this season's
+  // submission-specific note and starts blank like every other season's
+  // fresh application would; `permanent_comments` (internal-only, never
+  // shown to the shul) is the field that's actually meant to persist
+  // across seasons, so that's what gets copied here instead.
   const insertApplicant = db.prepare(`INSERT INTO applicants (id, org_id, shul_id, season_id, external_id, first_name, last_name, marital_status, home_phone, husband_cell, wife_cell, email,
-      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, comments, source, approval_status)
+      address, city, state, zip, preferred_contact_method, preferred_number, num_children, home_for_yomtov, permanent_comments, source, approval_status)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'carried_forward', 'incomplete')`);
   for (const a of sourceApplicants) {
     insertApplicant.run(uuid(), req.user.org_id, target.id, targetSeason.id, generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
       a.home_phone || '', a.husband_cell || '', a.wife_cell || '', a.email || '', a.address || '', a.city || '', a.state || '', a.zip || '',
-      a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.comments || '');
+      a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.permanent_comments || null);
   }
   logAudit(req.user.org_id, req.user.id, 'carry-forward', 'shul', source.id, { season_id: source.season_id }, { target_shul_id: target.id, target_season_id: targetSeason.id, applicants_carried: sourceApplicants.length }, req.ip);
   res.json({ shul: target, shulCreated, emailError, applicantsCarried: sourceApplicants.length });
@@ -490,14 +500,15 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
 router.post('/mass-reject', requireAdmin, (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
-  let rejected = 0, skipped = 0;
+  let rejected = 0, skipped = 0; const affectedIds = [], names = [];
   for (const id of ids) {
     const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!shul) { skipped++; continue; }
     db.prepare(`UPDATE shuls SET status='rejected', updated_at=datetime('now') WHERE id=?`).run(shul.id);
-    logAudit(req.user.org_id, req.user.id, 'reject', 'shul', shul.id, shul, null, req.ip);
+    affectedIds.push(shul.id); names.push(shul.name_en);
     rejected++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-reject', 'shul', affectedIds, { skipped, names }, req.ip);
   res.json({ rejected, skipped });
 });
 
@@ -509,7 +520,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
   const { ids, slots_allocated } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (slots_allocated === undefined || slots_allocated === null) return res.status(400).json({ error: 'slots_allocated is required to approve' });
-  let approved = 0, skipped = 0, emailErrors = 0;
+  let approved = 0, skipped = 0, emailErrors = 0; const affectedIds = [], names = [];
   for (const id of ids) {
     const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!shul || shul.is_paused) { skipped++; continue; }
@@ -521,9 +532,10 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
     const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: slots_allocated });
     const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
     if (emailError) { emailErrors++; console.error('[mail] mass-approve shul email failed:', emailError); }
-    logAudit(req.user.org_id, req.user.id, 'approve', 'shul', shul.id, shul, { slots_allocated }, req.ip);
+    affectedIds.push(shul.id); names.push(shul.name_en);
     approved++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-approve', 'shul', affectedIds, { skipped, emailErrors, slots_allocated, names }, req.ip);
   res.json({ approved, skipped, emailErrors });
 });
 
@@ -540,14 +552,15 @@ router.post('/:id/set-pending', requireAdmin, (req, res) => {
 router.post('/mass-set-pending', requireAdmin, (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
-  let updated = 0, skipped = 0;
+  let updated = 0, skipped = 0; const affectedIds = [], names = [];
   for (const id of ids) {
     const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!shul) { skipped++; continue; }
     db.prepare(`UPDATE shuls SET status='submitted', updated_at=datetime('now') WHERE id=?`).run(shul.id);
-    logAudit(req.user.org_id, req.user.id, 'set-pending', 'shul', shul.id, { status: shul.status }, { status: 'submitted' }, req.ip);
+    affectedIds.push(shul.id); names.push(shul.name_en);
     updated++;
   }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-set-pending', 'shul', affectedIds, { skipped, names }, req.ip);
   res.json({ updated, skipped });
 });
 
@@ -579,7 +592,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
 router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
-  let deleted = 0, skipped = 0;
+  let deleted = 0, skipped = 0; const affectedIds = [], names = [];
   for (const id of ids) {
     const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!shul) { skipped++; continue; }
@@ -593,9 +606,14 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
       db.prepare('DELETE FROM shuls WHERE id = ?').run(shul.id);
     });
     del();
-    logAudit(req.user.org_id, req.user.id, 'delete', 'shul', shul.id, shul, null, req.ip);
+    affectedIds.push(shul.id); names.push(shul.name_en);
     deleted++;
   }
+  // The deleted rows' own ids aren't useful to a reviewer any more (nothing
+  // left to look up by them), but logMassAudit still needs a non-empty list
+  // to know a mass-delete entry is worth logging at all — names is what
+  // actually matters here, ids is just the "how many / which ones" record.
+  logMassAudit(req.user.org_id, req.user.id, 'mass-delete', 'shul', affectedIds, { skipped, names }, req.ip);
   res.json({ deleted, skipped });
 });
 
@@ -814,6 +832,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
   const shulDefaultForm = getDefaultForm(req.user.org_id, 'shul_application');
   let success = 0, dupes = 0, updated = 0; const errors = [];
+  const createdIds = [], createdNames = [], updatedIds = [], updatedNames = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const existing = rowExisting[i];
@@ -823,7 +842,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         if (sets.length) {
           const vals = sets.map(f => SHUL_UPDATABLE_FIELDS[f](r));
           db.prepare(`UPDATE shuls SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
-          logAudit(req.user.org_id, req.user.id, 'update', 'shul', existing.id, Object.fromEntries(sets.map(f => [f, existing[f]])), Object.fromEntries(sets.map((f, idx) => [f, vals[idx]])), req.ip);
+          updatedIds.push(existing.id); updatedNames.push(existing.name_en);
         }
         updated++;
       } catch (e) {
@@ -846,7 +865,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'shul', shul);
       recordFormResponse(req.user.org_id, shulDefaultForm, r, { type: 'shul', id });
-      logAudit(req.user.org_id, req.user.id, 'create', 'shul', id, null, shul, req.ip);
+      createdIds.push(id); createdNames.push(shul.name_en);
       if (flag) dupes++; else success++;
       if (sendContracts && !flag) {
         const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
@@ -868,6 +887,8 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   db.prepare(`INSERT INTO import_jobs (id, org_id, entity_type, file_name, status, total_rows, success_count, error_count, duplicate_count, error_log, created_by)
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'shuls', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
+  logMassAudit(req.user.org_id, req.user.id, 'mass-import', 'shul', [...createdIds, ...updatedIds],
+    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames] }, req.ip);
   res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 
