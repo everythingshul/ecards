@@ -14,7 +14,7 @@ import { getActiveSeasonId } from '../utils/formSchedule.js';
 import { validateBySchema, shulInfoErrors } from '../utils/formValidation.js';
 import { SHUL_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
-import { deletePolymorphicRefs } from '../utils/entityDelete.js';
+import { hardDeleteShul } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 
 const router = Router();
@@ -572,15 +572,7 @@ router.post('/mass-set-pending', requireAdmin, (req, res) => {
 router.delete('/:id/permanent', requireAdmin, (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
-  const del = db.transaction(() => {
-    db.prepare('UPDATE applicants SET shul_id = NULL WHERE shul_id = ?').run(shul.id);
-    db.prepare('UPDATE shuls SET duplicate_of_shul_id = NULL WHERE duplicate_of_shul_id = ?').run(shul.id);
-    db.prepare('DELETE FROM contracts WHERE shul_id = ?').run(shul.id);
-    db.prepare('DELETE FROM shul_notes WHERE shul_id = ?').run(shul.id);
-    if (shul.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(shul.portal_user_id);
-    deletePolymorphicRefs('shul', shul.id);
-    db.prepare('DELETE FROM shuls WHERE id = ?').run(shul.id);
-  });
+  const del = db.transaction(() => hardDeleteShul(shul));
   del();
   logAudit(req.user.org_id, req.user.id, 'delete', 'shul', shul.id, shul, null, req.ip);
   res.json({ ok: true });
@@ -593,15 +585,7 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
   for (const id of ids) {
     const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!shul) { skipped++; continue; }
-    const del = db.transaction(() => {
-      db.prepare('UPDATE applicants SET shul_id = NULL WHERE shul_id = ?').run(shul.id);
-      db.prepare('UPDATE shuls SET duplicate_of_shul_id = NULL WHERE duplicate_of_shul_id = ?').run(shul.id);
-      db.prepare('DELETE FROM contracts WHERE shul_id = ?').run(shul.id);
-      db.prepare('DELETE FROM shul_notes WHERE shul_id = ?').run(shul.id);
-      if (shul.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(shul.portal_user_id);
-      deletePolymorphicRefs('shul', shul.id);
-      db.prepare('DELETE FROM shuls WHERE id = ?').run(shul.id);
-    });
+    const del = db.transaction(() => hardDeleteShul(shul));
     del();
     affectedIds.push(shul.id); names.push(shul.name_en);
     deleted++;
@@ -822,6 +806,11 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
   let success = 0, dupes = 0, updated = 0; const errors = [];
   const createdIds = [], createdNames = [], updatedIds = [], updatedNames = [];
+  // Per-row "what did this column used to say" snapshot, captured right
+  // before each UPDATE — this is what makes mass-import undo (see
+  // services/audit.js undoMassImportEntry) able to actually restore an
+  // edited row instead of just deleting the newly-created ones.
+  const updatedDiffs = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const existing = rowExisting[i];
@@ -832,6 +821,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
           const vals = sets.map(f => SHUL_UPDATABLE_FIELDS[f](r));
           db.prepare(`UPDATE shuls SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
           updatedIds.push(existing.id); updatedNames.push(existing.name_en);
+          updatedDiffs.push({ id: existing.id, before: Object.fromEntries(sets.map(f => [f, existing[f]])) });
         }
         updated++;
       } catch (e) {
@@ -876,7 +866,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'shuls', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
   logMassAudit(req.user.org_id, req.user.id, 'mass-import', 'shul', [...createdIds, ...updatedIds],
-    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames] }, req.ip);
+    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames], createdIds, updatedIds, updatedDiffs }, req.ip);
   res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 

@@ -1,4 +1,5 @@
 import { db, uuid } from '../db.js';
+import { hardDeleteShul, hardDeleteApplicant } from '../utils/entityDelete.js';
 
 // ---------------------------------------------------------------------------
 // Shared audit trail + generic undo/redo. Previously logAudit() was a local,
@@ -89,7 +90,7 @@ export function getRecentActions(orgId, hours = 48) {
     ...r,
     before: r.before_json ? JSON.parse(r.before_json) : null,
     after: r.after_json ? JSON.parse(r.after_json) : null,
-    undoable: UNDOABLE_ACTIONS.includes(r.action) && !!ENTITY_TABLES[r.entity_type] && !r.undone_at && !!(r.before_json || r.after_json),
+    undoable: (UNDOABLE_ACTIONS.includes(r.action) || r.action === 'mass-import') && !!ENTITY_TABLES[r.entity_type] && !r.undone_at && !!(r.before_json || r.after_json),
     // Lets the UI put a "Redo" button directly on an already-undone row
     // instead of making the admin go find the separate "Reversed a change
     // to..." entry the undo created.
@@ -125,13 +126,77 @@ function restoreEntityState(entityType, entityId, targetState) {
 // Undoes one audit_log entry: restores before_json, marks it undone, and
 // logs a fresh 'undo' entry (before = after_json, after = before_json) that
 // itself is undoable — clicking Undo on THAT entry is what redo is.
+// Reverses a mass upload: every row it created gets hard-deleted, and every
+// row it edited gets its touched columns restored to what they said right
+// before the import — using the per-row before-snapshot the import route
+// captured at update time (updatedDiffs, see routes/shuls.js and
+// routes/applicants.js POST /import). Rows this entry never touched are
+// left alone even if they've since been deleted or changed elsewhere —
+// each id is independently checked to still exist before acting on it.
+//
+// Entries logged before this snapshot existed (mass-import rows from the
+// narrow window after mass-action logging was consolidated to one row per
+// click, but before per-row undo data was added) only carry the combined
+// id list and counts — but since that list was always built as
+// [...createdIds, ...updatedIds] in that exact order, the first `created`
+// ids are still safely recoverable as "these were newly created" and can
+// be deleted; the remaining ids were edits with no captured before-state,
+// so those can't be reverted and are reported back as unrestorable rather
+// than silently left alone.
+//
+// Deliberately NOT itself undoable/redoable — logged as 'mass-import-undo'
+// (not 'undo'), a name that's neither in UNDOABLE_ACTIONS nor recognized by
+// this function's own dispatch, and undo_entry_id is left unset on the
+// original entry so no Redo button appears for it. Reversing dozens of
+// deletes-and-restores through the generic single-entity redo mechanism
+// isn't something this supports — if the import needs to happen again,
+// that's a fresh upload.
+function undoMassImportEntry(entry, actingUser, ip) {
+  const def = ENTITY_TABLES[entry.entity_type];
+  if (!def) throw new Error(`"${entry.entity_type}" records can't be undone`);
+  const after = entry.after_json ? JSON.parse(entry.after_json) : {};
+  const createdIds = after.createdIds || (after.ids || []).slice(0, after.created || 0);
+  const updatedDiffs = after.updatedDiffs || [];
+  const legacyUnrestorableCount = after.updatedDiffs ? 0 : Math.max(0, (after.ids || []).length - createdIds.length);
+  if (!createdIds.length && !updatedDiffs.length) throw new Error('Nothing to restore for this import — no created or restorable updated records.');
+
+  const hardDelete = { shul: hardDeleteShul, applicant: hardDeleteApplicant }[entry.entity_type]
+    || ((row) => db.prepare(`DELETE FROM ${def.table} WHERE ${def.pk} = ?`).run(row[def.pk]));
+
+  let deletedCreated = 0, restoredUpdated = 0;
+  const run = db.transaction(() => {
+    for (const id of createdIds) {
+      const row = db.prepare(`SELECT * FROM ${def.table} WHERE ${def.pk} = ? AND org_id = ?`).get(id, entry.org_id);
+      if (!row) continue;
+      hardDelete(row);
+      deletedCreated++;
+    }
+    for (const { id, before } of updatedDiffs) {
+      if (!before || !Object.keys(before).length) continue;
+      const exists = db.prepare(`SELECT 1 FROM ${def.table} WHERE ${def.pk} = ? AND org_id = ?`).get(id, entry.org_id);
+      if (!exists) continue;
+      const keys = Object.keys(before);
+      db.prepare(`UPDATE ${def.table} SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE ${def.pk} = ?`)
+        .run(...keys.map(k => before[k]), id);
+      restoredUpdated++;
+    }
+  });
+  run();
+
+  db.prepare(`UPDATE audit_log SET undone_at = datetime('now') WHERE id = ?`).run(entry.id);
+  const summary = { reversedEntry: entry.id, deletedCreated, restoredUpdated, unrestorableUpdated: legacyUnrestorableCount };
+  const touchedIds = [...createdIds, ...updatedDiffs.map(d => d.id)];
+  return logMassAudit(entry.org_id, actingUser.id, 'mass-import-undo', entry.entity_type, touchedIds.length ? touchedIds : [entry.id], summary, ip);
+}
+
 export function undoAuditEntry(auditId, actingUser, ip) {
   const entry = db.prepare('SELECT * FROM audit_log WHERE id = ?').get(auditId);
   if (!entry) throw new Error('Action not found');
   if (entry.org_id !== actingUser.org_id) throw new Error('Not found');
+  if (entry.undone_at) throw new Error('This action was already undone');
+  if (entry.action === 'mass-import') return undoMassImportEntry(entry, actingUser, ip);
   if (!UNDOABLE_ACTIONS.includes(entry.action)) throw new Error(`"${entry.action}" actions can't be undone`);
   if (!ENTITY_TABLES[entry.entity_type]) throw new Error(`"${entry.entity_type}" records can't be undone`);
-  if (entry.undone_at) throw new Error('This action was already undone');
   const before = entry.before_json ? JSON.parse(entry.before_json) : null;
   const after = entry.after_json ? JSON.parse(entry.after_json) : null;
   if (before === null && after === null) throw new Error('Nothing to restore for this action');

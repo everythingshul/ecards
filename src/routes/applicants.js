@@ -16,7 +16,7 @@ import { getActiveSeasonId } from '../utils/formSchedule.js';
 import { validateBySchema, validateRowsBySchema, shulInfoErrors } from '../utils/formValidation.js';
 import { APPLICANT_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
-import { deletePolymorphicRefs } from '../utils/entityDelete.js';
+import { hardDeleteApplicant } from '../utils/entityDelete.js';
 import { lockApplicantCards, unlockApplicantCustomer } from '../services/cardSync.js';
 
 const router = Router();
@@ -431,14 +431,7 @@ router.delete('/:id/permanent', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
-  const del = db.transaction(() => {
-    db.prepare('DELETE FROM card_transactions WHERE card_id IN (SELECT id FROM cards WHERE applicant_id = ?)').run(applicant.id);
-    db.prepare('DELETE FROM cards WHERE applicant_id = ?').run(applicant.id);
-    db.prepare('DELETE FROM applicant_notes WHERE applicant_id = ?').run(applicant.id);
-    db.prepare('UPDATE applicants SET duplicate_of_applicant_id = NULL WHERE duplicate_of_applicant_id = ?').run(applicant.id);
-    deletePolymorphicRefs('applicant', applicant.id);
-    db.prepare('DELETE FROM applicants WHERE id = ?').run(applicant.id);
-  });
+  const del = db.transaction(() => hardDeleteApplicant(applicant));
   del();
   logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
   res.json({ ok: true, cardLockErrors });
@@ -454,14 +447,7 @@ router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
     if (!applicant) { skipped++; continue; }
     const { errors } = await lockApplicantCards(req.user.org_id, applicant);
     if (errors?.length) cardLockErrors++;
-    const del = db.transaction(() => {
-      db.prepare('DELETE FROM card_transactions WHERE card_id IN (SELECT id FROM cards WHERE applicant_id = ?)').run(applicant.id);
-      db.prepare('DELETE FROM cards WHERE applicant_id = ?').run(applicant.id);
-      db.prepare('DELETE FROM applicant_notes WHERE applicant_id = ?').run(applicant.id);
-      db.prepare('UPDATE applicants SET duplicate_of_applicant_id = NULL WHERE duplicate_of_applicant_id = ?').run(applicant.id);
-      deletePolymorphicRefs('applicant', applicant.id);
-      db.prepare('DELETE FROM applicants WHERE id = ?').run(applicant.id);
-    });
+    const del = db.transaction(() => hardDeleteApplicant(applicant));
     del();
     affectedIds.push(applicant.id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
     deleted++;
@@ -715,6 +701,11 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
 
   let success = 0, dupes = 0, updated = 0; const errors = [];
   const createdIds = [], createdNames = [], updatedIds = [], updatedNames = [];
+  // Per-row "what did this column used to say" snapshot, captured right
+  // before each UPDATE — this is what makes mass-import undo (see
+  // services/audit.js undoMassImportEntry) able to actually restore an
+  // edited row instead of just deleting the newly-created ones.
+  const updatedDiffs = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const existing = rowExisting[i];
@@ -727,6 +718,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
         if (sets.length) {
           db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
           updatedIds.push(existing.id); updatedNames.push(`${existing.first_name} ${existing.last_name}`.trim());
+          updatedDiffs.push({ id: existing.id, before: Object.fromEntries(sets.map(f => [f, existing[f]])) });
         }
         updated++;
       } catch (e) {
@@ -766,7 +758,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'applicants', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
   logMassAudit(req.user.org_id, req.user.id, 'mass-import', 'applicant', [...createdIds, ...updatedIds],
-    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames] }, req.ip);
+    { created: createdIds.length, updated: updatedIds.length, duplicates: dupes, errors: errors.length, names: [...createdNames, ...updatedNames], createdIds, updatedIds, updatedDiffs }, req.ip);
   res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 

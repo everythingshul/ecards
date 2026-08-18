@@ -96,6 +96,14 @@ function massHeadline(a) {
     if (updated) parts.push(`${updated} updated`);
     return `Imported ${total} ${plural}${parts.length ? ' — ' + parts.join(', ') : ''}`;
   }
+  if (a.action === 'mass-import-undo') {
+    const deleted = after.deletedCreated || 0, restored = after.restoredUpdated || 0, unrestorable = after.unrestorableUpdated || 0;
+    const parts = [];
+    if (deleted) parts.push(`${deleted} created ${deleted === 1 ? 'record' : 'records'} deleted`);
+    if (restored) parts.push(`${restored} updated ${restored === 1 ? 'record' : 'records'} restored`);
+    if (unrestorable) parts.push(`${unrestorable} older ${unrestorable === 1 ? 'update' : 'updates'} couldn't be reverted`);
+    return `Reversed an import${parts.length ? ' — ' + parts.join(', ') : ''}`;
+  }
   const verb = MASS_VERBS[a.action] || (a.action.replace(/^mass-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
   const count = after.count || 0;
   return `${verb} ${count} ${count === 1 ? label : label + 's'}`;
@@ -131,14 +139,23 @@ async function load() {
           ${isMass ? massDetail(a) : changeList(a)}
           <div class="small-muted" style="margin-top:8px">${a.user_id ? esc((a.first_name||'')+' '+(a.last_name||'')).trim() || esc(a.user_email) : 'System'} · ${fmtDateTime(a.created_at)}</div>
         </div>
-        ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}', false)">Undo</button>` : ''}
+        ${a.undoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.id}', false, '${a.action}')">Undo</button>` : ''}
         ${a.redoable ? `<button class="btn btn-sm btn-outline" onclick="undoAction('${a.undo_entry_id}', true)">Redo</button>` : ''}
       </div>
     </div>`;
   }).join('') : '<p class="small-muted">No actions in this window.</p>';
 }
-window.undoAction = async (id, isRedo) => {
-  if (!confirm(isRedo ? 'Redo this action? This brings the change back.' : 'Undo this action? This restores the affected record to how it was right before this change.')) return;
+window.undoAction = async (id, isRedo, action) => {
+  // Undoing a mass import is more consequential than a normal single-entity
+  // undo — it permanently deletes every record the import created (not a
+  // reversible "restore," a real delete) and, when the row has the data for
+  // it, restores edited records to their prior values. There's also no
+  // Redo afterward (see services/audit.js undoMassImportEntry), so the
+  // generic "this restores..." wording undersells what's about to happen.
+  const message = action === 'mass-import'
+    ? 'Undo this import? Every record it CREATED will be permanently deleted, and any records it UPDATED will be restored to their previous values where possible. This cannot be redone afterward.'
+    : (isRedo ? 'Redo this action? This brings the change back.' : 'Undo this action? This restores the affected record to how it was right before this change.');
+  if (!confirm(message)) return;
   try { await api(`/audit/${id}/undo`, { method: 'POST' }); toast(isRedo ? 'Redone' : 'Undone'); load(); } catch (err) { toast(err.message, true); }
 };
 qs('#f-hours').addEventListener('change', load);
