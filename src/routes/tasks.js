@@ -94,6 +94,51 @@ router.post('/:id/status', (req, res) => {
   res.json({ task: db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) });
 });
 
+router.post('/mass-status', (req, res) => {
+  const { ids, status } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (!['open', 'in_progress', 'done'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!task) { skipped++; continue; }
+    db.prepare(`UPDATE tasks SET status=?, completed_at=CASE WHEN ?='done' THEN datetime('now') ELSE NULL END, updated_at=datetime('now') WHERE id=?`)
+      .run(status, status, task.id);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
+router.post('/mass-reassign', (req, res) => {
+  const { ids, assigned_to } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (assigned_to) {
+    const assignee = db.prepare('SELECT id FROM users WHERE id = ? AND org_id = ?').get(assigned_to, req.user.org_id);
+    if (!assignee) return res.status(400).json({ error: 'Assigned user not found' });
+  }
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!task) { skipped++; continue; }
+    db.prepare(`UPDATE tasks SET assigned_to=?, updated_at=datetime('now') WHERE id=?`).run(assigned_to || null, task.id);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
+router.post('/mass-delete', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let deleted = 0, skipped = 0;
+  for (const id of ids) {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!task) { skipped++; continue; }
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    deleted++;
+  }
+  res.json({ deleted, skipped });
+});
+
 router.delete('/:id', (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!task) return res.status(404).json({ error: 'Not found' });

@@ -18,12 +18,22 @@ renderShell('/admin/tasks', `
     <select id="f-assigned"><option value="">Everyone</option><option value="me">Assigned to Me</option></select>
     <select id="f-status"><option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="done">Done</option></select>
     <label class="checkbox-row"><input type="checkbox" id="f-overdue"> Overdue only</label>
+    <select id="mass-action">
+      <option value="status-open">Mark Open</option>
+      <option value="status-in_progress">Mark In Progress</option>
+      <option value="status-done">Mark Done</option>
+      <option value="reassign">Reassign To…</option>
+      <option value="delete">Delete</option>
+    </select>
+    <select id="mass-reassign-target" style="display:none"></select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
   </div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th></th><th>Title</th><th>Linked To</th><th>Assigned To</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="8" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th style="width:34px"><input type="checkbox" id="chk-all"></th><th></th><th>Title</th><th>Linked To</th><th>Assigned To</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
+let selected = new Set();
 
 let usersCache = [];
 // Fetching the assignee list requires org_admin/super_admin (GET /api/users
@@ -50,6 +60,7 @@ async function load() {
   try {
     const { tasks } = await api('/tasks?' + params);
     qs('#tbody').innerHTML = tasks.length ? tasks.map(t => `<tr>
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${t.id}"></td>
         <td><input type="checkbox" ${t.status==='done'?'checked':''} onchange="toggleDone('${t.id}', this.checked)"></td>
         <td><strong style="${t.status==='done'?'text-decoration:line-through;color:var(--text-muted)':''}">${esc(t.title)}</strong>${t.description ? `<br><span class="small-muted">${esc(t.description)}</span>` : ''}</td>
         <td>${t.entity_label ? `<span class="small-muted">${esc(t.entity_type)}: ${esc(t.entity_label)}</span>` : ''}</td>
@@ -58,10 +69,19 @@ async function load() {
         <td>${badge(t.priority, t.priority==='high'?'rejected':(t.priority==='low'?'submitted':'pending'))}</td>
         <td>${badge(t.status.replace('_',' '), t.status==='done'?'active':(t.status==='in_progress'?'sent':'pending'))}</td>
         <td><button class="btn btn-sm btn-outline" onclick="openTask('${t.id}')">Edit</button></td>
-      </tr>`).join('') : '<tr><td colspan="8" class="empty-state">No tasks found.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="9" class="empty-state">No tasks found.</td></tr>';
+    qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
   } catch (err) { toast(err.message, true); }
 }
 window.toggleDone = async (id, checked) => { try { await api(`/tasks/${id}/status`, { method: 'POST', body: { status: checked ? 'done' : 'open' } }); load(); } catch (err) { toast(err.message, true); } };
+
+qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
+function onCheck(e) {
+  const id = e.target.dataset.id;
+  if (e.target.checked) selected.add(id); else selected.delete(id);
+  qs('#btn-mass-apply').textContent = `Apply to Selected (${selected.size})`;
+  qs('#btn-mass-apply').disabled = selected.size === 0;
+}
 
 qs('#f-assigned').addEventListener('change', load);
 qs('#f-status').addEventListener('change', load);
@@ -128,6 +148,39 @@ window.saveTask = async (id) => {
 };
 window.setStatus = async (id, status) => { try { await api(`/tasks/${id}/status`, { method: 'POST', body: { status } }); toast('Updated'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.deleteTask = async (id) => { if (!confirm('Delete this task?')) return; try { await api(`/tasks/${id}`, { method: 'DELETE' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+
+qs('#mass-action').addEventListener('change', () => {
+  const isReassign = qs('#mass-action').value === 'reassign';
+  qs('#mass-reassign-target').style.display = isReassign ? '' : 'none';
+  if (isReassign) qs('#mass-reassign-target').innerHTML = assigneeOptions();
+});
+const MASS_ACTIONS = {
+  'status-open': { confirm: n => `Mark ${n} selected task(s) Open?`, run: (ids) => api('/tasks/mass-status', { method: 'POST', body: { ids, status: 'open' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  'status-in_progress': { confirm: n => `Mark ${n} selected task(s) In Progress?`, run: (ids) => api('/tasks/mass-status', { method: 'POST', body: { ids, status: 'in_progress' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  'status-done': { confirm: n => `Mark ${n} selected task(s) Done?`, run: (ids) => api('/tasks/mass-status', { method: 'POST', body: { ids, status: 'done' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  reassign: {
+    confirm: null,
+    run: (ids) => api('/tasks/mass-reassign', { method: 'POST', body: { ids, assigned_to: qs('#mass-reassign-target').value || null } }),
+    summarize: r => ({ msg: `Reassigned ${r.updated}, skipped ${r.skipped}` }),
+  },
+  delete: {
+    confirm: n => `Delete ${n} selected task(s)? This cannot be undone.`,
+    run: (ids) => api('/tasks/mass-delete', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}` }),
+  },
+};
+qs('#btn-mass-apply').addEventListener('click', async () => {
+  const action = MASS_ACTIONS[qs('#mass-action').value];
+  const ids = Array.from(selected);
+  if (action.confirm && !confirm(action.confirm(ids.length))) return;
+  try {
+    const r = await action.run(ids);
+    if (!r) return;
+    const { msg, isError } = action.summarize(r);
+    toast(msg, !!isError);
+    selected.clear(); load();
+  } catch (err) { toast(err.message, true); }
+});
 
 loadUsers().then(load);
 </script>
