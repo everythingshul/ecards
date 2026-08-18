@@ -144,6 +144,22 @@ router.put('/:id', requireAdmin, (req, res) => {
   res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
 });
 
+const STORE_STATUSES = ['pending', 'in_progress', 'active', 'inactive'];
+router.post('/mass-set-status', requireAdmin, (req, res) => {
+  const { ids, setup_status } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (!STORE_STATUSES.includes(setup_status)) return res.status(400).json({ error: `setup_status must be one of: ${STORE_STATUSES.join(', ')}` });
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!store) { skipped++; continue; }
+    db.prepare('UPDATE stores SET setup_status = ? WHERE id = ?').run(setup_status, store.id);
+    logAudit(req.user.org_id, req.user.id, 'update', 'store', store.id, { setup_status: store.setup_status }, { setup_status }, req.ip);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
 // Permanent deletion — full removal. Card transactions against this store
 // are kept (a card's own ledger shouldn't lose history) but unlinked
 // (store_id set to null) since the store record itself is gone; billing
@@ -166,12 +182,31 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// Invite a store to their self-service portal.
-router.post('/:id/invite', requireAdmin, async (req, res) => {
-  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!store) return res.status(404).json({ error: 'Not found' });
-  const email = req.body?.email || store.owner_email || store.manager_email;
-  if (!email) return res.status(400).json({ error: 'No email on file for this store' });
+router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let deleted = 0, skipped = 0;
+  for (const id of ids) {
+    const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!store) { skipped++; continue; }
+    const del = db.transaction(() => {
+      db.prepare('UPDATE card_transactions SET store_id = NULL WHERE store_id = ?').run(store.id);
+      db.prepare('DELETE FROM store_billing WHERE store_id = ?').run(store.id);
+      if (store.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(store.portal_user_id);
+      deletePolymorphicRefs('store', store.id);
+      db.prepare('DELETE FROM stores WHERE id = ?').run(store.id);
+    });
+    del();
+    logAudit(req.user.org_id, req.user.id, 'delete', 'store', store.id, store, null, req.ip);
+    deleted++;
+  }
+  res.json({ deleted, skipped });
+});
+
+// Shared by the single and mass invite routes below.
+async function inviteStoreToPortal(orgId, store, emailOverride) {
+  const email = emailOverride || store.owner_email || store.manager_email;
+  if (!email) return { error: 'No email on file for this store' };
   let user = db.prepare('SELECT * FROM users WHERE store_id = ?').get(store.id);
   const token = uuid();
   const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
@@ -180,14 +215,38 @@ router.post('/:id/invite', requireAdmin, async (req, res) => {
   } else {
     const uid = uuid();
     db.prepare(`INSERT INTO users (id, org_id, email, first_name, role, store_id, invite_token, invite_expires, is_active) VALUES (?,?,?,?,'store',?,?,?,0)`)
-      .run(uid, req.user.org_id, email, store.manager_name || store.name, store.id, token, expires);
+      .run(uid, orgId, email, store.manager_name || store.name, store.id, token, expires);
   }
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
   const portalUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
-  const tmpl = renderSystemTemplate(req.user.org_id, 'storeSetup', { storeName: store.name, portalUrl });
-  const { emailError } = await sendMailChecked(req.user.org_id, email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const tmpl = renderSystemTemplate(orgId, 'storeSetup', { storeName: store.name, portalUrl });
+  const { emailError } = await sendMailChecked(orgId, email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
   if (emailError) console.error('[mail] store invite email failed:', emailError);
-  res.json({ ok: true, emailError });
+  return { emailError };
+}
+
+// Invite a store to their self-service portal.
+router.post('/:id/invite', requireAdmin, async (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  const result = await inviteStoreToPortal(req.user.org_id, store, req.body?.email);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json({ ok: true, emailError: result.emailError });
+});
+
+router.post('/mass-invite', requireAdmin, async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let invited = 0, skipped = 0, emailErrors = 0;
+  for (const id of ids) {
+    const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!store) { skipped++; continue; }
+    const result = await inviteStoreToPortal(req.user.org_id, store, null);
+    if (result.error) { skipped++; continue; }
+    if (result.emailError) emailErrors++;
+    invited++;
+  }
+  res.json({ invited, skipped, emailErrors });
 });
 
 // ---- Store portal onboarding wizard ----

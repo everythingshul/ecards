@@ -14,20 +14,32 @@
 Auth.requireAdmin();
 renderShell('/admin/stores', `
   <div class="flex-between"><h2>Participating Stores</h2><div class="pill-row"><button class="btn btn-outline btn-sm" id="btn-export">Export Excel</button><button class="btn btn-primary btn-sm" id="btn-new">+ Add Store</button></div></div>
-  <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select><select id="f-source"><option value="">All sources</option><option value="application">Self-Applied</option><option value="admin">Admin Added</option></select></div>
+  <div class="toolbar"><input id="f-search" placeholder="Search store name or city…"><select id="f-status"><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="active">Active</option><option value="inactive">Inactive</option></select><select id="f-source"><option value="">All sources</option><option value="application">Self-Applied</option><option value="admin">Admin Added</option></select>
+    <select id="mass-action">
+      <option value="status-pending">Set to Pending</option>
+      <option value="status-in_progress">Set to In Progress</option>
+      <option value="status-active">Set to Active</option>
+      <option value="status-inactive">Set to Inactive</option>
+      <option value="invite">Invite to Portal</option>
+      <option value="delete">Delete Permanently</option>
+    </select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
+  </div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Store</th><th>Manager</th><th>Owner</th><th>Setup Status</th><th>Onboarding</th><th>Live Spend</th><th></th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="7" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th style="width:34px"><input type="checkbox" id="chk-all"></th><th>Store</th><th>Manager</th><th>Owner</th><th>Setup Status</th><th>Onboarding</th><th>Live Spend</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="8" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
 
 let state = { search:'', status:'', source:'' };
+let selected = new Set();
 async function load() {
   const params = new URLSearchParams({ search: state.search, setup_status: state.status });
   try {
     let { stores } = await api('/stores?' + params);
     if (state.source) stores = stores.filter(s => (s.source || 'admin') === state.source);
     qs('#tbody').innerHTML = stores.length ? stores.map(s => `<tr>
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${s.id}"></td>
         <td><strong>${esc(s.name)}</strong>${s.source === 'application' ? ' ' + badge('applied','pending') : ''}<br><span class="small-muted">${esc(s.address||'')} ${esc(s.city||'')}, ${esc(s.state||'')}</span></td>
         <td>${esc(s.manager_name||'')}<br><span class="small-muted">${esc(s.manager_phone||'')}</span></td>
         <td>${esc(s.owner_name||'')}<br><span class="small-muted">${esc(s.owner_phone||'')}</span></td>
@@ -35,8 +47,16 @@ async function load() {
         <td>${(s.onboarding_step||0) >= 3 ? badge('complete','active') : (s.portal_user_id ? `Step ${s.onboarding_step||0} of 3` : 'Not invited')}</td>
         <td><strong>${fmtMoney(s.total_purchases)}</strong>${s.total_refunds ? `<br><span class="small-muted">Refunds: ${fmtMoney(s.total_refunds)}</span>` : ''}<br><span class="small-muted">${s.txn_count} txn${s.txn_count===1?'':'s'}</span></td>
         <td><button class="btn btn-sm btn-outline" onclick="openStore('${s.id}')">Manage</button></td>
-      </tr>`).join('') : '<tr><td colspan="7" class="empty-state">No stores yet.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="8" class="empty-state">No stores yet.</td></tr>';
+    qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
   } catch (err) { toast(err.message, true); }
+}
+qs('#chk-all').addEventListener('change', (e) => { qsa('.row-chk').forEach(c => { c.checked = e.target.checked; c.dispatchEvent(new Event('change')); }); });
+function onCheck(e) {
+  const id = e.target.dataset.id;
+  if (e.target.checked) selected.add(id); else selected.delete(id);
+  qs('#btn-mass-apply').textContent = `Apply to Selected (${selected.size})`;
+  qs('#btn-mass-apply').disabled = selected.size === 0;
 }
 qs('#f-source').addEventListener('change', () => { state.source = qs('#f-source').value; load(); });
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; load(); }, 350));
@@ -44,6 +64,35 @@ qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status'
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 qs('#btn-new').addEventListener('click', () => openStoreForm());
 qs('#btn-export').addEventListener('click', () => downloadAuthed('/stores/export?' + new URLSearchParams({ search: state.search, setup_status: state.status }), 'stores.xlsx'));
+
+const MASS_ACTIONS = {
+  'status-pending': { confirm: n => `Set ${n} selected store(s) to Pending?`, run: (ids) => api('/stores/mass-set-status', { method: 'POST', body: { ids, setup_status: 'pending' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  'status-in_progress': { confirm: n => `Set ${n} selected store(s) to In Progress?`, run: (ids) => api('/stores/mass-set-status', { method: 'POST', body: { ids, setup_status: 'in_progress' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  'status-active': { confirm: n => `Set ${n} selected store(s) to Active?`, run: (ids) => api('/stores/mass-set-status', { method: 'POST', body: { ids, setup_status: 'active' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  'status-inactive': { confirm: n => `Set ${n} selected store(s) to Inactive?`, run: (ids) => api('/stores/mass-set-status', { method: 'POST', body: { ids, setup_status: 'inactive' } }), summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }) },
+  invite: {
+    confirm: n => `Invite ${n} selected store(s) to their portal? Each uses their owner or manager email on file.`,
+    run: (ids) => api('/stores/mass-invite', { method: 'POST', body: { ids } }),
+    summarize: r => { let msg = `Invited ${r.invited}, skipped ${r.skipped}`; if (r.emailErrors) msg += ` — ${r.emailErrors} invite email(s) failed to send`; return { msg, isError: !!r.emailErrors }; },
+  },
+  delete: {
+    confirm: n => `Permanently delete ${n} selected store(s)? This removes each store and its billing records completely and cannot be undone.`,
+    run: (ids) => api('/stores/mass-delete-permanent', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}` }),
+  },
+};
+qs('#btn-mass-apply').addEventListener('click', async () => {
+  const action = MASS_ACTIONS[qs('#mass-action').value];
+  const ids = Array.from(selected);
+  if (action.confirm && !confirm(action.confirm(ids.length))) return;
+  try {
+    const r = await action.run(ids);
+    if (!r) return;
+    const { msg, isError } = action.summarize(r);
+    toast(msg, !!isError);
+    selected.clear(); load();
+  } catch (err) { toast(err.message, true); }
+});
 
 async function openStore(id) {
   try {
