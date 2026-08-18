@@ -370,6 +370,22 @@ router.post('/:id/set-pending', requireAdmin, async (req, res) => {
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), cardLockErrors });
 });
 
+router.post('/mass-set-pending', requireAdmin, async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let updated = 0, skipped = 0, cardLockErrors = 0;
+  for (const id of ids) {
+    const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!applicant) { skipped++; continue; }
+    db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
+    logAudit(req.user.org_id, req.user.id, 'set-pending', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'pending' }, req.ip);
+    const { errors } = await lockApplicantCards(req.user.org_id, applicant);
+    if (errors?.length) cardLockErrors++;
+    updated++;
+  }
+  res.json({ updated, skipped, cardLockErrors });
+});
+
 // Permanent deletion — full removal, not the pause/reject soft-states
 // elsewhere in this file. Every table's reference to this applicant is
 // cleaned up first (FK enforcement is ON): cards + their transactions and
@@ -402,6 +418,30 @@ router.delete('/:id/permanent', requireAdmin, async (req, res) => {
   del();
   logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
   res.json({ ok: true, cardLockErrors });
+});
+
+router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let deleted = 0, skipped = 0, cardLockErrors = 0;
+  for (const id of ids) {
+    const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!applicant) { skipped++; continue; }
+    const { errors } = await lockApplicantCards(req.user.org_id, applicant);
+    if (errors?.length) cardLockErrors++;
+    const del = db.transaction(() => {
+      db.prepare('DELETE FROM card_transactions WHERE card_id IN (SELECT id FROM cards WHERE applicant_id = ?)').run(applicant.id);
+      db.prepare('DELETE FROM cards WHERE applicant_id = ?').run(applicant.id);
+      db.prepare('DELETE FROM applicant_notes WHERE applicant_id = ?').run(applicant.id);
+      db.prepare('UPDATE applicants SET duplicate_of_applicant_id = NULL WHERE duplicate_of_applicant_id = ?').run(applicant.id);
+      deletePolymorphicRefs('applicant', applicant.id);
+      db.prepare('DELETE FROM applicants WHERE id = ?').run(applicant.id);
+    });
+    del();
+    logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
+    deleted++;
+  }
+  res.json({ deleted, skipped, cardLockErrors });
 });
 
 router.post('/:id/approve', requireAdmin, async (req, res) => {
@@ -481,6 +521,22 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
   logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
   const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
   res.json({ ok: true, cardLockErrors });
+});
+
+router.post('/mass-reject', requireAdmin, async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let rejected = 0, skipped = 0, cardLockErrors = 0;
+  for (const id of ids) {
+    const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!applicant) { skipped++; continue; }
+    db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
+    logAudit(req.user.org_id, req.user.id, 'reject', 'applicant', applicant.id, { approval_status: applicant.approval_status }, { approval_status: 'rejected' }, req.ip);
+    const { errors } = await lockApplicantCards(req.user.org_id, applicant);
+    if (errors?.length) cardLockErrors++;
+    rejected++;
+  }
+  res.json({ rejected, skipped, cardLockErrors });
 });
 
 // Mass approval — spec #5 "allow mass approval".

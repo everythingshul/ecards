@@ -32,7 +32,13 @@ renderShell('/admin/applicants', `
     <select id="f-shul"><option value="">All Shuls</option></select>
     <select id="f-season"></select>
     <select id="f-pagesize"><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="200">200 / page</option></select>
-    <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
+    <select id="mass-action">
+      <option value="approve">Approve</option>
+      <option value="reject">Reject</option>
+      <option value="set-pending">Set to Pending</option>
+      <option value="delete">Delete Permanently</option>
+    </select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
   </div>
   <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -109,7 +115,7 @@ function changePage(d) { state.page += d; load(); }
 
 function rowHtml(a, cols) {
   return `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer">
-    <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}" ${a.is_paused ? 'disabled' : ''}></td>
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${a.id}"></td>
     ${cols.map(c => `<td>${c.render(a)}</td>`).join('')}
     <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openApplicant('${a.id}')">View</button></td>
   </tr>`;
@@ -118,8 +124,8 @@ function rowHtml(a, cols) {
 function onCheck(e) {
   const id = e.target.dataset.id;
   if (e.target.checked) selected.add(id); else selected.delete(id);
-  qs('#btn-mass-approve').textContent = `Approve Selected (${selected.size})`;
-  qs('#btn-mass-approve').disabled = selected.size === 0;
+  qs('#btn-mass-apply').textContent = `Apply to Selected (${selected.size})`;
+  qs('#btn-mass-apply').disabled = selected.size === 0;
 }
 
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
@@ -136,15 +142,46 @@ qs('#btn-export').addEventListener('click', () => downloadAuthed('/applicants/ex
 qs('#btn-new').addEventListener('click', () => openApplicantForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
 qs('#f-dupes').addEventListener('click', showDuplicates);
-qs('#btn-mass-approve').addEventListener('click', async () => {
-  const amount = prompt("Card amount to set for all selected (leave blank to use each applicant's existing/default amount):", '');
+const MASS_ACTIONS = {
+  approve: {
+    confirm: null,
+    run: (ids) => {
+      const amount = prompt("Card amount to set for all selected (leave blank to use each applicant's existing/default amount):", '');
+      const body = { ids };
+      if (amount !== null && amount !== '') body.card_amount = +amount;
+      return api('/applicants/mass-approve', { method: 'POST', body });
+    },
+    summarize: r => {
+      let msg = `Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`;
+      if (r.providerErrors) msg += ` — ${r.providerErrors} disccardpromos issue(s)${r.providerErrorsHint ? ': ' + r.providerErrorsHint : ''}`;
+      return { msg, isError: !!r.providerErrors };
+    },
+  },
+  reject: {
+    confirm: n => `Reject ${n} selected applicant(s)?`,
+    run: (ids) => api('/applicants/mass-reject', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Rejected ${r.rejected}, skipped ${r.skipped}`, isError: !!r.cardLockErrors }),
+  },
+  'set-pending': {
+    confirm: n => `Move ${n} selected applicant(s) back to pending?`,
+    run: (ids) => api('/applicants/mass-set-pending', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}`, isError: !!r.cardLockErrors }),
+  },
+  delete: {
+    confirm: n => `Permanently delete ${n} selected applicant(s)? This removes each applicant, their cards, and notes completely and cannot be undone.`,
+    run: (ids) => api('/applicants/mass-delete-permanent', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}`, isError: !!r.cardLockErrors }),
+  },
+};
+qs('#btn-mass-apply').addEventListener('click', async () => {
+  const action = MASS_ACTIONS[qs('#mass-action').value];
+  const ids = Array.from(selected);
+  if (action.confirm && !confirm(action.confirm(ids.length))) return;
   try {
-    const body = { ids: Array.from(selected) };
-    if (amount !== null && amount !== '') body.card_amount = +amount;
-    const r = await api('/applicants/mass-approve', { method: 'POST', body });
-    let msg = `Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`;
-    if (r.providerErrors) msg += ` — ${r.providerErrors} disccardpromos issue(s)${r.providerErrorsHint ? ': ' + r.providerErrorsHint : ''}`;
-    toast(msg, !!r.providerErrors);
+    const r = await action.run(ids);
+    if (!r) return;
+    const { msg, isError } = action.summarize(r);
+    toast(msg, !!isError);
     selected.clear(); load();
   } catch (err) { toast(err.message, true); }
 });
