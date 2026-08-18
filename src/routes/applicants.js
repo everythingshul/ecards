@@ -611,8 +611,24 @@ router.get('/import/template', (req, res) => {
   const columns = known.length ? [...known.filter(k => k !== 'shul_id'), 'shul_name', 'card_amount'] : APPLICANT_IMPORT_COLUMNS;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="applicant_import_template.xlsx"');
-  res.send(buildXlsxTemplate(columns));
+  res.send(buildXlsxTemplate(['id', ...columns]));
 });
+
+// Every column an UPDATE row (see rowExisting below) can touch, and how to
+// read it off a parsed sheet row — a blank cell means "leave this column
+// alone", not "clear it", same contract as the shuls import. Shul
+// reassignment is deliberately not editable this way — moving an applicant
+// between shuls has real side effects (season cap, disccardpromos account)
+// better done as its own explicit action than a spreadsheet cell.
+const APPLICANT_UPDATABLE_FIELDS = {
+  first_name: r => r.first_name, last_name: r => r.last_name, marital_status: r => r.marital_status,
+  home_phone: r => r.home_phone && normalizePhone(r.home_phone), husband_cell: r => r.husband_cell && normalizePhone(r.husband_cell), wife_cell: r => r.wife_cell && normalizePhone(r.wife_cell),
+  email: r => r.email, address: r => r.address, city: r => r.city, state: r => r.state, zip: r => r.zip,
+  preferred_contact_method: r => r.preferred_contact_method, preferred_number: r => r.preferred_number,
+  num_children: r => (r.num_children !== '' && r.num_children != null ? +r.num_children : ''),
+  card_amount: r => (r.card_amount !== '' && r.card_amount != null ? +r.card_amount : ''),
+  comments: r => r.comments,
+};
 
 router.post('/import', requirePermission('applicants', 'can_edit'), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -627,33 +643,69 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   // of what happens to the applicant afterward.
   const providerExempt = req.body.provider_exempt === 'true' || req.body.provider_exempt === true ? 1 : 0;
 
-  // All-or-nothing: every row must have every field the live Applicant
-  // Application form currently requires, or nothing in the sheet is
-  // imported — no partial imports. An admin uploading a sheet normally gets
-  // just the per-field "Admin can override" leniency the public
+  // A row with a non-blank `id` column that matches an existing applicant
+  // is an edit, not a new submission — the file Export Excel produces,
+  // edited in place and re-uploaded. A shul-portal upload can only match
+  // its own applicants (same boundary forcedShul already enforces on
+  // create) — a match against someone else's applicant is treated as not
+  // found rather than granting cross-shul edit access.
+  const rowExisting = rows.map(r => {
+    const id = r.id ? String(r.id).trim() : '';
+    if (!id) return null;
+    const rec = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!rec) return null;
+    if (forcedShul && rec.shul_id !== forcedShul.id) return null;
+    return rec;
+  });
+
+  // All-or-nothing: every true-create row must have every field the live
+  // Applicant Application form currently requires, or nothing in the sheet
+  // is imported — no partial imports. An admin uploading a sheet normally
+  // gets just the per-field "Admin can override" leniency the public
   // form/shul-portal upload never does; bypass_required (admin only, same
   // idea as the single admin-add's bypass_required checkbox) skips this
   // whole check for the entire sheet. first_name/last_name stay
-  // hard-required per row below regardless — a nameless record isn't
+  // hard-required per new row below regardless — a nameless record isn't
   // useful even as a placeholder. shul_name isn't a form field (shul
   // assignment isn't part of the intake questions) — checked separately,
   // and only for an admin upload; a shul-portal upload's shul is always
   // forced to their own, and shul_name is never bypassable since without a
-  // shul the row has nowhere to go.
+  // shul a new row has nowhere to go. Update rows skip all of this — they're
+  // patching specific cells on a record that's already valid, not
+  // submitting a fresh application.
   const isAdminSubmitter = req.user.role !== 'shul';
   const bypassRequired = isAdminSubmitter && (req.body.bypass_required === 'true' || req.body.bypass_required === true);
   const defaultForm = getDefaultForm(req.user.org_id, 'applicant_application');
   const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
-  const schemaErrors = bypassRequired ? [] : validateRowsBySchema(schema, rows, { isAdmin: isAdminSubmitter, skipKeys: ['shul_id'] });
-  const shulNameErrors = forcedShul ? [] : rows.map((r, i) => (!r.shul_name ? { row: i + 2, error: 'Missing required field: shul_name' } : null)).filter(Boolean);
-  const requiredErrors = [...schemaErrors, ...shulNameErrors].sort((a, b) => a.row - b.row);
+  const schemaErrors = bypassRequired ? [] : validateRowsBySchema(schema, rows, { isAdmin: isAdminSubmitter, skipKeys: ['shul_id'] })
+    .filter(e => !rowExisting[e.row - 2]);
+  const shulNameErrors = forcedShul ? [] : rows.map((r, i) => (!rowExisting[i] && !r.shul_name) ? { row: i + 2, error: 'Missing required field: shul_name' } : null).filter(Boolean);
+  const idNotFoundErrors = rows.map((r, i) => (r.id && String(r.id).trim() && !rowExisting[i]) ? { row: i + 2, error: `No existing applicant found with id "${r.id}"` } : null).filter(Boolean);
+  const requiredErrors = [...schemaErrors, ...shulNameErrors, ...idNotFoundErrors].sort((a, b) => a.row - b.row);
   if (requiredErrors.length) {
-    return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
+    return res.status(400).json({ error: 'Some rows have errors. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
   }
 
-  let success = 0, dupes = 0; const errors = [];
+  let success = 0, dupes = 0, updated = 0; const errors = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    const existing = rowExisting[i];
+    if (existing) {
+      try {
+        const sets = Object.keys(APPLICANT_UPDATABLE_FIELDS).filter(f => { const v = APPLICANT_UPDATABLE_FIELDS[f](r); return v !== undefined && v !== ''; });
+        const vals = sets.map(f => APPLICANT_UPDATABLE_FIELDS[f](r));
+        const yomtovRaw = String(r.home_for_yomtov ?? '').trim();
+        if (yomtovRaw !== '') { sets.push('home_for_yomtov'); vals.push(/^(y|yes|true|1)$/i.test(yomtovRaw) ? 1 : 0); }
+        if (sets.length) {
+          db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
+          logAudit(req.user.org_id, req.user.id, 'update', 'applicant', existing.id, Object.fromEntries(sets.map(f => [f, existing[f]])), Object.fromEntries(sets.map((f, idx) => [f, vals[idx]])), req.ip);
+        }
+        updated++;
+      } catch (e) {
+        errors.push({ row: i + 2, error: e.message });
+      }
+      continue;
+    }
     if (!r.first_name || !r.last_name) { errors.push({ row: i + 2, error: 'Missing first_name or last_name' }); continue; }
     let shul = forcedShul;
     if (!shul) {
@@ -686,7 +738,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   db.prepare(`INSERT INTO import_jobs (id, org_id, entity_type, file_name, status, total_rows, success_count, error_count, duplicate_count, error_log, created_by)
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'applicants', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
-  res.json({ jobId, total: rows.length, success, duplicates: dupes, errors });
+  res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 
 router.get('/duplicates/open', requireAdmin, (req, res) => {

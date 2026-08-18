@@ -357,7 +357,7 @@ window.createApplicant = async () => {
 };
 
 function openImportModal() {
-  const body = `<p class="small-muted">Upload an Excel (.xlsx) file using the template — CSV isn't accepted, since it doesn't reliably support Hebrew text. The <code>shul_name</code> column must match an existing shul name exactly.</p>
+  const body = `<p class="small-muted">Upload an Excel (.xlsx) file using the template — CSV isn't accepted, since it doesn't reliably support Hebrew text. The <code>shul_name</code> column must match an existing shul name exactly. To mass-edit existing applicants, export first, edit cells in Excel, and re-upload — a row with a filled-in <code>id</code> column updates that applicant (only the cells you actually changed), instead of creating a new one.</p>
     <input type="file" id="import-file" accept=".xlsx">
     <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-bypass"><label style="margin:0">Bypass missing required fields (admin only — rows with blanks are still imported; first/last name still required)</label></div>
     <div class="checkbox-row" style="margin-top:8px"><input type="checkbox" id="import-provider-exempt"><label style="margin:0">One-time backfill for another season — never send these to disccardpromos (permanent, even if later approved/rejected)</label></div>
@@ -373,7 +373,7 @@ window.runImport = async () => {
   btn.disabled = true; btn.textContent = 'Uploading…';
   try {
     const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
-    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.updated}</strong> updated, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
       (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
     load();
   } catch (err) {

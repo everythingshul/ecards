@@ -32,7 +32,7 @@ window.runImport = async () => {
   btn.disabled = true; btn.textContent = 'Uploading…';
   try {
     const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
-    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> submitted, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> submitted, <strong>${r.updated}</strong> updated, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
       (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
   } catch (err) { toast(err.message, true); } finally {
     btn.disabled = false; btn.textContent = 'Upload';

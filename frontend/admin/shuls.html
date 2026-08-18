@@ -342,7 +342,7 @@ window.createShul = async () => {
 async function openImportModal() {
   let seasons = [];
   try { ({ seasons } = await api('/seasons')); } catch { /* season picker just won't show options if this fails */ }
-  const body = `<p class="small-muted">Upload an Excel (.xlsx) file using the template — CSV isn't accepted, since it doesn't reliably support Hebrew text. New shuls are matched for duplicates automatically; both accounts are paused if one is found.</p>
+  const body = `<p class="small-muted">Upload an Excel (.xlsx) file using the template — CSV isn't accepted, since it doesn't reliably support Hebrew text. New shuls are matched for duplicates automatically; both accounts are paused if one is found. To mass-edit existing shuls, export first, edit cells in Excel, and re-upload — a row with a filled-in <code>id</code> column updates that shul (only the cells you actually changed), instead of creating a new one.</p>
     <input type="file" id="import-file" accept=".xlsx">
     <label style="margin-top:12px">Season <span class="small-muted">(for a one-time backfill of a past/other season — defaults to the current season)</span></label>
     <select id="import-season">${seasons.map(s => `<option value="${s.id}" ${s.is_active ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
@@ -362,7 +362,7 @@ window.runImport = async () => {
   btn.disabled = true; btn.textContent = 'Uploading…';
   try {
     const r = await api('/shuls/import', { method: 'POST', isForm: true, body: fd });
-    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
+    qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.updated}</strong> updated, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
       (r.errors.length ? `<ul>${r.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>` : '');
     load();
   } catch (err) {

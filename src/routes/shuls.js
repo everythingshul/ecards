@@ -11,7 +11,7 @@ import { parseSpreadsheet, buildXlsxTemplate, SHUL_IMPORT_COLUMNS } from '../ser
 import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
-import { getDefaultForm, validateBySchema, validateRowsBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
+import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, SHUL_FIELDS } from '../utils/formValidation.js';
 import { logAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
@@ -740,8 +740,24 @@ router.get('/import/template', requireAdmin, (req, res) => {
   const columns = known.length ? [...known, 'slots_allocated'] : SHUL_IMPORT_COLUMNS;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="shul_import_template.xlsx"');
-  res.send(buildXlsxTemplate(columns));
+  res.send(buildXlsxTemplate(['id', ...columns]));
 });
+
+// Every column this route will write on an UPDATE row, and how to read it
+// off a parsed sheet row — shared between the required-field bypass check
+// and the actual UPDATE below so the two can never drift apart on which
+// columns count as "filled in". Phone columns get normalized; everything
+// else is used as-is. A blank cell (parseSpreadsheet's defval) means
+// "leave this column alone", not "clear it" — that's the whole point of
+// editing an exported sheet and re-uploading only the cells that changed.
+const SHUL_UPDATABLE_FIELDS = {
+  name_en: r => r.name_en, name_he: r => r.name_he, address: r => r.address, city: r => r.city, state: r => r.state, zip: r => r.zip,
+  ruv_first_name: r => r.ruv_first_name, ruv_last_name: r => r.ruv_last_name, ruv_phone: r => r.ruv_phone && normalizePhone(r.ruv_phone),
+  ruv_address: r => r.ruv_address, ruv_city: r => r.ruv_city, ruv_state: r => r.ruv_state, ruv_zip: r => r.ruv_zip,
+  gabai_first_name: r => r.gabai_first_name, gabai_last_name: r => r.gabai_last_name, gabai_cell: r => r.gabai_cell && normalizePhone(r.gabai_cell),
+  gabai_email: r => r.gabai_email, gabai_address: r => r.gabai_address, gabai_city: r => r.gabai_city, gabai_state: r => r.gabai_state, gabai_zip: r => r.gabai_zip,
+  slots_allocated: r => (r.slots_allocated !== '' && r.slots_allocated != null ? Number(r.slots_allocated) : ''),
+};
 
 router.post('/import', requireAdmin, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -758,25 +774,63 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   if (req.body.season_id && !season) return res.status(400).json({ error: 'Season not found' });
   const sendContracts = req.body.send_contracts === 'true' || req.body.send_contracts === true;
 
-  // All-or-nothing: every row must have every field the live Shul
-  // Registration form currently requires, or nothing in the sheet is
+  // A row with a non-blank `id` column that matches an existing shul in
+  // this org is an edit, not a new application — same file you get from
+  // Export Excel, edited in place and re-uploaded. Everything below keys
+  // off this lookup: update rows skip required-field validation (they're
+  // patching specific cells, not submitting a fresh application) and skip
+  // creation entirely, only touching the columns that actually have a
+  // value in the sheet.
+  const rowExisting = rows.map(r => {
+    const id = r.id ? String(r.id).trim() : '';
+    if (!id) return null;
+    return db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id) || null;
+  });
+
+  // All-or-nothing: every true-create row must have every field the live
+  // Shul Registration form currently requires, or nothing in the sheet is
   // imported — no partial imports. An admin uploading a sheet normally gets
   // just the per-field "Admin can override" leniency the public form never
   // does; bypass_required skips this whole check for the entire sheet (e.g.
   // a backfill import where most fields genuinely aren't known) — name_en
-  // and gabai_email stay hard-required per row below regardless, since a
+  // and gabai_email stay hard-required per new row below regardless, since a
   // shul record is meaningless without at least those.
   const bypassRequired = req.body.bypass_required === 'true' || req.body.bypass_required === true;
   const schema = JSON.parse(getDefaultForm(req.user.org_id, 'shul_application')?.schema_json || '[]');
-  const requiredErrors = bypassRequired ? [] : validateRowsBySchema(schema, rows, { isAdmin: true });
-  if (requiredErrors.length) {
-    return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
+  const requiredErrors = bypassRequired ? [] : rows
+    .map((r, i) => (rowExisting[i] ? null : { row: i + 2, errors: validateBySchema(schema, r, { isAdmin: true }) }))
+    .filter(x => x && x.errors.length)
+    .map(x => ({ row: x.row, error: x.errors.join('; ') }));
+  // A row that named an id but it didn't match anything is a mistake worth
+  // surfacing, not a silent fall-through to creating a brand new shul under
+  // a random id the sheet never asked for.
+  const idNotFoundErrors = rows
+    .map((r, i) => (r.id && String(r.id).trim() && !rowExisting[i]) ? { row: i + 2, error: `No existing shul found with id "${r.id}"` } : null)
+    .filter(Boolean);
+  const allErrors = [...requiredErrors, ...idNotFoundErrors].sort((a, b) => a.row - b.row);
+  if (allErrors.length) {
+    return res.status(400).json({ error: 'Some rows have errors. Nothing was imported — fix the sheet and re-upload.', errors: allErrors });
   }
 
   const shulDefaultForm = getDefaultForm(req.user.org_id, 'shul_application');
-  let success = 0, dupes = 0; const errors = [];
+  let success = 0, dupes = 0, updated = 0; const errors = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    const existing = rowExisting[i];
+    if (existing) {
+      try {
+        const sets = Object.keys(SHUL_UPDATABLE_FIELDS).filter(f => { const v = SHUL_UPDATABLE_FIELDS[f](r); return v !== undefined && v !== ''; });
+        if (sets.length) {
+          const vals = sets.map(f => SHUL_UPDATABLE_FIELDS[f](r));
+          db.prepare(`UPDATE shuls SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, existing.id);
+          logAudit(req.user.org_id, req.user.id, 'update', 'shul', existing.id, Object.fromEntries(sets.map(f => [f, existing[f]])), Object.fromEntries(sets.map((f, idx) => [f, vals[idx]])), req.ip);
+        }
+        updated++;
+      } catch (e) {
+        errors.push({ row: i + 2, error: e.message });
+      }
+      continue;
+    }
     if (!r.name_en || !r.gabai_email) { errors.push({ row: i + 2, error: 'Missing name_en or gabai_email' }); continue; }
     try {
       const id = uuid();
@@ -814,7 +868,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
   db.prepare(`INSERT INTO import_jobs (id, org_id, entity_type, file_name, status, total_rows, success_count, error_count, duplicate_count, error_log, created_by)
     VALUES (?,?,?,?,'completed',?,?,?,?,?,?)`)
     .run(jobId, req.user.org_id, 'shuls', req.file.originalname, rows.length, success, errors.length, dupes, JSON.stringify(errors), req.user.id);
-  res.json({ jobId, total: rows.length, success, duplicates: dupes, errors });
+  res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 
 function checkScope(req, res, shulId) {
