@@ -621,6 +621,7 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
       const applicant = db.prepare('SELECT * FROM applicants WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'applicant', applicant);
       recordFormResponse(req.user.org_id, defaultForm, r, { type: 'applicant', id });
+      logAudit(req.user.org_id, req.user.id, 'create', 'applicant', id, null, applicant, req.ip);
       if (flag && req.user.role !== 'shul') dupes++; else success++;
     } catch (e) {
       errors.push({ row: i + 2, error: e.message });

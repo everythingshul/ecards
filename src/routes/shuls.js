@@ -715,6 +715,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
       const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'shul', shul);
       recordFormResponse(req.user.org_id, shulDefaultForm, r, { type: 'shul', id });
+      logAudit(req.user.org_id, req.user.id, 'create', 'shul', id, null, shul, req.ip);
       if (flag) dupes++; else success++;
       if (sendContracts && !flag) {
         const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
