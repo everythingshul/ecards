@@ -1,25 +1,10 @@
 import { db, uuid } from '../db.js';
+import { SHUL_APPLICATION_SCHEMA } from './builtinSchemas.js';
 
 // 'header'/'image' are presentational blocks in a form's schema, not real
 // inputs — never required, never validated.
 const BLOCK_TYPES = ['header', 'image'];
 function realFields(schema) { return schema.filter(f => !BLOCK_TYPES.includes(f.type)); }
-
-// The single source of truth for "what does this section's live public
-// form look like right now" — the forms.schema_json of whichever row is
-// is_current_default for that type (shul_application | store_application |
-// applicant_application). Used for the public page itself, required-field
-// validation, admin add, and bulk upload alike, so all four are always
-// asking the same questions (see routes/forms.js PUT /:id/set-default,
-// which is the only place is_current_default changes).
-export function getDefaultForm(orgId, type) {
-  return db.prepare(`SELECT * FROM forms WHERE org_id = ? AND type = ? AND is_current_default = 1`).get(orgId, type);
-}
-export function getDefaultFormSchema(orgId, type) {
-  const form = getDefaultForm(orgId, type);
-  if (!form) return [];
-  try { return JSON.parse(form.schema_json || '[]'); } catch { return []; }
-}
 
 // Checks one submission's values against a form's schema. `isAdmin` lets a
 // field marked admin_override skip both its required-ness and its number
@@ -49,14 +34,14 @@ export function validateBySchema(schema, values, { isAdmin = false } = {}) {
   return errors;
 }
 
-// Whatever the live shul application form would still flag as missing on a
-// given shul row — shared by the public apply form's own validation, the
-// admin shul-edit response, and (see routes/applicants.js) the gate that
-// blocks a shul-portal user from submitting/re-enrolling any applicant
-// until their own shul record is complete (#147: a shul carried forward
-// into a new season with missing info must fill it in first).
-export function shulInfoErrors(orgId, shul) {
-  return validateBySchema(getDefaultFormSchema(orgId, 'shul_application'), shul, { isAdmin: false });
+// Whatever the fixed shul application question set would still flag as
+// missing on a given shul row — shared by the public apply form's own
+// validation, the admin shul-edit response, and (see routes/applicants.js)
+// the gate that blocks a shul-portal user from submitting/re-enrolling any
+// applicant until their own shul record is complete (#147: a shul carried
+// forward into a new season with missing info must fill it in first).
+export function shulInfoErrors(shul) {
+  return validateBySchema(SHUL_APPLICATION_SCHEMA, shul, { isAdmin: false });
 }
 
 // Same check across every row of a bulk-upload sheet — one combined error

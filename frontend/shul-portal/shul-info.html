@@ -25,12 +25,12 @@ renderShell('/shul-portal/shul-info', `
 let currentShul = null;
 async function load() {
   const shulId = Auth.user().shul_id;
-  const [{ shul, missingInfo }, { form }] = await Promise.all([
+  const [{ shul, missingInfo }, schemaResult] = await Promise.all([
     api(`/shuls/${shulId}`),
-    api('/forms/public/default/shul_application').catch(() => ({ form: null })),
+    loadBuiltinSchema('shul_application'),
   ]);
   currentShul = shul;
-  const schema = form?.schema_json || [];
+  const schema = schemaResult || [];
   qs('#missing-banner').innerHTML = missingInfo && missingInfo.length
     ? `<div class="card" style="margin-bottom:16px;border-color:var(--danger)"><strong>Missing:</strong> ${missingInfo.map(esc).join('; ')}. Please fill these in before submitting or re-enrolling any applicants.</div>`
     : '';

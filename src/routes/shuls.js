@@ -10,8 +10,9 @@ import { sendSmsChecked } from '../services/sms.js';
 import { parseSpreadsheet, buildXlsxTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
-import { formWindowError, getFormSeasonId } from '../utils/formSchedule.js';
-import { getDefaultForm, validateBySchema, splitKnown, recordFormResponse, SHUL_FIELDS, shulInfoErrors } from '../utils/formValidation.js';
+import { getActiveSeasonId } from '../utils/formSchedule.js';
+import { validateBySchema, shulInfoErrors } from '../utils/formValidation.js';
+import { SHUL_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
@@ -70,52 +71,30 @@ function shulLoginUrl(user) {
 // generates (but does not yet send) the contract PDF.
 router.post('/apply', (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
-  const defaultForm = getDefaultForm(orgId, 'shul_application');
-  const windowError = formWindowError(defaultForm);
-  if (windowError) return res.status(423).json({ error: windowError });
   const b = req.body || {};
-  // The page itself is now a plain render of defaultForm.schema_json (see
-  // form-render.js), so every field an admin sees here — including ones that
-  // used to be hardcoded HTML — lives in that schema. Required-ness and
-  // per-field admin_override come from it too (isAdmin: false — a public
-  // applicant never gets the override).
-  const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
-  const errors = validateBySchema(schema, b, { isAdmin: false });
+  // Fixed question set (see utils/builtinSchemas.js) — no longer driven by
+  // an editable Form Builder row.
+  const errors = validateBySchema(SHUL_APPLICATION_SCHEMA, b, { isAdmin: false });
   if (errors.length) return res.status(400).json({ error: errors[0] });
-  const { known: shul, extra } = splitKnown(schema, b, SHUL_FIELDS);
-  // Non-negotiable floor regardless of what the live schema currently asks
-  // for (defense in depth — PUT /:id/set-default already refuses to switch
-  // to a schema missing these, so this should never actually trip).
-  for (const f of REQUIRED_SHUL_FIELDS) {
-    if (!shul[f]) return res.status(400).json({ error: `Missing required field: ${f}` });
-  }
-  if (shul.ruv_phone !== undefined) shul.ruv_phone = normalizePhone(shul.ruv_phone);
-  if (shul.gabai_cell !== undefined) shul.gabai_cell = normalizePhone(shul.gabai_cell);
-  const seasonId = defaultForm?.season_id || getFormSeasonId(orgId, 'shul_application');
+  if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
+  if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
+  const seasonId = getActiveSeasonId(orgId);
   const id = uuid();
   // lat/lng/place_id (Places autocomplete) are technical fields the JS
-  // widget fills in directly, not builder-configurable questions — read
-  // straight off the body regardless of schema, same as before.
+  // widget fills in directly, not one of the fixed questions — read
+  // straight off the body regardless.
   db.prepare(`INSERT INTO shuls (id, org_id, season_id, name_en, name_he, address, city, state, zip, lat, lng, place_id,
       ruv_first_name, ruv_last_name, ruv_phone, ruv_address, ruv_city, ruv_state, ruv_zip, ruv_place_id,
       gabai_first_name, gabai_last_name, gabai_cell, gabai_email, gabai_address, gabai_city, gabai_state, gabai_zip, gabai_place_id,
       status, source)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, 'submitted', 'form')`)
-    .run(id, orgId, seasonId, shul.name_en, shul.name_he || '', shul.address, shul.city, shul.state, shul.zip, b.lat || null, b.lng || null, b.place_id || null,
-      shul.ruv_first_name, shul.ruv_last_name, shul.ruv_phone, shul.ruv_address || '', shul.ruv_city || '', shul.ruv_state || '', shul.ruv_zip || '', b.ruv_place_id || null,
-      shul.gabai_first_name, shul.gabai_last_name, shul.gabai_cell, shul.gabai_email, shul.gabai_address || '', shul.gabai_city || '', shul.gabai_state || '', shul.gabai_zip || '', b.gabai_place_id || null);
-
-  // Anything the admin added to the schema beyond the known DB columns
-  // (splitKnown above) lands here as free text, same as a generic custom
-  // form. b.extra_notes is a legacy fallback for the old fixed-fields-plus-
-  // bolt-ons page shape, kept in case anything still posts that field name.
-  if (extra) db.prepare('INSERT INTO shul_notes (id, shul_id, note) VALUES (?,?,?)').run(uuid(), id, extra);
-  if (b.extra_notes) db.prepare('INSERT INTO shul_notes (id, shul_id, note) VALUES (?,?,?)').run(uuid(), id, b.extra_notes);
+    .run(id, orgId, seasonId, b.name_en, b.name_he || '', b.address, b.city, b.state, b.zip, b.lat || null, b.lng || null, b.place_id || null,
+      b.ruv_first_name, b.ruv_last_name, b.ruv_phone, b.ruv_address || '', b.ruv_city || '', b.ruv_state || '', b.ruv_zip || '', b.ruv_place_id || null,
+      b.gabai_first_name, b.gabai_last_name, b.gabai_cell, b.gabai_email, b.gabai_address || '', b.gabai_city || '', b.gabai_state || '', b.gabai_zip || '', b.gabai_place_id || null);
 
   const shulRow = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
   const flag = detectAndFlag(orgId, 'shul', shulRow);
   logAudit(orgId, null, 'create', 'shul', id, null, shulRow, req.ip);
-  recordFormResponse(orgId, defaultForm, b, { type: 'shul', id });
   if (flag) return res.status(201).json({ shul: shulRow, duplicate: true, message: 'Your application was received, but a similar shul is already on file. Our team will follow up.' });
   res.status(201).json({ shul: shulRow, duplicate: false, message: 'Application received. You will receive an email with your contract to sign shortly.' });
 });
@@ -271,7 +250,7 @@ router.get('/:id', (req, res) => {
   // admin approval already use (see #147: a shul carried into a new season
   // needs to fill in anything genuinely missing before submitting
   // applicants, e.g. a field that wasn't required last season but is now).
-  const missingInfo = shulInfoErrors(req.user.org_id, shul);
+  const missingInfo = shulInfoErrors(shul);
   res.json({ shul: shulOut, notes, contract, applicants, flags, missingInfo });
 });
 
@@ -463,7 +442,7 @@ router.put('/:id', (req, res) => {
   logAudit(req.user.org_id, req.user.id, 'update', 'shul', shul.id, shul, updated, req.ip);
   const shulOut = { ...updated };
   if (isSelf) delete shulOut.permanent_comments;
-  const missingInfo = shulInfoErrors(req.user.org_id, updated);
+  const missingInfo = shulInfoErrors(updated);
   res.json({ shul: shulOut, missingInfo });
 });
 
@@ -767,16 +746,10 @@ router.post('/duplicates/:flagId/resolve', requireAdmin, (req, res) => {
 // Mass upload template + import — spec #3: shuls uploaded from the back end
 // should be able to receive the contract if signed up, always email when
 // there's a doc to sign (handled by calling /send-contract per row, or in bulk below).
-// Columns mirror whatever the live Shul Registration form currently asks
-// for (same schema apply.html renders — see form-render.js), falling back
-// to the static list only if no default form is configured yet.
 router.get('/import/template', requireAdmin, (req, res) => {
-  const schema = JSON.parse(getDefaultForm(req.user.org_id, 'shul_application')?.schema_json || '[]');
-  const known = schema.filter(f => SHUL_FIELDS.includes(f.key)).map(f => f.key);
-  const columns = known.length ? [...known, 'slots_allocated'] : SHUL_IMPORT_COLUMNS;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="shul_import_template.xlsx"');
-  res.send(buildXlsxTemplate(['id', ...columns]));
+  res.send(buildXlsxTemplate(['id', ...SHUL_IMPORT_COLUMNS]));
 });
 
 // Every column this route will write on an UPDATE row, and how to read it
@@ -823,18 +796,17 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     return db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id) || null;
   });
 
-  // All-or-nothing: every true-create row must have every field the live
-  // Shul Registration form currently requires, or nothing in the sheet is
-  // imported — no partial imports. An admin uploading a sheet normally gets
-  // just the per-field "Admin can override" leniency the public form never
-  // does; bypass_required skips this whole check for the entire sheet (e.g.
-  // a backfill import where most fields genuinely aren't known) — name_en
+  // All-or-nothing: every true-create row must have every field the fixed
+  // Shul Registration question set requires, or nothing in the sheet is
+  // imported — no partial imports. An admin uploading a sheet gets the
+  // per-field "Admin can override" leniency the public form never does;
+  // bypass_required skips this whole check for the entire sheet (e.g. a
+  // backfill import where most fields genuinely aren't known) — name_en
   // and gabai_email stay hard-required per new row below regardless, since a
   // shul record is meaningless without at least those.
   const bypassRequired = req.body.bypass_required === 'true' || req.body.bypass_required === true;
-  const schema = JSON.parse(getDefaultForm(req.user.org_id, 'shul_application')?.schema_json || '[]');
   const requiredErrors = bypassRequired ? [] : rows
-    .map((r, i) => (rowExisting[i] ? null : { row: i + 2, errors: validateBySchema(schema, r, { isAdmin: true }) }))
+    .map((r, i) => (rowExisting[i] ? null : { row: i + 2, errors: validateBySchema(SHUL_APPLICATION_SCHEMA, r, { isAdmin: true }) }))
     .filter(x => x && x.errors.length)
     .map(x => ({ row: x.row, error: x.errors.join('; ') }));
   // A row that named an id but it didn't match anything is a mistake worth
@@ -848,7 +820,6 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
     return res.status(400).json({ error: 'Some rows have errors. Nothing was imported — fix the sheet and re-upload.', errors: allErrors });
   }
 
-  const shulDefaultForm = getDefaultForm(req.user.org_id, 'shul_application');
   let success = 0, dupes = 0, updated = 0; const errors = [];
   const createdIds = [], createdNames = [], updatedIds = [], updatedNames = [];
   for (let i = 0; i < rows.length; i++) {
@@ -882,7 +853,6 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
           Number(r.slots_allocated) || 0);
       const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
       const flag = detectAndFlag(req.user.org_id, 'shul', shul);
-      recordFormResponse(req.user.org_id, shulDefaultForm, r, { type: 'shul', id });
       createdIds.push(id); createdNames.push(shul.name_en);
       if (flag) dupes++; else success++;
       if (sendContracts && !flag) {

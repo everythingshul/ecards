@@ -929,28 +929,19 @@ async function attachColumnCustomizer(buttonId, storageKey, columns, defaultOrde
   return order;
 }
 
-// Checks the schedule (opens_at/closes_at, is_active) of whichever form is
-// CURRENTLY the live default for a section before letting the caller show
-// its form. `type` is one of 'shul_application'/'store_application'/
-// 'applicant_application' (see utils/formSchedule.js and
-// forms.is_current_default) — looked up via /forms/public/default/:type
-// rather than by slug, since these pages are fixed at fixed URLs and the
-// slug is just an editable label for whichever form currently serves them,
 // Renders one form-builder field as public-facing HTML — shared by
-// form.html (custom slug-based forms) and the three fixed public pages
-// (apply.html/apply-store.html/apply-ezras-habayis.html), which render
-// their fields the same way now (fetched from GET /forms/public/default/
-// :type) instead of a hardcoded field set with extras bolted on separately
-// — every field an admin sees in the Form Builder for the live default form
-// is exactly what shows up here. Every real input also gets id=key
+// form.html (custom slug-based forms) and the four built-in flows
+// (apply.html/apply-store.html/apply-ezras-habayis.html, shul-portal
+// dashboard/shul-info), whether the field array came from a real Form
+// Builder schema or one of the fixed arrays in utils/builtinSchemas.js
+// (fetched via loadBuiltinSchema below). Every real input also gets id=key
 // alongside name=key so page-specific wiring (Google Places autocomplete on
 // address/city/state/zip, for one) can still target known field keys
-// directly even though the fields themselves are fully dynamic now.
-// expectedAnswer (Form Builder: "Expected Answer") never reaches here in
-// the first place — routes/forms.js strips it before any public response —
-// so there's nothing to accidentally leak by rendering fields verbatim.
-// shulOptions is only used for the special shul_id field on the Applicant
-// Application form; pass [] anywhere else.
+// directly. expectedAnswer (Form Builder: "Expected Answer") never reaches
+// here in the first place — routes/forms.js strips it before any public
+// response — so there's nothing to accidentally leak by rendering fields
+// verbatim. shulOptions is only used for the special shul_id field on a
+// custom Applicant Application form; pass [] anywhere else.
 function fieldHtml(f, shulOptions = []) {
   if (f.type === 'header') return `<h3 style="margin-top:22px">${esc(f.label || '')}</h3>`;
   if (f.type === 'image') return f.url ? `<img src="${esc(f.url)}" alt="${esc(f.label||'')}" style="max-width:100%;height:auto;margin:14px 0;border-radius:8px">` : '';
@@ -968,31 +959,12 @@ function fieldHtml(f, shulOptions = []) {
   return `${label}<input type="${f.type==='email'?'email':(f.type==='tel'?'tel':'text')}" name="${esc(f.key)}" id="${esc(f.key)}" ${req}>`;
 }
 
-// Fetches whichever form is currently the live default for this section
-// (type = 'shul_application'/'store_application'/'applicant_application' —
-// see forms.is_current_default) and reports whether it's actually open for
-// submissions right now. Callers pass formSelector so, on a closed/not-yet-
-// open window, this can swap the real form out for a "not accepting
-// submissions" notice in place — same UX the old guardFormWindow gave, just
-// now sharing the one fetch every page already needs to render its fields.
-// Fails open on any error — a form-builder hiccup should never block a real
-// applicant from seeing/submitting the form.
-async function loadDefaultForm(type, formSelector) {
-  try {
-    const { form, windowError } = await api(`/forms/public/default/${type}`);
-    if (windowError) {
-      const el = qs(formSelector);
-      if (el) {
-        const notice = document.createElement('div');
-        notice.className = 'card';
-        notice.style.textAlign = 'center';
-        notice.innerHTML = `<h3>Not accepting submissions</h3><p class="small-muted">${esc(windowError)}</p>`;
-        el.replaceWith(notice);
-      }
-      return null;
-    }
-    return form;
-  } catch { return null; }
+// Fetches the fixed question set for one of the four built-in application
+// flows (type = 'shul_application'/'store_application'/'applicant_application'
+// — see utils/builtinSchemas.js). No more schedule/active-state to check —
+// these pages no longer read from an editable Form Builder row at all.
+async function loadBuiltinSchema(type) {
+  try { return (await api(`/forms/builtin/${type}`)).schema; } catch { return null; }
 }
 
 // Minimal signature pad (mouse + touch) writing to a canvas, exported as base64 PNG.

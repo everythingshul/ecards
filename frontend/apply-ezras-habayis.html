@@ -32,15 +32,14 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-// Every field here comes straight from whichever form is currently live for
-// "Ezras Habayis Application" (Form Builder, type applicant_application) —
-// required-ness, labels, and even whether a field exists at all are 100%
-// admin-controlled there now. No shul_id field appears since Ezras Habayis
-// applicants auto-attach to the season's locked system shul server-side.
+// Fixed question set for Applicant Application (utils/builtinSchemas.js) —
+// no longer editable through Form Builder. No shul_id field appears since
+// Ezras Habayis applicants auto-attach to the season's locked system shul
+// server-side.
 (async () => {
-  const form = await loadDefaultForm('applicant_application', '#apply-form');
-  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
-  qs('#dyn-fields').innerHTML = form.schema_json.filter(f => f.key !== 'shul_id').map(f => fieldHtml(f)).join('');
+  const schema = await loadBuiltinSchema('applicant_application');
+  if (!schema) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  qs('#dyn-fields').innerHTML = schema.filter(f => f.key !== 'shul_id').map(f => fieldHtml(f)).join('');
   loadGoogleMaps().then(() => {
     attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip' });
   });

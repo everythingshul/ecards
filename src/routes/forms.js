@@ -8,8 +8,9 @@ import { detectAndFlag } from '../services/duplicates.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 import { isZipAllowed } from './applicants.js';
-import { formWindowError, REQUIRED_MINIMUM_FIELDS } from '../utils/formSchedule.js';
+import { formWindowError } from '../utils/formSchedule.js';
 import { validateBySchema, recordFormResponse, splitKnown, APPLICANT_FIELDS, SHUL_FIELDS, STORE_FIELDS } from '../utils/formValidation.js';
+import { BUILTIN_SCHEMAS } from '../utils/builtinSchemas.js';
 import { sendXlsx } from '../services/xlsx.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -39,16 +40,16 @@ router.get('/public/:slug', (req, res) => {
   res.json({ form: { ...form, schema_json: sanitizeSchemaForPublic(JSON.parse(form.schema_json)), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
 });
 
-// Public: same as above but for the three built-in application pages
-// (apply.html, apply-store.html, apply-ezras-habayis.html), which are fixed
-// pages at fixed URLs — not slug-driven — so they look up whichever form is
-// CURRENTLY the live default for that section (type + is_current_default;
-// see PUT /:id/set-default and utils/formSchedule.js) instead of a specific
-// pinned row or the now-freely-editable slug.
-router.get('/public/default/:type', (req, res) => {
-  const form = db.prepare('SELECT * FROM forms WHERE type = ? AND is_current_default = 1 AND is_active = 1').get(req.params.type);
-  if (!form) return res.status(404).json({ error: 'Form not found or no longer active' });
-  res.json({ form: { ...form, schema_json: sanitizeSchemaForPublic(JSON.parse(form.schema_json)), target_json: JSON.parse(form.target_json || '[]') }, windowError: formWindowError(form) });
+// Public: the fixed question set for one of the four built-in application
+// flows (shul/store/applicant application — Ezras Habayis shares
+// applicant_application). These used to be editable Form Builder rows
+// looked up by is_current_default; that's gone (see utils/builtinSchemas.js)
+// — these are just hardcoded arrays now, so there's no schedule/active
+// state to report and no 404 case.
+router.get('/builtin/:type', (req, res) => {
+  const schema = BUILTIN_SCHEMAS[req.params.type];
+  if (!schema) return res.status(404).json({ error: 'Unknown built-in form type' });
+  res.json({ schema });
 });
 
 // Public: generic submission handler for custom forms built in the form
@@ -165,23 +166,10 @@ router.put('/:id', (req, res) => {
     if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
     if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
   }
-  // Renaming a built-in form's slug is safe — the public page that actually
-  // serves it (apply.html etc.) looks up whichever form is the current
-  // default for its type, not by slug (see utils/formSchedule.js) — but
-  // slug still has to stay unique and non-empty for the generic
-  // /forms/public/:slug lookup that custom forms (and anyone with an old
-  // link to this one) rely on.
   if (slug !== undefined) {
     if (!slug) return res.status(400).json({ error: 'URL Slug is required' });
     const conflict = db.prepare('SELECT 1 FROM forms WHERE slug = ? AND id != ?').get(slug, form.id);
     if (conflict) return res.status(409).json({ error: 'That slug is already in use' });
-  }
-  // Every section (Shuls/Applicants/Stores) must always have a live default
-  // form — deactivating the one currently holding that spot would leave the
-  // fixed public page (and admin add/bulk-upload, which read the same
-  // schema) with nothing to render. Set a different form as default first.
-  if (is_active === false && form.is_current_default) {
-    return res.status(400).json({ error: 'This form is currently live for its section — set another form as default before deactivating it.' });
   }
   // opens_at/closes_at: undefined leaves it as-is; explicit null/'' clears
   // the date (open-ended) — same pattern as seasons.js's max_accepted_applicants.
@@ -195,43 +183,9 @@ router.put('/:id', (req, res) => {
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });
 
-// Makes this form the CURRENTLY ACTIVE one for its section — the fixed
-// public page for that type (apply.html/apply-store.html/apply-ezras-
-// habayis.html) starts rendering and submitting through it immediately,
-// replacing whichever form held that spot before. Only one form per (org,
-// type) can be current at a time, so this clears the flag off every other
-// form of the same type first. Refuses to switch to a form whose schema is
-// missing any of that type's non-negotiable required fields (see
-// REQUIRED_MINIMUM_FIELDS in utils/formSchedule.js) — the live section must
-// always be able to collect what the rest of the system (disccardpromos
-// account creation, contract generation, etc.) needs, regardless of which
-// specific form document is currently serving it.
-router.put('/:id/set-default', (req, res) => {
-  const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!form) return res.status(404).json({ error: 'Not found' });
-  // An inactive form can never serve as a section's live default — the
-  // public page's own lookup requires is_current_default AND is_active
-  // together (see GET /public/default/:type above), so switching to an
-  // inactive form here wouldn't show that form, it would just take the
-  // section's public page down entirely with a bare 404 until an admin
-  // notices and either activates this form or reassigns the section.
-  if (!form.is_active) return res.status(400).json({ error: 'Activate this form before setting it as the default — an inactive form can\'t serve as a section\'s live page.' });
-  const required = REQUIRED_MINIMUM_FIELDS[form.type];
-  if (required) {
-    const schema = JSON.parse(form.schema_json);
-    const keys = new Set(schema.map(f => f.key));
-    const missing = required.filter(k => !keys.has(k));
-    if (missing.length) return res.status(400).json({ error: `This form is missing required field(s) for this section: ${missing.join(', ')}` });
-  }
-  db.prepare('UPDATE forms SET is_current_default = 0 WHERE org_id = ? AND type = ?').run(req.user.org_id, form.type);
-  db.prepare('UPDATE forms SET is_current_default = 1, updated_at = datetime(\'now\') WHERE id = ?').run(form.id);
-  res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
-});
-
 router.delete('/:id', (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
-  if (form.is_current_default) return res.status(400).json({ error: 'This form is currently live for its section — set another form as default before removing it.' });
   db.prepare('UPDATE forms SET is_active = 0 WHERE id = ?').run(form.id);
   res.json({ ok: true });
 });

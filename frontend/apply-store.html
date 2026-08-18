@@ -32,13 +32,12 @@
 <script>trackPageview();</script>
 <script>renderPublicFooter();</script>
 <script>
-// Every field here comes straight from whichever form is currently live for
-// "Store Application" (Form Builder) — required-ness, labels, and even
-// whether a field exists at all are 100% admin-controlled there now.
+// Fixed question set for Store Application (utils/builtinSchemas.js) — no
+// longer editable through Form Builder.
 (async () => {
-  const form = await loadDefaultForm('store_application', '#apply-form');
-  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
-  qs('#dyn-fields').innerHTML = form.schema_json.map(f => fieldHtml(f)).join('');
+  const schema = await loadBuiltinSchema('store_application');
+  if (!schema) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  qs('#dyn-fields').innerHTML = schema.map(f => fieldHtml(f)).join('');
   loadGoogleMaps().then(() => {
     attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip' });
   });

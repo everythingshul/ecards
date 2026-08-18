@@ -105,15 +105,14 @@ window.createApplicant = async () => {
 // added internally (notes, duplicate-flag reasoning) is ever included; the
 // API already withholds those entirely for the shul role.
 // Carried over from a previous season (see admin's "Carry Forward to
-// Season" action) — not a real submission yet. Renders the live Applicant
-// Application form, pre-filled with whatever's already known, and requires
-// completing every field the form currently requires before it counts as a
-// real submission for this season (and this shul's allocated slots).
+// Season" action) — not a real submission yet. Renders the fixed Applicant
+// Application question set (utils/builtinSchemas.js), pre-filled with
+// whatever's already known, and requires completing every required field
+// before it counts as a real submission for this season (and this shul's
+// allocated slots).
 async function openReenrollment(a) {
-  let form;
-  try { ({ form } = await api('/forms/public/default/applicant_application')); } catch { /* falls through to the error below */ }
-  if (!form) { toast('Could not load the application form — try again shortly.', true); return; }
-  const schema = form.schema_json;
+  const schema = await loadBuiltinSchema('applicant_application');
+  if (!schema) { toast('Could not load the application form — try again shortly.', true); return; }
   openModal(`Complete Re-enrollment: ${esc(a.first_name)} ${esc(a.last_name)}`,
     `<p class="small-muted">This applicant was carried over from a previous season. Please review and fill in anything missing before submitting.</p>
      <form id="reenroll-form">${schema.map(f => fieldHtml(f)).join('')}</form>`,

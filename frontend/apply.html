@@ -48,15 +48,12 @@
 let shulId = null, signToken = null, currentSchema = [];
 let contractFields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
 
-// Every field here — including ones that used to be hardcoded HTML (name,
-// address, Rav/Gabai info) — comes straight from whichever form is
-// currently live for "Shul Registration" (Form Builder). Required-ness,
-// labels, and even whether a field exists at all are 100% admin-controlled
-// there now, not baked into this page.
+// Fixed question set for Shul Registration (utils/builtinSchemas.js) — no
+// longer editable through Form Builder.
 (async () => {
-  const form = await loadDefaultForm('shul_application', '#apply-form');
-  if (!form) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
-  currentSchema = form.schema_json;
+  const schema = await loadBuiltinSchema('shul_application');
+  if (!schema) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
+  currentSchema = schema;
   qs('#dyn-fields').innerHTML = currentSchema.map(f => fieldHtml(f)).join('');
   loadGoogleMaps().then(() => {
     attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip', placeId:'shul_place_id', lat:'shul_lat', lng:'shul_lng' });

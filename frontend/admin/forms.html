@@ -22,14 +22,12 @@ let fieldDraft = [];
 let formsCache = [];
 let seasonsCache = [];
 
-const SECTION_PAGE = { shul_application: '/apply', store_application: '/apply-store', applicant_application: '/apply-ezras-habayis' };
 const SECTION_LABEL = { shul_application: 'Shul Application', store_application: 'Store Application', applicant_application: 'Applicant Application' };
-// The section's fixed public page always goes to whichever form is
-// currently the default for its type — Preview Link goes there when this
-// form IS that one; otherwise there's no live URL to preview yet (it would
-// only take effect after "Set as Default"), so it falls back to the
-// generic slug-driven form renderer instead.
-function previewLink(f) { return (f.is_current_default && SECTION_PAGE[f.type]) || '/form?slug=' + esc(f.slug); }
+// Every custom form previews through the generic slug-driven renderer —
+// the fixed public pages (apply.html etc.) no longer read from any form
+// row at all (see utils/builtinSchemas.js), so there's no "this form is
+// currently live at the fixed URL" case to special-case anymore.
+function previewLink(f) { return '/form?slug=' + esc(f.slug); }
 function scheduleStatus(f) {
   const now = new Date();
   if (!f.is_active) return badge('inactive', 'rejected');
@@ -45,24 +43,19 @@ async function load() {
   const seasonName = (id) => seasons.find(s => s.id === id)?.name || 'no season';
   qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
       <div class="flex-between">
-        <div><strong>${esc(f.name)}</strong> ${f.is_current_default ? badge(`live for ${esc(SECTION_LABEL[f.type]||f.type)}`, 'active') : ''} <span class="small-muted">/${esc(f.slug)}</span><br>
+        <div><strong>${esc(f.name)}</strong> <span class="small-muted">/${esc(f.slug)}</span><br>
           <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${esc(seasonName(f.season_id))} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
         <div class="pill-row">
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
           <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
           <button class="btn btn-sm btn-outline" onclick="openResponses('${f.id}')">Responses</button>
-          ${!f.is_current_default && f.is_active ? `<button class="btn btn-sm btn-outline" onclick="setDefaultForm('${f.id}')">Set as Default for ${esc(SECTION_LABEL[f.type]||f.type)}</button>` : ''}
           <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
         </div>
       </div>
     </div>`).join('') : '<p class="small-muted">No forms yet.</p>';
 }
 window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { method: 'PUT', body: { is_active: activate === 'true' } }); load(); } catch (err) { toast(err.message, true); } };
-window.setDefaultForm = async (id) => {
-  if (!confirm(`Make this the live form for its section? The public page will immediately start using it instead of whichever form serves that section now.`)) return;
-  try { await api(`/forms/${id}/set-default`, { method: 'PUT' }); toast('This is now the live form for its section'); load(); } catch (err) { toast(err.message, true); }
-};
 
 qs('#btn-new').addEventListener('click', () => {
   fieldDraft = [{ key: 'first_name', label: 'First Name', type: 'text', required: true }];
@@ -104,7 +97,6 @@ function formBody(existing = null) {
     </div>
     <label>Season *</label><select id="f-season">${seasonsCache.map(s => `<option value="${s.id}" ${(existing ? existing.season_id === s.id : s.is_active) ? 'selected' : ''}>${esc(s.name)}${s.is_active?' (active)':''}</option>`).join('')}</select>
     <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026" value="${existing ? esc(existing.slug) : ''}">
-    ${existing?.editing && existing.is_current_default && SECTION_PAGE[existing.type] ? `<p class="small-muted">This form is live at <code>${esc(SECTION_PAGE[existing.type])}</code> — that URL is fixed regardless of this slug; renaming it here won't move or break the live page.</p>` : ''}
     ${existing?.editing ? `
     <div class="grid-2">
       <div><label>Opens <span class="small-muted">(blank = always open)</span></label><input type="datetime-local" id="f-opens" value="${toLocalInputValue(existing.opens_at)}"></div>
