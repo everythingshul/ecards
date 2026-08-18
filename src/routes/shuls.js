@@ -487,6 +487,20 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/mass-reject', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let rejected = 0, skipped = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul) { skipped++; continue; }
+    db.prepare(`UPDATE shuls SET status='rejected', updated_at=datetime('now') WHERE id=?`).run(shul.id);
+    logAudit(req.user.org_id, req.user.id, 'reject', 'shul', shul.id, shul, null, req.ip);
+    rejected++;
+  }
+  res.json({ rejected, skipped });
+});
+
 // Bulk approve, mirroring applicants' /mass-approve: one uniform
 // slots_allocated applied to every selected shul (a per-shul prompt isn't
 // practical for a bulk action). Paused shuls (unresolved duplicate flag,
@@ -523,6 +537,20 @@ router.post('/:id/set-pending', requireAdmin, (req, res) => {
   res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id) });
 });
 
+router.post('/mass-set-pending', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let updated = 0, skipped = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul) { skipped++; continue; }
+    db.prepare(`UPDATE shuls SET status='submitted', updated_at=datetime('now') WHERE id=?`).run(shul.id);
+    logAudit(req.user.org_id, req.user.id, 'set-pending', 'shul', shul.id, { status: shul.status }, { status: 'submitted' }, req.ip);
+    updated++;
+  }
+  res.json({ updated, skipped });
+});
+
 // Permanent deletion — full removal, not the reject/pause soft-states
 // elsewhere in this file. Applicants belonging to this shul are NOT
 // deleted — that's a separate, deliberate action (DELETE
@@ -546,6 +574,29 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
   del();
   logAudit(req.user.org_id, req.user.id, 'delete', 'shul', shul.id, shul, null, req.ip);
   res.json({ ok: true });
+});
+
+router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let deleted = 0, skipped = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul) { skipped++; continue; }
+    const del = db.transaction(() => {
+      db.prepare('UPDATE applicants SET shul_id = NULL WHERE shul_id = ?').run(shul.id);
+      db.prepare('UPDATE shuls SET duplicate_of_shul_id = NULL WHERE duplicate_of_shul_id = ?').run(shul.id);
+      db.prepare('DELETE FROM contracts WHERE shul_id = ?').run(shul.id);
+      db.prepare('DELETE FROM shul_notes WHERE shul_id = ?').run(shul.id);
+      if (shul.portal_user_id) db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(shul.portal_user_id);
+      deletePolymorphicRefs('shul', shul.id);
+      db.prepare('DELETE FROM shuls WHERE id = ?').run(shul.id);
+    });
+    del();
+    logAudit(req.user.org_id, req.user.id, 'delete', 'shul', shul.id, shul, null, req.ip);
+    deleted++;
+  }
+  res.json({ deleted, skipped });
 });
 
 // Generate + email the contract (spec #3: "always email them when there's a doc to sign").
@@ -630,6 +681,32 @@ router.post('/:id/unpause', requireAdmin, (req, res) => {
   db.prepare('UPDATE shuls SET is_paused = 0 WHERE id = ? AND org_id = ?').run(req.params.id, req.user.org_id);
   db.prepare('UPDATE users SET is_paused = 0 WHERE shul_id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+router.post('/mass-pause', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let paused = 0, skipped = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT id FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul) { skipped++; continue; }
+    db.prepare('UPDATE shuls SET is_paused = 1 WHERE id = ?').run(shul.id);
+    db.prepare('UPDATE users SET is_paused = 1 WHERE shul_id = ?').run(shul.id);
+    paused++;
+  }
+  res.json({ paused, skipped });
+});
+router.post('/mass-unpause', requireAdmin, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+  let unpaused = 0, skipped = 0;
+  for (const id of ids) {
+    const shul = db.prepare('SELECT id FROM shuls WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
+    if (!shul) { skipped++; continue; }
+    db.prepare('UPDATE shuls SET is_paused = 0 WHERE id = ?').run(shul.id);
+    db.prepare('UPDATE users SET is_paused = 0 WHERE shul_id = ?').run(shul.id);
+    unpaused++;
+  }
+  res.json({ unpaused, skipped });
 });
 
 // Duplicate flags involving shuls

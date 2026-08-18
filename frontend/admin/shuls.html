@@ -29,7 +29,15 @@ renderShell('/admin/shuls', `
     <select id="f-season"></select>
     <button class="btn btn-outline btn-sm" id="f-dupes">Duplicates</button>
     <select id="f-pagesize"><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="200">200 / page</option></select>
-    <button class="btn btn-sm btn-primary" id="btn-mass-approve" disabled>Approve Selected (0)</button>
+    <select id="mass-action">
+      <option value="approve">Approve</option>
+      <option value="reject">Reject</option>
+      <option value="set-pending">Set to Pending</option>
+      <option value="pause">Pause</option>
+      <option value="unpause">Unpause</option>
+      <option value="delete">Delete Permanently</option>
+    </select>
+    <button class="btn btn-sm btn-primary" id="btn-mass-apply" disabled>Apply to Selected (0)</button>
   </div>
   <div id="live-banner"></div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -106,8 +114,8 @@ function rowHtml(s, cols) {
 function onCheck(e) {
   const id = e.target.dataset.id;
   if (e.target.checked) selected.add(id); else selected.delete(id);
-  qs('#btn-mass-approve').textContent = `Approve Selected (${selected.size})`;
-  qs('#btn-mass-approve').disabled = selected.size === 0;
+  qs('#btn-mass-apply').textContent = `Apply to Selected (${selected.size})`;
+  qs('#btn-mass-apply').disabled = selected.size === 0;
 }
 
 qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f-search').value; state.page = 1; load(); }, 350));
@@ -122,14 +130,55 @@ qs('#btn-new').addEventListener('click', () => openShulForm());
 qs('#btn-import').addEventListener('click', () => openImportModal());
 qs('#btn-export').addEventListener('click', () => downloadAuthed('/shuls/export?' + new URLSearchParams({ search: state.search, status: state.status, season_id: state.season_id }), 'shuls.xlsx'));
 qs('#f-dupes').addEventListener('click', showDuplicates);
-qs('#btn-mass-approve').addEventListener('click', async () => {
-  const slots = prompt('Number of slots to allocate for each selected shul this season:', '0');
-  if (slots === null) return;
+// One entry per option in #mass-action — confirm() is skipped when null
+// (approve prompts for slots instead, which doubles as its own gate: a
+// null slots value from the cancelled prompt aborts via run() returning
+// null). summarize() turns each endpoint's own count shape into one line.
+const MASS_ACTIONS = {
+  approve: {
+    confirm: null,
+    run: async (ids) => {
+      const slots = prompt('Number of slots to allocate for each selected shul this season:', '0');
+      if (slots === null) return null;
+      return api('/shuls/mass-approve', { method: 'POST', body: { ids, slots_allocated: +slots } });
+    },
+    summarize: r => { let msg = `Approved ${r.approved}, skipped ${r.skipped} (paused)`; if (r.emailErrors) msg += ` — ${r.emailErrors} account setup email(s) failed to send`; return { msg, isError: !!r.emailErrors }; },
+  },
+  reject: {
+    confirm: n => `Reject ${n} selected shul(s)?`,
+    run: (ids) => api('/shuls/mass-reject', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Rejected ${r.rejected}, skipped ${r.skipped}` }),
+  },
+  'set-pending': {
+    confirm: n => `Move ${n} selected shul(s) back to pending?`,
+    run: (ids) => api('/shuls/mass-set-pending', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Updated ${r.updated}, skipped ${r.skipped}` }),
+  },
+  pause: {
+    confirm: n => `Pause ${n} selected shul(s)?`,
+    run: (ids) => api('/shuls/mass-pause', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Paused ${r.paused}, skipped ${r.skipped}` }),
+  },
+  unpause: {
+    confirm: n => `Unpause ${n} selected shul(s)?`,
+    run: (ids) => api('/shuls/mass-unpause', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Unpaused ${r.unpaused}, skipped ${r.skipped}` }),
+  },
+  delete: {
+    confirm: n => `Permanently delete ${n} selected shul(s)? This removes each shul, its contract, and notes completely and cannot be undone. Their applicants are kept but unlinked.`,
+    run: (ids) => api('/shuls/mass-delete-permanent', { method: 'POST', body: { ids } }),
+    summarize: r => ({ msg: `Deleted ${r.deleted}, skipped ${r.skipped}` }),
+  },
+};
+qs('#btn-mass-apply').addEventListener('click', async () => {
+  const action = MASS_ACTIONS[qs('#mass-action').value];
+  const ids = Array.from(selected);
+  if (action.confirm && !confirm(action.confirm(ids.length))) return;
   try {
-    const r = await api('/shuls/mass-approve', { method: 'POST', body: { ids: Array.from(selected), slots_allocated: +slots } });
-    let msg = `Approved ${r.approved}, skipped ${r.skipped} (paused)`;
-    if (r.emailErrors) msg += ` — ${r.emailErrors} account setup email(s) failed to send`;
-    toast(msg, !!r.emailErrors);
+    const r = await action.run(ids);
+    if (!r) return;
+    const { msg, isError } = action.summarize(r);
+    toast(msg, !!isError);
     selected.clear(); load();
   } catch (err) { toast(err.message, true); }
 });
