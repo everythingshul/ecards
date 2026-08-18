@@ -341,9 +341,19 @@ router.post('/:id/set-pending', requireAdmin, async (req, res) => {
 // so that applicant survives; the polymorphic entity_type/entity_id rows
 // (documents, tasks, etc.) are cleaned up too. Wrapped in a transaction so a
 // failure partway through doesn't leave orphaned rows.
-router.delete('/:id/permanent', requireAdmin, (req, res) => {
+// Deleting our local record must never leave a still-usable disccardpromos
+// customer/card behind — locking (is_active=false) happens first and is
+// never skipped, even though the delete itself always proceeds regardless
+// of whether the lock succeeds (best-effort, same as reject/set-pending;
+// any failure comes back as cardLockErrors so the admin knows to check
+// disccardpromos directly rather than assuming it's handled). Deliberately
+// a lock, not deleteCustomer — a customer that already had real money
+// loaded onto a card should stay on record there, just deactivated, not be
+// erased.
+router.delete('/:id/permanent', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
   const del = db.transaction(() => {
     db.prepare('DELETE FROM card_transactions WHERE card_id IN (SELECT id FROM cards WHERE applicant_id = ?)').run(applicant.id);
     db.prepare('DELETE FROM cards WHERE applicant_id = ?').run(applicant.id);
@@ -354,7 +364,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
   });
   del();
   logAudit(req.user.org_id, req.user.id, 'delete', 'applicant', applicant.id, applicant, null, req.ip);
-  res.json({ ok: true });
+  res.json({ ok: true, cardLockErrors });
 });
 
 router.post('/:id/approve', requireAdmin, async (req, res) => {
