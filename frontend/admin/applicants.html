@@ -325,12 +325,15 @@ function openImportModal() {
     <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-bypass"><label style="margin:0">Bypass missing required fields (admin only — rows with blanks are still imported; first/last name still required)</label></div>
     <div class="checkbox-row" style="margin-top:8px"><input type="checkbox" id="import-provider-exempt"><label style="margin:0">One-time backfill for another season — never send these to disccardpromos (permanent, even if later approved/rejected)</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
-  openModal('Mass Upload Applicants', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
+  openModal('Mass Upload Applicants', body, `<button class="btn btn-primary btn-sm" id="btn-run-import" onclick="runImport()">Upload</button>`);
 }
 window.runImport = async () => {
+  const btn = qs('#btn-run-import');
+  if (btn.disabled) return;
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
   const fd = new FormData(); fd.append('file', file); fd.append('provider_exempt', qs('#import-provider-exempt').checked); fd.append('bypass_required', qs('#import-bypass').checked);
+  btn.disabled = true; btn.textContent = 'Uploading…';
   try {
     const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
@@ -340,6 +343,8 @@ window.runImport = async () => {
     if (err.data?.errors) {
       qs('#import-result').innerHTML = `<p style="color:var(--danger)"><strong>${esc(err.message)}</strong></p><ul>${err.data.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>`;
     } else toast(err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Upload';
   }
 };
 

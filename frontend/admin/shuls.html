@@ -300,14 +300,17 @@ async function openImportModal() {
     <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-contracts"><label style="margin:0">Automatically email contracts to non-duplicate rows</label></div>
     <div class="checkbox-row" style="margin-top:8px"><input type="checkbox" id="import-bypass"><label style="margin:0">Bypass missing required fields (admin only — rows with blanks are still imported; name and gabai email still required)</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
-  openModal('Mass Upload Shuls', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
+  openModal('Mass Upload Shuls', body, `<button class="btn btn-primary btn-sm" id="btn-run-import" onclick="runImport()">Upload</button>`);
 }
 window.runImport = async () => {
+  const btn = qs('#btn-run-import');
+  if (btn.disabled) return;
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
   const fd = new FormData(); fd.append('file', file); fd.append('send_contracts', qs('#import-contracts').checked); fd.append('bypass_required', qs('#import-bypass').checked);
   const seasonId = qs('#import-season')?.value;
   if (seasonId) fd.append('season_id', seasonId);
+  btn.disabled = true; btn.textContent = 'Uploading…';
   try {
     const r = await api('/shuls/import', { method: 'POST', isForm: true, body: fd });
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +
@@ -317,6 +320,8 @@ window.runImport = async () => {
     if (err.data?.errors) {
       qs('#import-result').innerHTML = `<p style="color:var(--danger)"><strong>${esc(err.message)}</strong></p><ul>${err.data.errors.slice(0,20).map(e=>`<li>Row ${e.row}: ${esc(e.error)}</li>`).join('')}</ul>`;
     } else toast(err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Upload';
   }
 };
 
