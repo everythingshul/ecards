@@ -31,16 +31,26 @@ export function checkShulDuplicate(orgId, shul) {
   return null;
 }
 
-// Matches on: normalized full name + zip, or same email, or same husband/wife cell.
+// A full first+last name match is a duplicate on its own — no longer
+// requires a matching zip too — and so is a match on any single phone
+// number (home, husband cell, or wife cell), the email address, or the
+// full mailing address (street+city+state+zip together, not just zip
+// alone — two applicants sharing a zip code isn't meaningful, but sharing
+// an actual street address is).
+const fullAddress = (a) => norm([a.address, a.city, a.state, a.zip].filter(Boolean).join('|'));
 export function checkApplicantDuplicate(orgId, applicant) {
   const candidates = db.prepare(`SELECT * FROM applicants WHERE org_id = ? AND id != ?`).all(orgId, applicant.id);
+  const applicantAddress = fullAddress(applicant);
   for (const c of candidates) {
     let reason = null;
-    const sameName = norm(c.first_name) === norm(applicant.first_name) && norm(c.last_name) === norm(applicant.last_name);
-    if (sameName && applicant.zip && norm(c.zip) === norm(applicant.zip)) reason = 'Same name + zip code';
-    else if (applicant.email && norm(c.email) === norm(applicant.email)) reason = 'Same email address';
+    const sameName = norm(applicant.first_name) && norm(applicant.last_name)
+      && norm(c.first_name) === norm(applicant.first_name) && norm(c.last_name) === norm(applicant.last_name);
+    if (sameName) reason = 'Same first and last name';
+    else if (applicant.home_phone && norm(c.home_phone) === norm(applicant.home_phone)) reason = 'Same home phone number';
     else if (applicant.husband_cell && norm(c.husband_cell) === norm(applicant.husband_cell)) reason = 'Same husband cell number';
     else if (applicant.wife_cell && norm(c.wife_cell) === norm(applicant.wife_cell)) reason = 'Same wife cell number';
+    else if (applicant.email && norm(c.email) === norm(applicant.email)) reason = 'Same email address';
+    else if (applicant.address && applicantAddress === fullAddress(c)) reason = 'Same address';
     if (reason) return { matchedId: c.id, reason };
   }
   return null;
