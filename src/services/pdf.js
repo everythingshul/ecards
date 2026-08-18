@@ -56,7 +56,7 @@ export function getSignatureFields(orgId, kind) {
 
 // Shared simple word-wrapping PDF body builder, used by both the shul
 // contract and the generic applicant/store document generator below.
-async function buildSimplePdf({ heading, subheading, fieldLines, bodyText }) {
+export async function buildSimplePdf({ heading, subheading, fieldLines, bodyText }) {
   const doc = await PDFDocument.create();
   let page = doc.addPage([612, 792]);
   const { font, bold } = await embedUnicodeFonts(doc);
@@ -91,6 +91,8 @@ async function buildSimplePdf({ heading, subheading, fieldLines, bodyText }) {
   return doc.save();
 }
 
+const SHUL_CONTRACT_DEFAULT_BODY = `By signing below, the undersigned, on behalf of the above shul, agrees to participate in the gift card assistance program for the current season, to submit applicant information accurately and in good faith, and to abide by the program's terms as communicated by the administering organization. The organization reserves the right to allocate a limited number of slots per season and to approve or decline individual applicants at its discretion.`;
+
 // Contract source is either (a) an admin-uploaded PDF (Settings > Documents >
 // Shul Contract > Upload PDF) used as-is, or (b) a simple generated PDF built
 // from the shul/season details + a plain-text clause. Either way the result
@@ -112,7 +114,7 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
       `Rav: ${shul.ruv_first_name || ''} ${shul.ruv_last_name || ''}  |  Phone: ${shul.ruv_phone || ''}`,
       `Gabai: ${shul.gabai_first_name || ''} ${shul.gabai_last_name || ''}  |  Cell: ${shul.gabai_cell || ''}  |  Email: ${shul.gabai_email || ''}`,
     ],
-    bodyText: templateText || `By signing below, the undersigned, on behalf of the above shul, agrees to participate in the gift card assistance program for the current season, to submit applicant information accurately and in good faith, and to abide by the program's terms as communicated by the administering organization. The organization reserves the right to allocate a limited number of slots per season and to approve or decline individual applicants at its discretion.`,
+    bodyText: templateText || SHUL_CONTRACT_DEFAULT_BODY,
   });
   writeFileSync(path, bytes);
   return path;
@@ -140,6 +142,50 @@ const DOC_DEFAULTS = {
 
 export function docTemplatePath(entityType) { return DOC_TEMPLATE_PATHS[entityType]; }
 export function hasCustomDocTemplate(entityType) { return DOC_TEMPLATE_PATHS[entityType] ? existsSync(DOC_TEMPLATE_PATHS[entityType]) : false; }
+
+// Placeholder field lines for generatePreviewPdfBytes below — same shape as
+// the real fieldLines built in generateContractPdf/routes/documents.js's
+// resolveEntity, just with sample values since there's no specific
+// shul/applicant/store behind the signature-box placement editor.
+const PREVIEW_FIELD_LINES = {
+  shul: [
+    'Shul: Sample Shul Name / שם לדוגמה',
+    'Address: 123 Main St, Lakewood, NJ 08701',
+    'Rav: Sample Rav  |  Phone: 555-555-5555',
+    'Gabai: Sample Gabai  |  Cell: 555-555-5555  |  Email: sample@example.com',
+  ],
+  applicant: [
+    'Applicant: Sample Applicant',
+    'Address: 123 Main St, Lakewood, NJ 08701',
+    'Phone: 555-555-5555',
+    'Email: sample@example.com',
+  ],
+  store: [
+    'Store: Sample Store',
+    'Address: 123 Main St, Lakewood, NJ 08701',
+    'Owner: Sample Owner  |  555-555-5555  |  sample@example.com',
+    'Manager: Sample Manager  |  555-555-5555',
+  ],
+};
+
+// The signature-box placement editor's background when no custom PDF
+// template has been uploaded for this kind — the exact same generated-doc
+// shape (heading/subheading/fieldLines/body) the real contract/document
+// uses, just filled with placeholder values since there's no specific
+// entity behind this editor. Never written to disk (unlike
+// generateContractPdf/generateGenericDocumentPdf, which persist a per-entity
+// file) — this is purely for the admin to see while dragging the box.
+export async function generatePreviewPdfBytes(orgId, orgName, kind) {
+  const textKey = kind === 'shul' ? 'contract_template_text' : `document_template_text_${kind}`;
+  const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = ?`).get(orgId, textKey);
+  const defaults = kind === 'shul' ? { subheading: 'Participation Agreement', body: SHUL_CONTRACT_DEFAULT_BODY } : (DOC_DEFAULTS[kind] || { subheading: 'Agreement', body: '' });
+  return buildSimplePdf({
+    heading: orgName,
+    subheading: `${defaults.subheading} (Sample)`,
+    fieldLines: PREVIEW_FIELD_LINES[kind] || [],
+    bodyText: templateSetting?.value || defaults.body,
+  });
+}
 
 // entityType: 'applicant' | 'store'. fieldLines: array of plain summary lines
 // (name/address/contact) drawn near the top of the generated fallback PDF.

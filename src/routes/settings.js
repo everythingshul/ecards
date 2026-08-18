@@ -4,7 +4,7 @@ import { unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
-import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields } from '../services/pdf.js';
+import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields, generatePreviewPdfBytes } from '../services/pdf.js';
 import { isMockMode } from '../services/giftcard.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 import { runBackup, listBackups, backupPath } from '../services/backup.js';
@@ -108,6 +108,24 @@ router.get('/signature-box/:kind', async (req, res) => {
   const fields = getSignatureFields(req.user.org_id, kind);
   const pageSize = await templatePageSize(kind);
   res.json({ fields, pageSize });
+});
+
+// Streams the actual PDF the signature-box editor renders as its
+// background: the org's uploaded custom template if one exists for this
+// kind, otherwise a sample of our own generated document — same
+// heading/fieldLines/body layout the real thing uses, filled with
+// placeholder values since there's no specific entity behind this editor.
+// Either way, an admin dragging the box around is looking at the real page,
+// not a blank proportioned rectangle.
+router.get('/signature-box/:kind/preview-pdf', async (req, res) => {
+  const kind = req.params.kind;
+  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  const templatePath = SIG_TEMPLATE_PATH[kind]?.();
+  res.type('application/pdf');
+  if (templatePath) return res.send(readFileSync(templatePath));
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
+  const bytes = await generatePreviewPdfBytes(req.user.org_id, org.name, kind);
+  res.send(Buffer.from(bytes));
 });
 
 // Body is the full fields array (replaces whatever was saved before) — the

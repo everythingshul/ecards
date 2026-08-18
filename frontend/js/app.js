@@ -626,6 +626,40 @@ async function viewAuthed(path) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+// Same fetch-with-auth-header pattern as downloadAuthed/viewAuthed, but
+// returns the raw bytes for feeding into pdf.js instead of saving/opening
+// the file — used by the signature-box placement editor to render the
+// actual document as a canvas background. Throws on failure; caller decides
+// how to degrade (the editor still works with just proportioned boxes if
+// this fails).
+async function fetchAuthedBytes(path) {
+  const headers = {};
+  if (Auth.token()) headers['Authorization'] = `Bearer ${Auth.token()}`;
+  const res = await fetch(API_BASE + path, { headers });
+  if (res.status === 401) { Auth.logout(); throw new Error('Session expired'); }
+  if (!res.ok) throw new Error(`Could not load document (${res.status})`);
+  return res.arrayBuffer();
+}
+
+// Lazily loads pdf.js — vendored under /js/vendor/pdfjs (not a CDN: same
+// origin means no dependency on a third party's uptime, and nothing extra
+// to allow through a future CSP) — only the signature-box placement editor
+// needs it, so it's not worth bundling into every page load. Memoized so
+// repeated opens of the editor don't re-fetch it.
+let pdfJsPromise = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfJsPromise) return pdfJsPromise;
+  pdfJsPromise = import('/js/vendor/pdfjs/pdf.min.mjs')
+    .then((pdfjsLib) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/vendor/pdfjs/pdf.worker.min.mjs';
+      window.pdfjsLib = pdfjsLib;
+      return pdfjsLib;
+    })
+    .catch((e) => { pdfJsPromise = null; throw e; });
+  return pdfJsPromise;
+}
+
 // Generic per-entity Documents tab (applicants & stores) — list existing
 // documents, generate new ones, and send a signing link either to the
 // record's own email on file or to any other recipient (so a specific
@@ -1029,14 +1063,42 @@ function collectSignValues(fields) {
   return values;
 }
 
+// Renders the last page of the actual document (the org's uploaded
+// template, or a generated sample — see GET
+// /settings/signature-box/:kind/preview-pdf) onto #sigbox-canvas as the
+// editor's background, so the draggable field boxes overlay real page
+// content instead of a blank rectangle. Best-effort: on any failure (pdf.js
+// failed to load from the CDN, a corrupt uploaded PDF, etc.) it just leaves
+// the plain white background — field placement still works correctly since
+// it's stored as fractions of the page either way, this is purely visual.
+async function renderSignatureBoxPdfBackground(kind, mockW, mockH) {
+  const loading = qs('#sigbox-loading');
+  try {
+    const [pdfjsLib, bytes] = await Promise.all([loadPdfJs(), fetchAuthedBytes(`/settings/signature-box/${kind}/preview-pdf`)]);
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const page = await pdf.getPage(pdf.numPages); // last page — where stampSignatureFields defaults an unpositioned field to
+    const canvas = qs('#sigbox-canvas');
+    if (!canvas) return; // modal was closed before this resolved
+    const unscaledViewport = page.getViewport({ scale: 1 });
+    const dpr = window.devicePixelRatio || 1;
+    const scale = (mockW / unscaledViewport.width) * dpr;
+    const viewport = page.getViewport({ scale });
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    if (loading) loading.remove();
+  } catch (e) {
+    console.error('[sigbox] PDF preview unavailable:', e.message);
+    if (loading) loading.textContent = 'Preview unavailable — placement below still applies correctly to the real document.';
+  }
+}
+
 // Draggable/resizable multi-field signature editor (Settings > Documents).
-// kind is 'shul' | 'applicant' | 'store'. Renders a page-proportioned
-// mockup, not the live PDF content, since that's reliable across browsers
-// and works the same whether the underlying doc is our generated
-// Letter-size PDF or an admin-uploaded PDF of any size — every field's box
-// is saved as fractions (0-1) of the page's actual width/height, top-left
-// origin, and stampSignatureFields() (services/pdf.js) converts to PDF
-// points at sign time. Supports any number of fillable fields (multiple
+// kind is 'shul' | 'applicant' | 'store'. Every field's box is saved as
+// fractions (0-1) of the page's actual width/height, top-left origin, and
+// stampSignatureFields() (services/pdf.js) converts to PDF points at sign
+// time — independent of the mockW/mockH pixel size used to display and drag
+// them here. Supports any number of fillable fields (multiple
 // signatures/initials for co-signers, plus date/text fields), not just one.
 let sigBoxState = null;
 const SIGBOX_TYPE_LABEL = { signature: 'Signature', initial: 'Initial', date: 'Date', text: 'Text' };
@@ -1050,8 +1112,12 @@ window.openSignatureBoxEditor = async (kind, title) => {
   const mockH = Math.round(mockW * pageSize.height / pageSize.width);
 
   const bodyHtml = `
-    <p class="small-muted">Drag a field to position it, drag its corner to resize. Add multiple fields for extra signatures, initials, a date, or free text the signer fills in. This preview is scaled to your page's proportions, not the live document content.</p>
-    <div id="sigbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow)"></div>
+    <p class="small-muted">Drag a field to position it, drag its corner to resize. Add multiple fields for extra signatures, initials, a date, or free text the signer fills in.</p>
+    <div id="sigbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+      <canvas id="sigbox-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <div id="sigbox-loading" class="small-muted" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:8px">Loading page preview…</div>
+      <div id="sigbox-boxes" style="position:absolute;inset:0"></div>
+    </div>
     <div style="text-align:center;margin-bottom:12px">
       <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('signature')">+ Signature</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('initial')">+ Initial</button>
@@ -1059,9 +1125,10 @@ window.openSignatureBoxEditor = async (kind, title) => {
       <button type="button" class="btn btn-outline btn-sm" onclick="addSignatureField('text')">+ Text</button>
     </div>
     <div id="sigbox-fields"></div>
-    <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt</p>
+    <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt &mdash; showing the document's last page, where the signature area normally goes</p>
   `;
   openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveSignatureBox('${kind}')">Save Placement</button>`);
+  renderSignatureBoxPdfBackground(kind, mockW, mockH);
 
   function startDrag(e, f, mode) {
     e.preventDefault(); e.stopPropagation();
@@ -1085,7 +1152,7 @@ window.openSignatureBoxEditor = async (kind, title) => {
   }
 
   function renderBoxes() {
-    const page = qs('#sigbox-page');
+    const page = qs('#sigbox-boxes');
     if (!page) return;
     page.innerHTML = '';
     fields.forEach(f => {
