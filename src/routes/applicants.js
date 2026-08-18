@@ -525,15 +525,22 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
 
   // All-or-nothing: every row must have every field the live Applicant
   // Application form currently requires, or nothing in the sheet is
-  // imported — no partial imports. An admin uploading a sheet gets the
-  // per-field "Admin can override" leniency the public form/shul-portal
-  // upload never does. shul_name isn't a form field (shul assignment isn't
-  // part of the intake questions) — checked separately, and only for an
-  // admin upload; a shul-portal upload's shul is always forced to their own.
+  // imported — no partial imports. An admin uploading a sheet normally gets
+  // just the per-field "Admin can override" leniency the public
+  // form/shul-portal upload never does; bypass_required (admin only, same
+  // idea as the single admin-add's bypass_required checkbox) skips this
+  // whole check for the entire sheet. first_name/last_name stay
+  // hard-required per row below regardless — a nameless record isn't
+  // useful even as a placeholder. shul_name isn't a form field (shul
+  // assignment isn't part of the intake questions) — checked separately,
+  // and only for an admin upload; a shul-portal upload's shul is always
+  // forced to their own, and shul_name is never bypassable since without a
+  // shul the row has nowhere to go.
   const isAdminSubmitter = req.user.role !== 'shul';
+  const bypassRequired = isAdminSubmitter && (req.body.bypass_required === 'true' || req.body.bypass_required === true);
   const defaultForm = getDefaultForm(req.user.org_id, 'applicant_application');
   const schema = defaultForm ? JSON.parse(defaultForm.schema_json || '[]') : [];
-  const schemaErrors = validateRowsBySchema(schema, rows, { isAdmin: isAdminSubmitter, skipKeys: ['shul_id'] });
+  const schemaErrors = bypassRequired ? [] : validateRowsBySchema(schema, rows, { isAdmin: isAdminSubmitter, skipKeys: ['shul_id'] });
   const shulNameErrors = forcedShul ? [] : rows.map((r, i) => (!r.shul_name ? { row: i + 2, error: 'Missing required field: shul_name' } : null)).filter(Boolean);
   const requiredErrors = [...schemaErrors, ...shulNameErrors].sort((a, b) => a.row - b.row);
   if (requiredErrors.length) {

@@ -315,14 +315,15 @@ window.createApplicant = async () => {
 function openImportModal() {
   const body = `<p class="small-muted">Upload a CSV or Excel file using the template. The <code>shul_name</code> column must match an existing shul name exactly.</p>
     <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
-    <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-provider-exempt"><label style="margin:0">One-time backfill for another season — never send these to disccardpromos (permanent, even if later approved/rejected)</label></div>
+    <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-bypass"><label style="margin:0">Bypass missing required fields (admin only — rows with blanks are still imported; first/last name still required)</label></div>
+    <div class="checkbox-row" style="margin-top:8px"><input type="checkbox" id="import-provider-exempt"><label style="margin:0">One-time backfill for another season — never send these to disccardpromos (permanent, even if later approved/rejected)</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
   openModal('Mass Upload Applicants', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
 }
 window.runImport = async () => {
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
-  const fd = new FormData(); fd.append('file', file); fd.append('provider_exempt', qs('#import-provider-exempt').checked);
+  const fd = new FormData(); fd.append('file', file); fd.append('provider_exempt', qs('#import-provider-exempt').checked); fd.append('bypass_required', qs('#import-bypass').checked);
   try {
     const r = await api('/applicants/import', { method: 'POST', isForm: true, body: fd });
     qs('#import-result').innerHTML = `<p><strong>${r.success}</strong> created, <strong>${r.duplicates}</strong> flagged as duplicates, <strong>${r.errors.length}</strong> errors.</p>` +

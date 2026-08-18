@@ -536,10 +536,15 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
 
   // All-or-nothing: every row must have every field the live Shul
   // Registration form currently requires, or nothing in the sheet is
-  // imported — no partial imports. An admin uploading a sheet gets the
-  // per-field "Admin can override" leniency the public form never does.
+  // imported — no partial imports. An admin uploading a sheet normally gets
+  // just the per-field "Admin can override" leniency the public form never
+  // does; bypass_required skips this whole check for the entire sheet (e.g.
+  // a backfill import where most fields genuinely aren't known) — name_en
+  // and gabai_email stay hard-required per row below regardless, since a
+  // shul record is meaningless without at least those.
+  const bypassRequired = req.body.bypass_required === 'true' || req.body.bypass_required === true;
   const schema = JSON.parse(getDefaultForm(req.user.org_id, 'shul_application')?.schema_json || '[]');
-  const requiredErrors = validateRowsBySchema(schema, rows, { isAdmin: true });
+  const requiredErrors = bypassRequired ? [] : validateRowsBySchema(schema, rows, { isAdmin: true });
   if (requiredErrors.length) {
     return res.status(400).json({ error: 'Some rows are missing required fields. Nothing was imported — fix the sheet and re-upload.', errors: requiredErrors });
   }

@@ -266,13 +266,14 @@ async function openImportModal() {
     <label style="margin-top:12px">Season <span class="small-muted">(for a one-time backfill of a past/other season — defaults to the current season)</span></label>
     <select id="import-season">${seasons.map(s => `<option value="${s.id}" ${s.is_active ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
     <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="import-contracts"><label style="margin:0">Automatically email contracts to non-duplicate rows</label></div>
+    <div class="checkbox-row" style="margin-top:8px"><input type="checkbox" id="import-bypass"><label style="margin:0">Bypass missing required fields (admin only — rows with blanks are still imported; name and gabai email still required)</label></div>
     <div id="import-result" style="margin-top:14px"></div>`;
   openModal('Mass Upload Shuls', body, `<button class="btn btn-primary btn-sm" onclick="runImport()">Upload</button>`);
 }
 window.runImport = async () => {
   const file = qs('#import-file').files[0];
   if (!file) return toast('Choose a file first', true);
-  const fd = new FormData(); fd.append('file', file); fd.append('send_contracts', qs('#import-contracts').checked);
+  const fd = new FormData(); fd.append('file', file); fd.append('send_contracts', qs('#import-contracts').checked); fd.append('bypass_required', qs('#import-bypass').checked);
   const seasonId = qs('#import-season')?.value;
   if (seasonId) fd.append('season_id', seasonId);
   try {
