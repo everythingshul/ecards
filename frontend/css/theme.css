@@ -135,7 +135,7 @@ tr:hover td { background: var(--brand-panel-2); }
 .toast.error { background: var(--danger); }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(36,26,21,.55); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 998; }
-.modal { background: #fff; border-radius: var(--radius); width: 100%; max-width: 640px; box-shadow: var(--shadow); }
+.modal { background: #fff; border-radius: var(--radius); width: 100%; max-width: 900px; box-shadow: var(--shadow); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; border-bottom: 1px solid var(--border); }
 .modal-header button { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); }
 .modal-body { padding: 20px 24px; max-height: 70vh; overflow-y: auto; }
