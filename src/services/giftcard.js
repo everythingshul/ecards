@@ -348,14 +348,19 @@ export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
   const created = await call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify(customerPayload(opts)) });
+  console.log(`[giftcard] createCustomer POST returned id=${created?.id ?? '(none)'} for externalId=${externalId}`);
   if (created?.id && externalId) {
     try {
-      return await updateCustomer(seasonId, created.id, { externalId });
+      const patched = await updateCustomer(seasonId, created.id, { externalId });
+      console.log(`[giftcard] createCustomer follow-up PATCH for id=${created.id} returned external_id=${patched?.external_id ?? '(none)'}`);
+      return patched;
     } catch (e) {
-      console.error(`[giftcard] customer ${created.id} created but the external_id=${externalId} follow-up PATCH failed:`, e.message);
+      console.error(`[giftcard] customer ${created.id} created but the external_id=${externalId} follow-up PATCH failed (status ${e.status}):`, e.message);
+      created._patchError = e.message;
       return created;
     }
   }
+  console.log(`[giftcard] createCustomer skipped follow-up PATCH — created?.id=${created?.id} externalId=${externalId}`);
   return created;
 }
 

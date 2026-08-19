@@ -673,6 +673,23 @@ router.put('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
   }
 });
 
+// Diagnostic-only: call createCustomer() directly, isolated from
+// upsertAccountForApproval/the approve route entirely, to see exactly what
+// it returns (including the create->PATCH follow-up) without the rest of
+// the approval flow in the way.
+router.post('/:id/provider-test-create', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  try {
+    const result = await giftcard.createCustomer(applicant.season_id, {
+      externalId: `dbg${Date.now().toString().slice(-6)}`, firstName: 'Diag', lastName: 'Test', groupName: 'Test Shul',
+    });
+    res.json({ result });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
