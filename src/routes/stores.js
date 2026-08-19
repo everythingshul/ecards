@@ -214,6 +214,8 @@ async function inviteStoreToPortal(orgId, store, emailOverride) {
   const email = emailOverride || store.owner_email || store.manager_email;
   if (!email) return { error: 'No email on file for this store' };
   let user = db.prepare('SELECT * FROM users WHERE store_id = ?').get(store.id);
+  const emailTaken = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, user?.id || '');
+  if (emailTaken) return { error: `${email} is already used by another account. Update the store's contact email or that account first.` };
   const token = uuid();
   const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
   if (user) {
