@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
 </head>
 <body>
-<div class="public-wrap">
+<div class="public-wrap" style="max-width:900px">
   <div class="public-header">
     <img class="brand-mark" src="/img/org-logo.png" alt="Organization logo">
     <h1 id="title">Sign Document</h1>
@@ -17,13 +17,17 @@
   <div class="card" id="loading">Loading…</div>
 
   <div class="card" id="doc-section" style="display:none">
-    <h3 id="doc-title"></h3>
-    <iframe id="doc-frame" style="width:100%;height:460px;border:1px solid var(--border);border-radius:8px" src=""></iframe>
-    <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
+    <div class="flex-between" style="flex-wrap:wrap;gap:10px">
+      <h3 id="doc-title" style="margin:0"></h3>
+      <button type="button" class="btn btn-outline btn-sm" id="print-before-btn">Print / Download</button>
+    </div>
+    <p class="small-muted">Fill in each highlighted field directly on the document below, then sign at the bottom.</p>
+    <div id="pdf-pages"></div>
+    <div class="divider"></div>
+    <label>Signer Full Name <span class="req">*</span></label>
     <input id="signer_name" placeholder="Type your full legal name">
     <label>Title / Role <span class="small-muted">(optional)</span></label>
     <input id="signer_title" style="margin-bottom:16px">
-    <div id="sign-fields"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign Document</button>
     </div>
@@ -32,6 +36,7 @@
   <div class="card" id="done-section" style="display:none;text-align:center">
     <h3>&#10003; Signed</h3>
     <p class="small-muted" id="done-message">Thank you. This document has been signed.</p>
+    <button type="button" class="btn btn-outline btn-sm" id="print-after-btn">Print / Download Signed Document</button>
   </div>
 </div>
 <script src="/js/app.js"></script>
@@ -39,18 +44,24 @@
 <script>
 const token = new URLSearchParams(location.search).get('token');
 let fields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
+let pdfPreviewUrl = '';
 
 (async () => {
   if (!token) { qs('#loading').textContent = 'Missing signing link.'; return; }
   try {
     const { document: doc, entityName, alreadySigned, fields: docFields } = await api(`/documents/sign/${token}`);
     qs('#loading').style.display = 'none';
-    if (alreadySigned) { qs('#done-section').style.display = 'block'; return; }
+    pdfPreviewUrl = `/api/documents/sign/${token}/pdf-preview`;
+    if (alreadySigned) {
+      qs('#done-section').style.display = 'block';
+      qs('#print-after-btn').addEventListener('click', () => window.open(pdfPreviewUrl, '_blank'));
+      return;
+    }
     if (docFields && docFields.length) fields = docFields;
     qs('#doc-section').style.display = 'block';
     qs('#doc-title').textContent = entityName ? `${doc.title || 'Agreement'} for ${entityName}` : (doc.title || 'Agreement');
-    qs('#doc-frame').src = `/api/documents/sign/${token}/pdf-preview`;
-    renderSignFields(fields, qs('#sign-fields'));
+    qs('#print-before-btn').addEventListener('click', () => window.open(pdfPreviewUrl, '_blank'));
+    await renderPdfSigningPages(pdfPreviewUrl, fields, 'pdf-pages');
   } catch (err) {
     qs('#loading').textContent = err.message;
   }
@@ -66,6 +77,7 @@ qs('#sign-btn')?.addEventListener('click', async () => {
     await api(`/documents/sign/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, values } });
     qs('#doc-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
+    qs('#print-after-btn').addEventListener('click', () => window.open(pdfPreviewUrl, '_blank'));
   } catch (err) {
     toast(err.message, true);
     btn.disabled = false; btn.textContent = 'Sign Document';

@@ -24,13 +24,16 @@
     </div>
   </form>
 
-  <div class="card" id="contract-section" style="display:none;margin-top:20px">
-    <h3>Review & Sign Your Contract</h3>
-    <p class="small-muted">Please review your season participation agreement below, then sign to complete registration.</p>
-    <iframe id="contract-frame" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px" src=""></iframe>
-    <label style="margin-top:18px">Signer Full Name <span class="req">*</span></label>
+  <div class="card" id="contract-section" style="display:none;margin-top:20px;max-width:900px;margin-left:auto;margin-right:auto">
+    <div class="flex-between" style="flex-wrap:wrap;gap:10px">
+      <h3 style="margin:0">Review & Sign Your Contract</h3>
+      <button type="button" class="btn btn-outline btn-sm" id="print-before-btn">Print / Download</button>
+    </div>
+    <p class="small-muted">Fill in each highlighted field directly on the document below, then sign at the bottom.</p>
+    <div id="pdf-pages"></div>
+    <div class="divider"></div>
+    <label>Signer Full Name <span class="req">*</span></label>
     <input id="signer_name" placeholder="Type your full legal name" style="margin-bottom:16px">
-    <div id="sign-fields"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign & Submit Application</button>
     </div>
@@ -39,6 +42,7 @@
   <div class="card" id="done-section" style="display:none;text-align:center">
     <h3>&#10003; Application Submitted</h3>
     <p id="done-message" class="small-muted"></p>
+    <button type="button" class="btn btn-outline btn-sm" id="print-after-btn" style="display:none">Print / Download Signed Contract</button>
   </div>
 </div>
 <script src="/js/app.js"></script>
@@ -47,6 +51,7 @@
 <script>
 let shulId = null, signToken = null, currentSchema = [];
 let contractFields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
+let contractPdfUrl = '';
 
 // Fixed question set for Shul Registration (utils/builtinSchemas.js) — no
 // longer editable through Form Builder.
@@ -82,8 +87,9 @@ qs('#apply-form').addEventListener('submit', async (e) => {
     if (fields && fields.length) contractFields = fields;
     qs('#apply-form').style.display = 'none';
     qs('#contract-section').style.display = 'block';
-    qs('#contract-frame').src = `/api/shuls/contract/${signToken}/pdf-preview`;
-    renderSignFields(contractFields, qs('#sign-fields'));
+    contractPdfUrl = `/api/shuls/contract/${signToken}/pdf-preview`;
+    qs('#print-before-btn').addEventListener('click', () => window.open(contractPdfUrl, '_blank'));
+    await renderPdfSigningPages(contractPdfUrl, contractFields, 'pdf-pages');
   } catch (err) {
     toast(err.message, true);
     btn.disabled = false; btn.textContent = 'Continue to Contract';
@@ -101,6 +107,9 @@ qs('#sign-btn').addEventListener('click', async () => {
     qs('#contract-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
     qs('#done-message').textContent = 'Thank you! Your contract has been signed. An administrator will review your application and email you a link to set up your account once approved.';
+    const printBtn = qs('#print-after-btn');
+    printBtn.style.display = 'inline-flex';
+    printBtn.addEventListener('click', () => window.open(contractPdfUrl, '_blank'));
   } catch (err) {
     toast(err.message, true);
     btn.disabled = false; btn.textContent = 'Sign & Submit Application';

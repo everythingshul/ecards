@@ -1075,6 +1075,82 @@ function collectSignValues(fields) {
   return values;
 }
 
+// Renders the REAL document, every page, full width — not the small
+// browser-native iframe preview this used to be — with each fillable field
+// (from getSignatureFields()/services/pdf.js) positioned exactly where an
+// admin placed it in the signature-box editor, directly on top of the page
+// it belongs to. A signer fills fields in place on the document instead of
+// in a disconnected list below a tiny preview. Produces the same DOM shape
+// collectSignValues() already expects (`.sign-field-text[data-fid]` inputs,
+// `window.signaturePads[id]` for signature/initial canvases), so callers
+// keep using collectSignValues() unchanged — only the rendering call swaps.
+// pdfUrl is fetched unauthenticated (plain fetch, not fetchAuthedBytes) since
+// every caller here is a public signer page reached via a one-time token in
+// the URL, not a logged-in admin session.
+async function renderPdfSigningPages(pdfUrl, fields, containerId) {
+  const container = qs(`#${containerId}`);
+  container.innerHTML = '<p class="small-muted">Loading document…</p>';
+  let pdfjsLib, bytes;
+  try {
+    const [lib, res] = await Promise.all([loadPdfJs(), fetch(pdfUrl)]);
+    if (!res.ok) throw new Error(`Could not load the document (${res.status})`);
+    pdfjsLib = lib;
+    bytes = await res.arrayBuffer();
+  } catch (e) {
+    container.innerHTML = `<p class="small-muted">Could not load the document preview: ${esc(e.message)}</p>`;
+    throw e;
+  }
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const numPages = pdf.numPages;
+  container.innerHTML = '';
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.min(container.clientWidth || 900, 900);
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const unscaledViewport = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: (targetWidth / unscaledViewport.width) * dpr });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.cssText = 'display:block;width:100%';
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+    const pageWrap = document.createElement('div');
+    pageWrap.style.cssText = 'position:relative;margin-bottom:18px;border:1px solid var(--border);border-radius:6px;overflow:hidden;box-shadow:var(--shadow);background:#fff';
+    pageWrap.appendChild(canvas);
+    container.appendChild(pageWrap);
+
+    // Same page-index convention as stampSignatureFields() (services/pdf.js):
+    // an out-of-range/omitted `page` means "the last page".
+    const pageIndex = i - 1;
+    const isLastPage = i === numPages;
+    const pageFields = fields.filter(f => (typeof f.page === 'number' && f.page >= 0 && f.page < numPages) ? f.page === pageIndex : isLastPage);
+    for (const f of pageFields) {
+      // Same fallback box (bottom-left area of the page) as
+      // stampSignatureFields()'s (services/pdf.js) own fallback for a field
+      // with no admin-configured position — and the same default the
+      // signature-box editor seeds a brand-new field with — so an
+      // unconfigured field still lands in a sensible, visible spot instead
+      // of at left:NaN%.
+      const hasPosition = [f.x, f.y, f.width, f.height].every(v => typeof v === 'number' && v >= 0 && v <= 1);
+      const x = hasPosition ? f.x : 0.09, y = hasPosition ? f.y : 0.62, w = hasPosition ? f.width : 0.42, h = hasPosition ? f.height : 0.22;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `position:absolute;left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%;`;
+      if (f.type === 'signature' || f.type === 'initial') {
+        overlay.innerHTML = `<canvas id="sig-${f.id}" class="sign-field-canvas" style="width:100%;height:100%;background:rgba(255,247,225,.65);border:1.5px dashed var(--brand-gold-dark);border-radius:4px;cursor:crosshair"></canvas>
+          <div style="position:absolute;top:2px;left:4px;font-size:10px;color:var(--brand-gold-dark);pointer-events:none;font-weight:600">${esc(f.label || (f.type === 'signature' ? 'Signature' : 'Initial'))}${f.required !== false ? ' *' : ''}</div>`;
+      } else if (f.type === 'date') {
+        overlay.innerHTML = `<input type="date" class="sign-field-text" data-fid="${f.id}" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;height:100%;box-sizing:border-box;font-size:14px;border:1.5px solid var(--brand-gold-dark);border-radius:4px;padding:2px 4px">`;
+      } else {
+        overlay.innerHTML = `<input type="text" class="sign-field-text" data-fid="${f.id}" placeholder="${esc(f.label || 'Text')}${f.required !== false ? ' *' : ''}" style="width:100%;height:100%;box-sizing:border-box;font-size:14px;border:1.5px solid var(--brand-gold-dark);border-radius:4px;padding:2px 4px">`;
+      }
+      pageWrap.appendChild(overlay);
+    }
+  }
+  fields.filter(f => f.type === 'signature' || f.type === 'initial').forEach(f => { signaturePads[f.id] = initSignaturePad(`sig-${f.id}`); });
+}
+
 // Renders the last page of the actual document at previewUrl (the org's
 // uploaded template, or a generated sample — see GET
 // /settings/signature-box/:kind/preview-pdf, shared by both the signature
