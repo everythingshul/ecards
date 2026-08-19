@@ -74,6 +74,41 @@ router.post('/generate', auth, requireAdmin, async (req, res) => {
   res.status(201).json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(id) });
 });
 
+// Self-service: a store generates + signs its OWN participation agreement
+// as part of onboarding (store-portal/onboarding.html step 2) — the same
+// "generate a real contract, sign it inline" pattern shuls already have via
+// the public /shuls/:id/generate-contract + apply.html, replacing what used
+// to be just a plain "I agree to the terms" checkbox with no actual
+// document. No email step needed here (unlike the admin /generate + /send
+// pair above) since the store signs it immediately in the same session —
+// returns the sign_token straight away for sign-document.html to use inline.
+router.post('/store-agreement', auth, async (req, res) => {
+  if (req.user.role !== 'store') return res.status(403).json({ error: 'Not permitted' });
+  const storeId = req.user.store_id;
+  const entity = resolveEntity('store', storeId, req.user.org_id);
+  if (!entity) return res.status(404).json({ error: 'Store not found' });
+  // Reuse an existing not-yet-signed agreement instead of piling up a new
+  // document (and a new signing token) every time onboarding re-renders
+  // this step.
+  const existing = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'store' AND entity_id = ? AND status != 'signed' ORDER BY created_at DESC LIMIT 1`)
+    .get(req.user.org_id, storeId);
+  if (existing) return res.json({ document: existing, sign_token: existing.sign_token });
+
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
+  const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'document_template_text_store'`).get(req.user.org_id);
+  const pdfPath = await generateGenericDocumentPdf({
+    entityType: 'store', entityId: storeId, title: 'Store Participation Agreement', fieldLines: entity.fieldLines,
+    templateText: templateSetting?.value, orgName: org.name,
+    record: entity.record, extra: entity.extra, orgId: req.user.org_id,
+  });
+  const id = uuid();
+  const token = uuid();
+  const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  db.prepare(`INSERT INTO documents (id, org_id, entity_type, entity_id, title, pdf_path, status, sign_token, sign_token_expires, sent_at, created_by)
+    VALUES (?,?,?,?,?,?,'sent',?,?,datetime('now'),?)`).run(id, req.user.org_id, 'store', storeId, 'Store Participation Agreement', pdfPath, token, expires, req.user.id);
+  res.status(201).json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(id), sign_token: token });
+});
+
 // Email the signing link. Generates first if this document hasn't been generated yet.
 router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);

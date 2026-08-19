@@ -57,14 +57,31 @@ function step1Html() {
     <label>Manager Email</label><input id="f-manager_email" value="${esc(store.manager_email||'')}">
     <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue</button></div>`;
 }
+// Step 2 is itself two parts: owner info, then reviewing & signing the
+// actual participation agreement — a real generated document (same
+// full-page-overlay signing UI as shul contracts), not just a plain
+// "I agree" checkbox with no document behind it.
+let step2Signing = false;
+let agreementFields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
+let agreementToken = null;
+
 function step2Html() {
+  if (step2Signing) {
+    return `
+      <h3>2. Review & Sign Your Participation Agreement</h3>
+      <p class="small-muted">Fill in each highlighted field directly on the document below, then sign at the bottom.</p>
+      <div id="pdf-pages"></div>
+      <div class="divider"></div>
+      <label>Signer Full Name <span class="req">*</span></label>
+      <input id="signer_name" placeholder="Type your full legal name" style="margin-bottom:16px">
+      <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="sign-btn">Sign & Continue</button></div>`;
+  }
   return `
     <h3>2. Owner & Billing Contact</h3>
     <div class="grid-2"><div><label>Owner Name</label><input id="f-owner_name" value="${esc(store.owner_name||'')}"></div><div><label>Owner Phone</label><input id="f-owner_phone" value="${esc(store.owner_phone||'')}"></div></div>
     <label>Owner Email</label><input id="f-owner_email" value="${esc(store.owner_email||'')}">
     <p class="small-muted">This is who billing correspondence (amounts owed, payment schedule) will be sent to.</p>
-    <div class="checkbox-row" style="margin-top:20px"><input type="checkbox" id="f-agree"><label style="margin:0">I agree to participate in the gift card program under the terms communicated by the administering organization.</label></div>
-    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue</button></div>`;
+    <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="next-btn">Continue to Agreement</button></div>`;
 }
 function step3Html() {
   return `<h3>3. All Set</h3><p class="small-muted">Your setup information has been submitted. An administrator will finish activating your store and reach out with next steps.</p>
@@ -77,10 +94,34 @@ function attachHandlers() {
       phone: qs('#f-phone').value, manager_name: qs('#f-manager_name').value, manager_phone: qs('#f-manager_phone').value, manager_email: qs('#f-manager_email').value };
     try { const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 1, info } }); store = s; step = 2; render(); } catch (err) { toast(err.message, true); }
   });
-  if (step === 2) qs('#next-btn').addEventListener('click', async () => {
-    if (!qs('#f-agree').checked) return toast('Please agree to the program terms to continue', true);
+  if (step === 2 && !step2Signing) qs('#next-btn').addEventListener('click', async () => {
     const info = { owner_name: qs('#f-owner_name').value, owner_phone: qs('#f-owner_phone').value, owner_email: qs('#f-owner_email').value };
-    try { const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, info, agree_terms: true } }); store = s; step = 3; render(); } catch (err) { toast(err.message, true); }
+    try {
+      const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, info } });
+      store = s;
+      const { sign_token, document: doc } = await api('/documents/store-agreement', { method: 'POST' });
+      agreementToken = sign_token;
+      const { fields } = await api(`/documents/sign/${sign_token}`);
+      if (fields && fields.length) agreementFields = fields;
+      step2Signing = true;
+      render();
+      await renderPdfSigningPages(`/api/documents/sign/${sign_token}/pdf-preview`, agreementFields, 'pdf-pages');
+    } catch (err) { toast(err.message, true); }
+  });
+  if (step === 2 && step2Signing) qs('#sign-btn').addEventListener('click', async () => {
+    const signerName = qs('#signer_name').value.trim();
+    if (!signerName) return toast('Please type your full name', true);
+    const values = collectSignValues(agreementFields);
+    if (!values) return;
+    const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
+    try {
+      await api(`/documents/sign/${agreementToken}/sign`, { method: 'POST', body: { signer_name: signerName, values } });
+      const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, agree_terms: true } });
+      store = s; step2Signing = false; step = 3; render();
+    } catch (err) {
+      toast(err.message, true);
+      btn.disabled = false; btn.textContent = 'Sign & Continue';
+    }
   });
   if (step === 3) qs('#finish-btn').addEventListener('click', async () => {
     try { await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 3 } }); location.href = '/store-portal/dashboard'; } catch (err) { toast(err.message, true); }
