@@ -499,6 +499,20 @@ router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
   res.json({ deleted, skipped, cardLockErrors });
 });
 
+// #11: guards against the SAME applicant being written to disccardpromos
+// twice as a separate "new" customer — most plausibly a double-click on
+// Approve (or two admins approving the same applicant at once), which
+// races two concurrent requests through upsertAccountForApproval's
+// find-then-create with nothing serializing them: both can see "no
+// existing customer" before either has actually created one, so both
+// create. Keyed on external_id (not applicant.id) since that's what
+// disccardpromos itself matches an existing customer by — see
+// giftcard.js's findCustomerByExternalId — and, after the carry-forward
+// fix above, the same external_id can legitimately belong to more than one
+// applicant row across seasons. In-process only (this app runs single-
+// instance — see services/reminders.js's identical assumption).
+const approvalsInFlight = new Set();
+
 router.post('/:id/approve', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
@@ -514,70 +528,78 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     applicant.external_id = generateApplicantExternalId(db);
     db.prepare('UPDATE applicants SET external_id = ? WHERE id = ?').run(applicant.external_id, applicant.id);
   }
-  const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(applicant.season_id);
-  if (applicant.approval_status !== 'approved' && season?.max_accepted_applicants != null) {
-    const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
-    if (accepted >= season.max_accepted_applicants) return res.status(400).json({ error: `This season's cap of ${season.max_accepted_applicants} accepted applicant(s) has already been reached.` });
+  if (approvalsInFlight.has(applicant.external_id)) {
+    return res.status(409).json({ error: 'This applicant is already being approved — please wait for that to finish.' });
   }
-  const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
-  db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
-    .run(req.user.id, amount, applicant.id);
-  logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', applicant.id,
-    { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
-  let emailError = null;
-  if (applicant.email) {
-    const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
-    ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
-    if (emailError) console.error('[mail] applicant approval email failed:', emailError);
-  }
-  // Writes/links the disccardpromos account for this applicant — idempotent
-  // by external_id (existing account just gets the current season added;
-  // a new one is created under a group matching the shul's English name,
-  // creating that group first if needed — see giftcard.js's
-  // upsertAccountForApproval). Best-effort: a disccardpromos hiccup here
-  // must never undo or block the approval that already committed above,
-  // same "external side-effect can fail without failing the action" pattern
-  // as the approval email right above.
-  let providerAccountError = null;
-  if (applicant.shul_id && !applicant.provider_exempt) {
-    try {
-      const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-      const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
-        externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
-        groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
-        homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
-        email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
-      });
-      if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
-      await unlockApplicantCustomer(req.user.org_id, result.accountId);
-    } catch (e) {
-      providerAccountError = e.message;
-      console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
+  approvalsInFlight.add(applicant.external_id);
+  try {
+    const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(applicant.season_id);
+    if (applicant.approval_status !== 'approved' && season?.max_accepted_applicants != null) {
+      const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
+      if (accepted >= season.max_accepted_applicants) return res.status(400).json({ error: `This season's cap of ${season.max_accepted_applicants} accepted applicant(s) has already been reached.` });
     }
-  }
-  // disccardpromos has no separate "assign/activate a card" step — crediting
-  // a customer's balance against a configured Package (Settings >
-  // Organization > Gift Card Loading) via add-funds IS how a card actually
-  // gets issued with an amount. Same best-effort pattern as the account
-  // write above: skipped if that write failed (nothing to credit yet), and
-  // never blocks/undoes the approval itself. provider_exempt applicants
-  // (one-time backfill import — see POST /import) never reach either block,
-  // permanently, no matter how many times they're approved/rejected.
-  let providerFundsError = null;
-  if (applicant.shul_id && !applicant.provider_exempt && !providerAccountError && amount > 0) {
-    const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
-    if (!discountId) {
-      providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
-    } else {
+    const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
+    db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
+      .run(req.user.id, amount, applicant.id);
+    logAudit(req.user.org_id, req.user.id, 'approve', 'applicant', applicant.id,
+      { approval_status: applicant.approval_status, card_amount: applicant.card_amount }, { approval_status: 'approved', card_amount: amount }, req.ip);
+    let emailError = null;
+    if (applicant.email) {
+      const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
+      ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
+      if (emailError) console.error('[mail] applicant approval email failed:', emailError);
+    }
+    // Writes/links the disccardpromos account for this applicant — idempotent
+    // by external_id (existing account just gets the current season added;
+    // a new one is created under a group matching the shul's English name,
+    // creating that group first if needed — see giftcard.js's
+    // upsertAccountForApproval). Best-effort: a disccardpromos hiccup here
+    // must never undo or block the approval that already committed above,
+    // same "external side-effect can fail without failing the action" pattern
+    // as the approval email right above.
+    let providerAccountError = null;
+    if (applicant.shul_id && !applicant.provider_exempt) {
       try {
-        await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount });
+        const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
+        const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
+          externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
+          groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
+          homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
+          email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
+        });
+        if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
+        await unlockApplicantCustomer(req.user.org_id, result.accountId);
       } catch (e) {
-        providerFundsError = e.message;
-        console.error('[giftcard] failed to load funds on approval:', e.message);
+        providerAccountError = e.message;
+        console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
       }
     }
+    // disccardpromos has no separate "assign/activate a card" step — crediting
+    // a customer's balance against a configured Package (Settings >
+    // Organization > Gift Card Loading) via add-funds IS how a card actually
+    // gets issued with an amount. Same best-effort pattern as the account
+    // write above: skipped if that write failed (nothing to credit yet), and
+    // never blocks/undoes the approval itself. provider_exempt applicants
+    // (one-time backfill import — see POST /import) never reach either block,
+    // permanently, no matter how many times they're approved/rejected.
+    let providerFundsError = null;
+    if (applicant.shul_id && !applicant.provider_exempt && !providerAccountError && amount > 0) {
+      const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
+      if (!discountId) {
+        providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
+      } else {
+        try {
+          await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount });
+        } catch (e) {
+          providerFundsError = e.message;
+          console.error('[giftcard] failed to load funds on approval:', e.message);
+        }
+      }
+    }
+    res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
+  } finally {
+    approvalsInFlight.delete(applicant.external_id);
   }
-  res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
 });
 
 router.post('/:id/reject', requireAdmin, async (req, res) => {

@@ -421,7 +421,16 @@ async function carryForwardShul(orgId, userId, source, targetSeason, { slotsAllo
   let applicantsCarried = 0, applicantsSkipped = 0;
   for (const a of sourceApplicants) {
     if (alreadyCarried.get(targetSeason.id, a.id)) { applicantsSkipped++; continue; }
-    insertApplicant.run(uuid(), orgId, target.id, targetSeason.id, generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
+    // #11: carrying an applicant forward reuses their existing external_id
+    // instead of generating a fresh one. external_id is what disccardpromos
+    // matches an existing customer by (see giftcard.js's
+    // upsertAccountForApproval) — a new random id here would make this same
+    // real person look brand new to disccardpromos every season, writing a
+    // second, duplicate customer record instead of renewing the one that
+    // already exists. Falls back to generating fresh only if the source
+    // row somehow has none (shouldn't happen — every applicant gets one at
+    // creation and a startup migration backfills any legacy row missing it).
+    insertApplicant.run(uuid(), orgId, target.id, targetSeason.id, a.external_id || generateApplicantExternalId(db), a.first_name, a.last_name, a.marital_status || '',
       a.home_phone || '', a.husband_cell || '', a.wife_cell || '', a.email || '', a.address || '', a.city || '', a.state || '', a.zip || '',
       a.preferred_contact_method || '', a.preferred_number || '', a.num_children || 0, a.home_for_yomtov || 0, a.permanent_comments || null, a.id);
     applicantsCarried++;
