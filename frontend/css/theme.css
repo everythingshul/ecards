@@ -107,6 +107,9 @@ tr:hover td { background: var(--brand-panel-2); }
    scrolling horizontally. Hidden by default (display:none via inline style
    set only when there's actually overflow); nav-more-btn itself is always
    in the flow so its width can be measured before deciding what overflows. */
+/* Nav pending-count tally (#10) — replaces the old bare red dot with the
+   actual number, so a glance tells you how many, not just "something". */
+.nav-tally { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; line-height: 1; vertical-align: middle; }
 .nav-more { position: relative; flex-shrink: 0; }
 .nav-more-btn { display: flex; align-items: center; gap: 4px; padding: 10px 12px; border-radius: 8px; background: none; border: none; color: var(--sidebar-link); font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap; }
 .nav-more-btn:hover, .nav-more-btn.active { background: rgba(255,255,255,.06); color: #fff; }

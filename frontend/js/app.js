@@ -181,7 +181,12 @@ function renderShell(activeHref, contentHtml) {
   }
   if (['staff', 'org_admin', 'super_admin'].includes(role)) {
     api('/dashboard/pending-counts').then(({ counts }) => {
-      const dot = () => '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-left:5px;vertical-align:middle"></span>';
+      // A bare dot never told you HOW MANY were waiting — now the nav shows
+      // the real count (#10). Counts are already scoped server-side to the
+      // current season, so a dot here always means something actually
+      // needs attention right now, not a record left over from a past,
+      // long-closed season.
+      const tally = (n) => `<span class="nav-tally">${n > 999 ? '999+' : n}</span>`;
       const pages = { shuls: 'shuls', applicants: 'applicants', stores: 'stores' };
       let changed = false;
       for (const [key, path] of Object.entries(pages)) {
@@ -189,7 +194,7 @@ function renderShell(activeHref, contentHtml) {
         const link = document.querySelector(`nav a[data-href$="/${path}"]`);
         if (!link) continue;
         link.title = `${link.title} — ${counts[key]} pending`;
-        link.querySelector('.nav-label').insertAdjacentHTML('beforeend', dot());
+        link.querySelector('.nav-label').insertAdjacentHTML('beforeend', tally(counts[key]));
         changed = true;
       }
       if (changed) layoutNavOverflow();

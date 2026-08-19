@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { getPermission } from '../middleware/permissions.js';
+import { getActiveSeasonId } from '../utils/formSchedule.js';
 
 const router = Router();
 // Internal team only — every count below is computed org-wide (total shuls,
@@ -16,14 +17,24 @@ router.use(auth, requireAdmin);
 // (which joins across cards/stores/duplicate flags too). Respects each
 // resource's view permission the same way /stats does, so a role that
 // can't see a resource never gets a dot for it.
+//
+// Shuls and applicants are scoped to the org's current active season (#10:
+// "make sure the red dots only work when needed") — without this, a shul or
+// applicant left sitting unactioned in a long-closed past season would keep
+// lighting up the nav forever, since nothing else ever revisits old-season
+// records once a new season starts. Stores aren't season-scoped here since
+// a store is one persistent record reused every season (see
+// routes/stores.js's /:id/season-history), not a fresh per-season row —
+// setup_status='pending' is meaningful regardless of season.
 router.get('/pending-counts', (req, res) => {
   const orgId = req.user.org_id;
+  const seasonId = getActiveSeasonId(orgId);
   const counts = {};
   if (getPermission(req.user, 'shuls').can_view) {
-    counts.shuls = db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND status IN ('submitted','contract_sent','contract_signed')`).get(orgId).c;
+    counts.shuls = db.prepare(`SELECT COUNT(*) c FROM shuls WHERE org_id = ? AND is_locked = 0 AND status IN ('submitted','contract_sent','contract_signed') AND season_id = ?`).get(orgId, seasonId).c;
   }
   if (getPermission(req.user, 'applicants').can_view) {
-    counts.applicants = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE org_id = ? AND approval_status = 'pending'`).get(orgId).c;
+    counts.applicants = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE org_id = ? AND approval_status = 'pending' AND season_id = ?`).get(orgId, seasonId).c;
   }
   if (getPermission(req.user, 'stores').can_view) {
     counts.stores = db.prepare(`SELECT COUNT(*) c FROM stores WHERE org_id = ? AND setup_status = 'pending'`).get(orgId).c;
