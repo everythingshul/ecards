@@ -113,18 +113,28 @@ async function call(seasonId, path, opts = {}) {
       ...(opts.headers || {}),
     },
   });
-  const body = await res.json().catch(() => ({}));
+  // A failure response isn't guaranteed to be JSON at all — a 500 from a
+  // Django-style backend with DEBUG off is typically a plain-text/HTML error
+  // page, which res.json() can't parse. Read the raw text first so that case
+  // still surfaces SOMETHING instead of silently collapsing to {}.
+  const rawText = await res.text();
+  let body;
+  try { body = rawText ? JSON.parse(rawText) : {}; } catch { body = {}; }
   if (!res.ok) {
-    console.error(`[giftcard] ${opts.method || 'GET'} ${path} -> ${res.status}: ${JSON.stringify(body)}`);
+    console.error(`[giftcard] ${opts.method || 'GET'} ${path} -> ${res.status}: ${rawText.slice(0, 2000)}`);
     // body.message covers their simple-error shape; a DRF-style validation
     // error instead comes back as {field: ["reason", ...]} with no top-level
     // message, which previously collapsed to an opaque "API error 500" with
     // no way to tell (from the admin UI's providerFundsError/
     // providerAccountError, the only place this ever surfaces outside server
-    // logs) which field was rejected or why.
-    const detail = body?.message || (body && Object.keys(body).length ? JSON.stringify(body) : null);
+    // logs) which field was rejected or why. A non-JSON body (HTML error
+    // page, plain text) falls back to a truncated snippet of the raw text
+    // rather than nothing at all.
+    const detail = body?.message
+      || (body && Object.keys(body).length ? JSON.stringify(body) : null)
+      || (rawText ? rawText.replace(/\s+/g, ' ').trim().slice(0, 300) : null);
     const err = new Error(detail ? `disccardpromos API error ${res.status}: ${detail}` : `disccardpromos API error ${res.status}`);
-    err.status = res.status; err.body = body;
+    err.status = res.status; err.body = body; err.rawText = rawText;
     throw err;
   }
   return body;
@@ -338,13 +348,18 @@ export async function deleteCustomer(seasonId, customerId) {
 // side into our local `cards` table, which is the only way to pick up a
 // card that was assigned directly in their dashboard rather than through
 // this app.
-export async function getCustomerByExternalId(seasonId, externalId, { balances = false, transactions = false } = {}) {
+// suppressNotFound=false is a diagnostic escape hatch (used by GET
+// /applicants/:id/provider-customer) — normal callers want a plain null for
+// "no customer yet", but investigating whether the by-external-id lookup
+// itself matches what create() actually stored needs to see the real 404
+// body/text rather than have it swallowed.
+export async function getCustomerByExternalId(seasonId, externalId, { balances = false, transactions = false, suppressNotFound = true } = {}) {
   if (isMockMode(seasonId)) return null;
   const qs = [balances && 'balances=true', transactions && 'transactions=true'].filter(Boolean).join('&');
   try {
     return await call(seasonId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/${qs ? `?${qs}` : ''}`);
   } catch (e) {
-    if (e.status === 404) return null;
+    if (e.status === 404 && suppressNotFound) return null;
     throw e;
   }
 }

@@ -631,10 +631,10 @@ router.get('/:id/provider-customer', requireAdmin, async (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (!applicant.external_id) return res.status(400).json({ error: 'This applicant has no external_id yet' });
   try {
-    const customer = await giftcard.getCustomerByExternalId(applicant.season_id, applicant.external_id, { balances: true });
+    const customer = await giftcard.getCustomerByExternalId(applicant.season_id, applicant.external_id, { balances: true, suppressNotFound: false });
     res.json({ customer, mockMode: giftcard.isMockMode(applicant.season_id) });
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
   }
 });
 
