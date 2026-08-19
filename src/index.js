@@ -1,3 +1,12 @@
+// MUST be imported before any router is dispatched (patches Express's Layer
+// prototype): Express 4 does not catch a rejected/thrown promise from an
+// `async (req, res) => {...}` route handler — an uncaught error in ANY async
+// route (there are dozens across this app) crashes the whole Node process
+// for every concurrent user instead of returning a JSON 500 to just the one
+// request that hit it. Confirmed by hand: without this, an unguarded throw
+// in an async handler never reaches the app.use((err, req, res, next) => ...)
+// handler below at all — it's an unhandled rejection that kills the process.
+import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

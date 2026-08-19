@@ -503,6 +503,17 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant has an unresolved duplicate flag' });
+  // Belt-and-suspenders: every INSERT path generates an external_id and a
+  // startup migration backfills any legacy row missing one (see db.js), so
+  // this should never actually fire — but approval is the one place a blank
+  // external_id has real financial consequences (disccardpromos silently
+  // drops the field from the create-customer request entirely — see
+  // giftcard.js's customerPayload — leaving a live customer with no way to
+  // ever be matched back to this applicant again). Cheap to guarantee here.
+  if (!applicant.external_id) {
+    applicant.external_id = generateApplicantExternalId(db);
+    db.prepare('UPDATE applicants SET external_id = ? WHERE id = ?').run(applicant.external_id, applicant.id);
+  }
   const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(applicant.season_id);
   if (applicant.approval_status !== 'approved' && season?.max_accepted_applicants != null) {
     const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
