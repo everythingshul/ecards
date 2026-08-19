@@ -638,6 +638,24 @@ router.get('/:id/provider-customer', requireAdmin, async (req, res) => {
   }
 });
 
+// Diagnostic-only: fetch a disccardpromos customer directly by their
+// numeric provider id (not by our external_id) — pass ?provider_id=74412.
+// Used to check whether a customer known to exist actually carries the
+// external_id we sent, i.e. whether the by-external-id lookup's 404s mean
+// "no such route" or "route works, this customer genuinely doesn't match".
+router.get('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const providerId = req.query.provider_id;
+  if (!providerId) return res.status(400).json({ error: 'provider_id query param is required' });
+  try {
+    const customer = await giftcard.getCustomerById(applicant.season_id, providerId);
+    res.json({ customer });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });

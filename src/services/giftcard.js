@@ -315,6 +315,18 @@ export async function findCustomerByExternalId(seasonId, externalId) {
   }
 }
 
+// Diagnostic-only direct lookup by disccardpromos' own numeric customer id
+// (distinct from findCustomerByExternalId/getCustomerByExternalId, which go
+// through the by-external-id sub-path) — used to check whether a customer
+// definitely known to exist (its id came back from createCustomer) actually
+// carries the external_id we sent, disambiguating "by-external-id doesn't
+// exist as a route" from "it exists but external_id isn't stored/matched
+// the way we assumed."
+export async function getCustomerById(seasonId, customerId) {
+  if (isMockMode(seasonId)) return null;
+  return call(seasonId, `/org/customers/${customerId}/`);
+}
+
 export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
