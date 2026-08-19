@@ -18,7 +18,13 @@ export function validateBySchema(schema, values, { isAdmin = false } = {}) {
     const raw = values[f.key];
     const empty = raw === undefined || raw === null || String(raw).trim() === '';
     const overridable = isAdmin && f.admin_override;
-    if (f.required && empty) {
+    // requiredUnless: { key, equals } lets one field's required-ness depend
+    // on another field's value in the same submission — e.g. the store
+    // application's "manager and owner are the same person" checkbox, which
+    // exempts the manager fields from being required once checked (the
+    // owner fields, always required, stand in for that one person).
+    const exempted = f.requiredUnless && values[f.requiredUnless.key] === f.requiredUnless.equals;
+    if (f.required && !exempted && empty) {
       if (!overridable) errors.push(`Missing required field: ${f.label || f.key}`);
       continue;
     }
@@ -70,7 +76,7 @@ export function validateRowsBySchema(schema, rows, { isAdmin = false, rowNumberO
 // identically whether it's on the fixed public page or a custom form.
 export const APPLICANT_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email','address','city','state','zip','shul_id','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments'];
 export const SHUL_FIELDS = ['name_en','name_he','address','city','state','zip','ruv_first_name','ruv_last_name','ruv_phone','ruv_address','ruv_city','ruv_state','ruv_zip','gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip'];
-export const STORE_FIELDS = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments','has_provider_account'];
+export const STORE_FIELDS = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments','has_provider_account','same_person'];
 
 // Splits submitted fields into whatever matches a known column for this
 // entity type vs. everything else (appended to comments/notes so no data is

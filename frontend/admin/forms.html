@@ -15,8 +15,42 @@ Auth.requireAdmin();
 renderShell('/admin/forms', `
   <div class="flex-between"><h2>Form Builder</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Form</button></div>
   <p class="small-muted">Build custom forms and set them public, limited to a group of shuls, or a single shul/applicant.</p>
+  <h3>Built-In Application Forms</h3>
+  <p class="small-muted">The fixed shul, store, and applicant application pages — always live, not editable here. Copy the link to share.</p>
+  <div id="builtin-links" style="margin-bottom:22px"></div>
+  <div class="divider"></div>
+  <h3>Custom Forms</h3>
   <div id="forms-list"></div>
 `);
+
+// The three fixed application flows (see utils/builtinSchemas.js) live at
+// permanent URLs, not as editable rows here — an admin just needs the link
+// to share, not a form to build. Ezras Habayis shares the applicant schema
+// but has its own separate public URL/shul (see utils/ezrasHabayis.js).
+const BUILTIN_LINKS = [
+  { label: 'Shul Application', path: '/apply' },
+  { label: 'Store Application', path: '/apply-store' },
+  { label: 'Applicant Application', path: '/apply-ezras-habayis' },
+];
+function renderBuiltinLinks() {
+  qs('#builtin-links').innerHTML = BUILTIN_LINKS.map(({ label, path }) => {
+    const url = location.origin + path;
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="flex-between">
+        <div><strong>${esc(label)}</strong><br><span class="small-muted">${esc(url)}</span></div>
+        <div class="pill-row">
+          <a class="btn btn-sm btn-outline" href="${esc(path)}" target="_blank">Open</a>
+          <button class="btn btn-sm btn-outline" onclick="copyBuiltinLink('${esc(url)}')">Copy Link</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+window.copyBuiltinLink = async (url) => {
+  try { await navigator.clipboard.writeText(url); toast('Link copied'); }
+  catch { toast(url); }
+};
+renderBuiltinLinks();
 
 let fieldDraft = [];
 let formsCache = [];

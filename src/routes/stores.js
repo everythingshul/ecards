@@ -24,11 +24,14 @@ router.post('/apply', (req, res) => {
   if (errors.length) return res.status(400).json({ error: errors[0] });
   if (!b.name || !b.owner_email) return res.status(400).json({ error: 'Store name and owner email are required' });
   const id = uuid();
+  const samePerson = !!b.same_person;
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
-      owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account, source)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,'pending',?, 'application')`)
-    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
-      b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email,
+      owner_name, owner_phone, owner_email, same_person, comments, setup_status, has_provider_account, source)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,'pending',?, 'application')`)
+    .run(id, orgId, b.name, b.address || '', b.city || '', b.state || '', b.zip || '',
+      normalizePhone(b.phone || ''),
+      samePerson ? b.owner_name || '' : b.manager_name || '', samePerson ? normalizePhone(b.owner_phone || '') : normalizePhone(b.manager_phone || ''), samePerson ? b.owner_email || '' : b.manager_email || '',
+      b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email, samePerson ? 1 : 0,
       b.comments || '', b.has_provider_account ? 1 : 0);
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
 });
@@ -106,11 +109,11 @@ router.post('/', requireAdmin, (req, res) => {
   if (!b.name) return res.status(400).json({ error: 'Store name is required' });
   const id = uuid();
   db.prepare(`INSERT INTO stores (id, org_id, name, address, city, state, zip, phone, manager_name, manager_phone, manager_email,
-      owner_name, owner_phone, owner_email, comments, setup_status, has_provider_account)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?)`)
+      owner_name, owner_phone, owner_email, same_person, comments, setup_status, has_provider_account)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?)`)
     .run(id, req.user.org_id, b.name, b.address || '', b.city || '', b.state || '', b.zip || '', normalizePhone(b.phone || ''),
       b.manager_name || '', normalizePhone(b.manager_phone || ''), b.manager_email || '', b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email || '',
-      b.comments || '', b.setup_status || 'pending', b.has_provider_account ? 1 : 0);
+      b.same_person ? 1 : 0, b.comments || '', b.setup_status || 'pending', b.has_provider_account ? 1 : 0);
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(id);
   logAudit(req.user.org_id, req.user.id, 'create', 'store', id, null, store, req.ip);
   res.status(201).json({ store });
@@ -119,14 +122,14 @@ router.post('/', requireAdmin, (req, res) => {
 router.put('/:id', requireAdmin, (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
-  const fields = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','comments','setup_status','has_provider_account','provider_store_id'];
+  const fields = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','same_person','comments','setup_status','has_provider_account','provider_store_id'];
   const b = req.body || {};
   if (b.phone !== undefined) b.phone = normalizePhone(b.phone);
   if (b.manager_phone !== undefined) b.manager_phone = normalizePhone(b.manager_phone);
   if (b.owner_phone !== undefined) b.owner_phone = normalizePhone(b.owner_phone);
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
-    const vals = sets.map(f => f === 'has_provider_account' ? (b[f] ? 1 : 0) : b[f]);
+    const vals = sets.map(f => (f === 'has_provider_account' || f === 'same_person') ? (b[f] ? 1 : 0) : b[f]);
     db.prepare(`UPDATE stores SET ${sets.map(f=>`${f}=?`).join(',')} WHERE id=?`).run(...vals, store.id);
     logAudit(req.user.org_id, req.user.id, 'update', 'store', store.id, Object.fromEntries(sets.map(f => [f, store[f]])), Object.fromEntries(sets.map((f,i) => [f, vals[i]])), req.ip);
   }

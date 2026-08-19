@@ -34,10 +34,28 @@
 <script>
 // Fixed question set for Store Application (utils/builtinSchemas.js) — no
 // longer editable through Form Builder.
+// Manager fields are wrapped in their own div so the same_person checkbox
+// can hide them (and drop their `required`) without touching the shared
+// fieldHtml renderer — server-side validation (formValidation.js's
+// requiredUnless) is the real enforcement; this is just so the form doesn't
+// visually ask for info it won't actually require.
+const MANAGER_KEYS = ['manager_name', 'manager_phone', 'manager_email'];
 (async () => {
   const schema = await loadBuiltinSchema('store_application');
   if (!schema) { qs('#dyn-fields').innerHTML = '<p class="small-muted">This form isn\'t available right now — please try again shortly.</p>'; return; }
-  qs('#dyn-fields').innerHTML = schema.map(f => fieldHtml(f)).join('');
+  const managerFields = schema.filter(f => MANAGER_KEYS.includes(f.key));
+  const otherFields = schema.filter(f => !MANAGER_KEYS.includes(f.key));
+  const sameIdx = otherFields.findIndex(f => f.key === 'same_person');
+  const before = otherFields.slice(0, sameIdx + 1).map(f => fieldHtml(f)).join('');
+  const after = otherFields.slice(sameIdx + 1).map(f => fieldHtml(f)).join('');
+  qs('#dyn-fields').innerHTML = `${before}<div id="manager-fields">${managerFields.map(f => fieldHtml(f)).join('')}</div>${after}`;
+  const sameCheckbox = qs('#same_person');
+  function syncManagerFields() {
+    const same = sameCheckbox.checked;
+    qs('#manager-fields').style.display = same ? 'none' : '';
+    qsa('#manager-fields input').forEach(input => { input.required = !same; if (same) input.value = ''; });
+  }
+  if (sameCheckbox) { sameCheckbox.addEventListener('change', syncManagerFields); syncManagerFields(); }
   loadGoogleMaps().then(() => {
     attachPlacesAutocomplete('address', { address:'address', city:'city', state:'state', zip:'zip' });
   });

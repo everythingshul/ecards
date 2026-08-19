@@ -30,9 +30,16 @@ export const STORE_APPLICATION_SCHEMA = [
   { key: 'address', label: 'Address', type: 'text', required: false }, { key: 'city', label: 'City', type: 'text', required: false },
   { key: 'state', label: 'State', type: 'text', required: false }, { key: 'zip', label: 'Zip', type: 'text', required: false },
   { key: 'phone', label: 'Store Phone', type: 'tel', required: false },
-  { key: 'manager_name', label: 'Manager Name', type: 'text', required: false }, { key: 'manager_phone', label: 'Manager Phone', type: 'tel', required: false },
-  { key: 'manager_email', label: 'Manager Email', type: 'email', required: false },
-  { key: 'owner_name', label: 'Owner Name', type: 'text', required: false }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: false },
+  { key: 'same_person', label: 'The manager and owner are the same person', type: 'checkbox', required: false },
+  // Owner fields are always required — they double as "the one person"'s
+  // info when same_person is checked. Manager fields are required too,
+  // except when same_person is checked (requiredUnless — see
+  // formValidation.js's validateBySchema), since they'd otherwise duplicate
+  // the owner fields exactly.
+  { key: 'manager_name', label: 'Manager Name', type: 'text', required: true, requiredUnless: { key: 'same_person', equals: true } },
+  { key: 'manager_phone', label: 'Manager Phone', type: 'tel', required: true, requiredUnless: { key: 'same_person', equals: true } },
+  { key: 'manager_email', label: 'Manager Email', type: 'email', required: true, requiredUnless: { key: 'same_person', equals: true } },
+  { key: 'owner_name', label: 'Owner Name', type: 'text', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: true },
   { key: 'owner_email', label: 'Owner Email', type: 'email', required: true },
   { key: 'has_provider_account', label: 'We already have a disccardpromos.com (or equivalent) merchant account', type: 'checkbox', required: false },
   { key: 'comments', label: 'Comments', type: 'textarea', required: false },
