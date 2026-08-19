@@ -86,6 +86,7 @@ async function call(orgId, path, opts = {}) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    console.error(`[giftcard] ${opts.method || 'GET'} ${path} -> ${res.status}: ${JSON.stringify(body)}`);
     const err = new Error(body?.message || `disccardpromos API error ${res.status}`);
     err.status = res.status; err.body = body;
     throw err;
@@ -274,17 +275,19 @@ export async function createCustomer(orgId, opts) {
   return call(orgId, '/org/customers/', { method: 'POST', body: JSON.stringify({ external_id: externalId, ...customerPayload(opts) }) });
 }
 
-// Their docs show PATCH at '/org/customers/{id}' with no trailing slash —
-// every other Customer endpoint (list/create/get-by-id/get-by-external-id/
-// delete) documents one, so this is very possibly just a docs typo, but
-// it's what's actually written, and a slash mismatch against a strict
-// Django-style router is exactly the kind of thing that would 404 silently
-// enough to look like "nothing happens" from our side. Matching it exactly
-// rather than guessing "they probably meant consistent" — if this is wrong
-// the now-loud error logging around this call will show it plainly.
+// Their docs show PATCH at '/org/customers/{id}' with no trailing slash,
+// unlike every other Customer endpoint (list/create/get-by-id/
+// get-by-external-id/delete). Originally matched exactly as documented, on
+// the theory that a real API is safer to follow literally than to "fix" —
+// but a live "disccardpromos API error 404" report on card assignment
+// (POST /api/cards/assign -> linkCardToCustomer below, same PATCH path) is
+// consistent with this being the docs typo it was already suspected to be.
+// Trailing slash added to match every sibling endpoint; call() now logs the
+// exact path/status/body on every failure (see below), so if this guess is
+// wrong the next occurrence will say so directly instead of a bare 404.
 export async function updateCustomer(orgId, customerId, opts) {
   if (isMockMode(orgId)) return { id: customerId, ...customerPayload(opts) };
-  return call(orgId, `/org/customers/${customerId}`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
+  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
 }
 
 export async function deleteCustomer(orgId, customerId) {
@@ -316,7 +319,7 @@ export async function getCustomerByExternalId(orgId, externalId, { balances = fa
 // number an admin has in hand (e.g. from a batch of physical cards).
 export async function linkCardToCustomer(orgId, customerId, cardNumber) {
   if (isMockMode(orgId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
-  return call(orgId, `/org/customers/${customerId}`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
+  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
 }
 
 // Idempotent upsert used at applicant-approval time: an existing customer
