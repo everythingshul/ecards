@@ -4,7 +4,7 @@ import { unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
-import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields, generatePreviewPdfBytes } from '../services/pdf.js';
+import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields, generatePreviewPdfBytes, getDataFields, getDataFieldDefs } from '../services/pdf.js';
 import { isMockMode } from '../services/giftcard.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 import { runBackup, listBackups, backupPath } from '../services/backup.js';
@@ -143,6 +143,37 @@ router.put('/signature-box/:kind', requireAdmin, (req, res) => {
   const value = JSON.stringify(fields.map(f => ({ id: f.id, type: f.type, label: f.label || '', required: f.required !== false, x: f.x, y: f.y, width: f.width, height: f.height })));
   db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
     ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `signature_box_${kind}`, value);
+  res.json({ ok: true, fields: JSON.parse(value) });
+});
+
+// Contract data-field placement editor (Settings > Documents > "Edit
+// Contract Field Placement") — distinct from the signature-box editor
+// above: these fields get the entity's own record data stamped onto the
+// uploaded template PDF at generation time, not whatever the signer types.
+// Only meaningful once a custom template is uploaded (see
+// generateContractPdf/generateGenericDocumentPdf in services/pdf.js) —
+// hasTemplate tells the frontend whether to even offer this editor.
+router.get('/contract-fields/:kind', async (req, res) => {
+  const kind = req.params.kind;
+  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  const fields = getDataFields(req.user.org_id, kind);
+  const pageSize = await templatePageSize(kind);
+  res.json({ fields, pageSize, availableFields: getDataFieldDefs(kind), hasTemplate: !!SIG_TEMPLATE_PATH[kind]?.() });
+});
+
+router.put('/contract-fields/:kind', requireAdmin, (req, res) => {
+  const kind = req.params.kind;
+  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  const fields = req.body?.fields;
+  if (!Array.isArray(fields)) return res.status(400).json({ error: 'fields array required' });
+  const validKeys = new Set(getDataFieldDefs(kind).map(([key]) => key));
+  for (const f of fields) {
+    if (!f.id || !validKeys.has(f.dataField)) return res.status(400).json({ error: 'Each field needs a valid id and a recognized dataField' });
+    if ([f.x, f.y, f.width, f.height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
+  }
+  const value = JSON.stringify(fields.map(f => ({ id: f.id, dataField: f.dataField, x: f.x, y: f.y, width: f.width, height: f.height, fontSize: f.fontSize || null })));
+  db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
+    ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `contract_data_fields_${kind}`, value);
   res.json({ ok: true, fields: JSON.parse(value) });
 });
 

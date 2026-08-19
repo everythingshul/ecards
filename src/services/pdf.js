@@ -101,6 +101,17 @@ export async function generateContractPdf({ shul, season, templateText, orgName 
   const path = join(DATA_DIR, 'contracts', `${shul.id}-unsigned.pdf`);
 
   if (hasCustomTemplate()) {
+    // If the admin has placed data fields onto the template (Settings >
+    // Documents > "Edit Contract Field Placement"), stamp this shul's real
+    // values onto it instead of using the template verbatim — the whole
+    // point of that editor. No fields configured yet -> unchanged behavior.
+    const dataFields = getDataFields(shul.org_id, 'shul');
+    if (dataFields.length) {
+      const values = buildDataFieldValues('shul', shul, { orgName, seasonName: season?.name });
+      const stamped = await stampDataFields(readFileSync(CUSTOM_TEMPLATE_PATH), dataFields, values);
+      writeFileSync(path, stamped);
+      return path;
+    }
     writeFileSync(path, readFileSync(CUSTOM_TEMPLATE_PATH));
     return path;
   }
@@ -142,6 +153,121 @@ const DOC_DEFAULTS = {
 
 export function docTemplatePath(entityType) { return DOC_TEMPLATE_PATHS[entityType]; }
 export function hasCustomDocTemplate(entityType) { return DOC_TEMPLATE_PATHS[entityType] ? existsSync(DOC_TEMPLATE_PATHS[entityType]) : false; }
+
+// ---------------------------------------------------------------------------
+// Contract data-field placement (Settings > Documents > "Edit Contract Field
+// Placement") — separate from the signature-box fields above: these get
+// filled in with the entity's own record data at contract-generation time
+// (before anyone signs anything), not typed by whoever signs. Only takes
+// effect once a custom template PDF is uploaded for that kind (there's no
+// fixed "page" to place data onto for the auto-generated fallback) and at
+// least one field has been configured — see generateContractPdf /
+// generateGenericDocumentPdf below, which check getDataFields() before
+// falling back to their old behavior.
+// ---------------------------------------------------------------------------
+const DATA_FIELD_DEFS = {
+  shul: [
+    ['name_en', 'Shul Name (English)'], ['name_he', 'Shul Name (Hebrew)'],
+    ['address', 'Address'], ['city', 'City'], ['state', 'State'], ['zip', 'Zip'], ['full_address', 'Full Address'],
+    ['ruv_first_name', 'Rav First Name'], ['ruv_last_name', 'Rav Last Name'], ['ruv_full_name', 'Rav Full Name'], ['ruv_phone', 'Rav Phone'],
+    ['ruv_address', 'Rav Address'], ['ruv_city', 'Rav City'], ['ruv_state', 'Rav State'], ['ruv_zip', 'Rav Zip'],
+    ['gabai_first_name', 'Gabai First Name'], ['gabai_last_name', 'Gabai Last Name'], ['gabai_full_name', 'Gabai Full Name'],
+    ['gabai_cell', 'Gabai Cell'], ['gabai_email', 'Gabai Email'],
+    ['gabai_address', 'Gabai Address'], ['gabai_city', 'Gabai City'], ['gabai_state', 'Gabai State'], ['gabai_zip', 'Gabai Zip'],
+    ['slots_allocated', 'Slots Allocated'],
+    ['season_name', 'Season Name'], ['org_name', 'Organization Name'], ['today_date', "Today's Date"],
+  ],
+  applicant: [
+    ['first_name', 'First Name'], ['last_name', 'Last Name'], ['full_name', 'Full Name'],
+    ['marital_status', 'Marital Status'], ['home_phone', 'Home Phone'], ['husband_cell', 'Husband Cell'], ['wife_cell', 'Wife Cell'], ['email', 'Email'],
+    ['address', 'Address'], ['city', 'City'], ['state', 'State'], ['zip', 'Zip'], ['full_address', 'Full Address'],
+    ['card_amount', 'Card Amount'], ['external_id', 'Applicant ID'],
+    ['shul_name', 'Shul Name'], ['season_name', 'Season Name'], ['org_name', 'Organization Name'], ['today_date', "Today's Date"],
+  ],
+  store: [
+    ['name', 'Store Name'],
+    ['address', 'Address'], ['city', 'City'], ['state', 'State'], ['zip', 'Zip'], ['full_address', 'Full Address'],
+    ['owner_name', 'Owner Name'], ['owner_phone', 'Owner Phone'], ['owner_email', 'Owner Email'],
+    ['manager_name', 'Manager Name'], ['manager_phone', 'Manager Phone'],
+    ['org_name', 'Organization Name'], ['today_date', "Today's Date"],
+  ],
+};
+// [key, label] pairs for the field-placement editor's dropdown.
+export function getDataFieldDefs(kind) { return DATA_FIELD_DEFS[kind] || []; }
+
+export function getDataFields(orgId, kind) {
+  const row = db.prepare('SELECT value FROM settings WHERE org_id = ? AND key = ?').get(orgId, `contract_data_fields_${kind}`);
+  if (!row) return [];
+  try { const v = JSON.parse(row.value); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+// Resolves every defined field for `kind` down to a flat {key: displayValue}
+// map from a raw DB record (+ orgName/seasonName/shulName context that isn't
+// on the record itself) — the single source of truth both stampDataFields
+// below and the editor's available-fields dropdown are built from.
+function buildDataFieldValues(kind, record, { orgName = '', seasonName = '', shulName = '' } = {}) {
+  const todayDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const addr = (r) => [r.address, r.city, r.state, r.zip].filter(Boolean).join(', ');
+  if (kind === 'shul') {
+    return {
+      name_en: record.name_en || '', name_he: record.name_he || '',
+      address: record.address || '', city: record.city || '', state: record.state || '', zip: record.zip || '', full_address: addr(record),
+      ruv_first_name: record.ruv_first_name || '', ruv_last_name: record.ruv_last_name || '',
+      ruv_full_name: [record.ruv_first_name, record.ruv_last_name].filter(Boolean).join(' '), ruv_phone: record.ruv_phone || '',
+      ruv_address: record.ruv_address || '', ruv_city: record.ruv_city || '', ruv_state: record.ruv_state || '', ruv_zip: record.ruv_zip || '',
+      gabai_first_name: record.gabai_first_name || '', gabai_last_name: record.gabai_last_name || '',
+      gabai_full_name: [record.gabai_first_name, record.gabai_last_name].filter(Boolean).join(' '),
+      gabai_cell: record.gabai_cell || '', gabai_email: record.gabai_email || '',
+      gabai_address: record.gabai_address || '', gabai_city: record.gabai_city || '', gabai_state: record.gabai_state || '', gabai_zip: record.gabai_zip || '',
+      slots_allocated: record.slots_allocated != null ? String(record.slots_allocated) : '',
+      season_name: seasonName, org_name: orgName, today_date: todayDate,
+    };
+  }
+  if (kind === 'applicant') {
+    return {
+      first_name: record.first_name || '', last_name: record.last_name || '',
+      full_name: [record.first_name, record.last_name].filter(Boolean).join(' '),
+      marital_status: record.marital_status || '', home_phone: record.home_phone || '', husband_cell: record.husband_cell || '', wife_cell: record.wife_cell || '', email: record.email || '',
+      address: record.address || '', city: record.city || '', state: record.state || '', zip: record.zip || '', full_address: addr(record),
+      card_amount: record.card_amount != null ? String(record.card_amount) : '', external_id: record.external_id || '',
+      shul_name: shulName, season_name: seasonName, org_name: orgName, today_date: todayDate,
+    };
+  }
+  return { // store
+    name: record.name || '',
+    address: record.address || '', city: record.city || '', state: record.state || '', zip: record.zip || '', full_address: addr(record),
+    owner_name: record.owner_name || '', owner_phone: record.owner_phone || '', owner_email: record.owner_email || '',
+    manager_name: record.manager_name || '', manager_phone: record.manager_phone || '',
+    org_name: orgName, today_date: todayDate,
+  };
+}
+
+// Draws each configured field's resolved value onto templateBytes at its
+// saved position (same fraction-of-page, top-left-origin convention as the
+// signature editor) and returns the new PDF bytes. Shrinks the font until
+// the value fits the box's width rather than wrapping or clipping — these
+// boxes are meant for single values (a name, a phone number), not
+// paragraphs. Blank values are skipped so an unfilled optional field
+// doesn't leave a stray positioned nothing.
+export async function stampDataFields(templateBytes, fields, values) {
+  const doc = await PDFDocument.load(templateBytes);
+  const { font } = await embedUnicodeFonts(doc);
+  const pages = doc.getPages();
+  for (const f of fields) {
+    const value = values[f.dataField];
+    if (!value) continue;
+    const pageIndex = (typeof f.page === 'number' && f.page >= 0 && f.page < pages.length) ? f.page : pages.length - 1;
+    const page = pages[pageIndex];
+    const { width: pw, height: ph } = page.getSize();
+    const boxX = f.x * pw, boxW = Math.max(1, f.width * pw), boxH = Math.max(1, f.height * ph);
+    const boxTop = ph - f.y * ph;
+    const text = String(value);
+    let size = f.fontSize || Math.min(14, boxH * 0.7);
+    while (size > 6 && font.widthOfTextAtSize(text, size) > boxW) size -= 0.5;
+    page.drawText(text, { x: boxX, y: boxTop - boxH * 0.75, size, font, color: rgb(0.1, 0.08, 0.06) });
+  }
+  return doc.save();
+}
 
 // Placeholder field lines for generatePreviewPdfBytes below — same shape as
 // the real fieldLines built in generateContractPdf/routes/documents.js's
@@ -189,11 +315,21 @@ export async function generatePreviewPdfBytes(orgId, orgName, kind) {
 
 // entityType: 'applicant' | 'store'. fieldLines: array of plain summary lines
 // (name/address/contact) drawn near the top of the generated fallback PDF.
-export async function generateGenericDocumentPdf({ entityType, entityId, title, fieldLines, templateText, orgName }) {
+// record/extra/orgId are only needed to resolve data fields onto an
+// uploaded template (see generateContractPdf above for the shul version of
+// this same logic) — omit them and this behaves exactly as before.
+export async function generateGenericDocumentPdf({ entityType, entityId, title, fieldLines, templateText, orgName, record, extra, orgId }) {
   const path = join(DATA_DIR, 'contracts', `${entityType}-${entityId}-unsigned.pdf`);
   const templatePath = DOC_TEMPLATE_PATHS[entityType];
 
   if (templatePath && existsSync(templatePath)) {
+    const dataFields = orgId ? getDataFields(orgId, entityType) : [];
+    if (dataFields.length && record) {
+      const values = buildDataFieldValues(entityType, record, { orgName, ...extra });
+      const stamped = await stampDataFields(readFileSync(templatePath), dataFields, values);
+      writeFileSync(path, stamped);
+      return path;
+    }
     writeFileSync(path, readFileSync(templatePath));
     return path;
   }

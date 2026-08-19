@@ -1063,21 +1063,23 @@ function collectSignValues(fields) {
   return values;
 }
 
-// Renders the last page of the actual document (the org's uploaded
-// template, or a generated sample — see GET
-// /settings/signature-box/:kind/preview-pdf) onto #sigbox-canvas as the
-// editor's background, so the draggable field boxes overlay real page
-// content instead of a blank rectangle. Best-effort: on any failure (pdf.js
-// failed to load from the CDN, a corrupt uploaded PDF, etc.) it just leaves
-// the plain white background — field placement still works correctly since
-// it's stored as fractions of the page either way, this is purely visual.
-async function renderSignatureBoxPdfBackground(kind, mockW, mockH) {
-  const loading = qs('#sigbox-loading');
+// Renders the last page of the actual document at previewUrl (the org's
+// uploaded template, or a generated sample — see GET
+// /settings/signature-box/:kind/preview-pdf, shared by both the signature
+// and contract-field placement editors since it's the same background
+// document either way) onto the given canvas as the editor's background, so
+// the draggable field boxes overlay real page content instead of a blank
+// rectangle. Best-effort: on any failure (pdf.js failed to load, a corrupt
+// uploaded PDF, etc.) it just leaves the plain white background — field
+// placement still works correctly since it's stored as fractions of the
+// page either way, this is purely visual.
+async function renderPdfPreviewBackground(previewUrl, mockW, mockH, canvasId, loadingId) {
+  const loading = qs(`#${loadingId}`);
   try {
-    const [pdfjsLib, bytes] = await Promise.all([loadPdfJs(), fetchAuthedBytes(`/settings/signature-box/${kind}/preview-pdf`)]);
+    const [pdfjsLib, bytes] = await Promise.all([loadPdfJs(), fetchAuthedBytes(previewUrl)]);
     const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-    const page = await pdf.getPage(pdf.numPages); // last page — where stampSignatureFields defaults an unpositioned field to
-    const canvas = qs('#sigbox-canvas');
+    const page = await pdf.getPage(pdf.numPages); // last page — where an unpositioned field defaults to
+    const canvas = qs(`#${canvasId}`);
     if (!canvas) return; // modal was closed before this resolved
     const unscaledViewport = page.getViewport({ scale: 1 });
     const dpr = window.devicePixelRatio || 1;
@@ -1088,7 +1090,7 @@ async function renderSignatureBoxPdfBackground(kind, mockW, mockH) {
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
     if (loading) loading.remove();
   } catch (e) {
-    console.error('[sigbox] PDF preview unavailable:', e.message);
+    console.error('[pdf-preview] Unavailable:', e.message);
     if (loading) loading.textContent = 'Preview unavailable — placement below still applies correctly to the real document.';
   }
 }
@@ -1128,7 +1130,7 @@ window.openSignatureBoxEditor = async (kind, title) => {
     <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt &mdash; showing the document's last page, where the signature area normally goes</p>
   `;
   openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveSignatureBox('${kind}')">Save Placement</button>`);
-  renderSignatureBoxPdfBackground(kind, mockW, mockH);
+  renderPdfPreviewBackground(`/settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'sigbox-canvas', 'sigbox-loading');
 
   function startDrag(e, f, mode) {
     e.preventDefault(); e.stopPropagation();
@@ -1211,6 +1213,126 @@ window.saveSignatureBox = async (kind) => {
   try {
     await api(`/settings/signature-box/${kind}`, { method: 'PUT', body: { fields } });
     toast('Signature placement saved');
+    closeModal();
+  } catch (err) { toast(err.message, true); }
+};
+
+// Draggable/resizable contract data-field editor (Settings > Documents >
+// "Edit Contract Field Placement") — same drag/resize mechanics as
+// openSignatureBoxEditor above, but each box is bound to a real record
+// field (shul name, Rav phone, applicant address, ...) instead of a
+// signer-filled type. At contract-generation time (services/pdf.js
+// generateContractPdf/generateGenericDocumentPdf), each field's actual
+// value for that specific shul/applicant/store gets stamped at its saved
+// position on the uploaded template. Only usable once a template PDF is
+// uploaded — there's no fixed page to place data onto for the generated
+// fallback — so this is only offered once one exists.
+let cfBoxState = null;
+window.openContractFieldEditor = async (kind, title) => {
+  let data;
+  try { data = await api(`/settings/contract-fields/${kind}`); } catch (err) { return toast(err.message, true); }
+  if (!data.hasTemplate) return toast('Upload a PDF template above first — field placement stamps values onto that document.', true);
+  const pageSize = data.pageSize;
+  const availableFields = data.availableFields; // [[key,label], ...]
+  const labelFor = (key) => availableFields.find(([k]) => k === key)?.[1] || key;
+  let fields = (data.fields || []).map(f => ({ ...f }));
+  let activeId = fields[0]?.id || null;
+  const mockW = 320;
+  const mockH = Math.round(mockW * pageSize.height / pageSize.width);
+
+  const bodyHtml = `
+    <p class="small-muted">Drag a field to position it, drag its corner to resize. Each box gets filled in with that shul/applicant/store's actual value when their contract is generated — pick which field with the dropdown below the box.</p>
+    <div id="cfbox-page" style="position:relative;width:${mockW}px;height:${mockH}px;margin:16px auto;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+      <canvas id="cfbox-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <div id="cfbox-loading" class="small-muted" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:8px">Loading page preview…</div>
+      <div id="cfbox-boxes" style="position:absolute;inset:0"></div>
+    </div>
+    <div style="text-align:center;margin-bottom:12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="addContractField()">+ Add Field</button>
+    </div>
+    <div id="cfbox-fields"></div>
+    <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt &mdash; showing the document's last page</p>
+  `;
+  openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveContractFields('${kind}')">Save Placement</button>`);
+  renderPdfPreviewBackground(`/settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'cfbox-canvas', 'cfbox-loading');
+
+  function startDrag(e, f, mode) {
+    e.preventDefault(); e.stopPropagation();
+    activeId = f.id;
+    const startPx = { x: e.clientX, y: e.clientY };
+    const startBox = { x: f.x, y: f.y, width: f.width, height: f.height };
+    function onMove(ev) {
+      const dx = (ev.clientX - startPx.x) / mockW, dy = (ev.clientY - startPx.y) / mockH;
+      if (mode === 'move') {
+        f.x = Math.min(1 - f.width, Math.max(0, startBox.x + dx));
+        f.y = Math.min(1 - f.height, Math.max(0, startBox.y + dy));
+      } else {
+        f.width = Math.min(1 - f.x, Math.max(0.1, startBox.width + dx));
+        f.height = Math.min(1 - f.y, Math.max(0.04, startBox.height + dy));
+      }
+      renderBoxes();
+    }
+    function onUp() { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function renderBoxes() {
+    const page = qs('#cfbox-boxes');
+    if (!page) return;
+    page.innerHTML = '';
+    fields.forEach(f => {
+      const box = document.createElement('div');
+      const active = f.id === activeId;
+      box.style.cssText = `position:absolute;left:${f.x * mockW}px;top:${f.y * mockH}px;width:${f.width * mockW}px;height:${f.height * mockH}px;background:rgba(122,167,201,.35);border:2px solid ${active ? 'var(--brand-gold-dark)' : '#999'};cursor:move;box-sizing:border-box;font-size:10px;color:#241a15;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden`;
+      box.textContent = labelFor(f.dataField);
+      box.addEventListener('pointerdown', (e) => startDrag(e, f, 'move'));
+      const handle = document.createElement('div');
+      handle.style.cssText = 'position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:var(--brand-gold-dark);cursor:nwse-resize';
+      handle.addEventListener('pointerdown', (e) => startDrag(e, f, 'resize'));
+      box.appendChild(handle);
+      page.appendChild(box);
+    });
+  }
+
+  function renderFieldsList() {
+    const el = qs('#cfbox-fields');
+    if (!el) return;
+    el.innerHTML = fields.length ? fields.map(f => `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;padding:6px;border:1px solid ${f.id === activeId ? 'var(--brand-gold-dark)' : 'var(--border)'};border-radius:4px">
+        <select data-fid="${f.id}" class="cfbox-field" style="flex:1">
+          ${availableFields.map(([key, label]) => `<option value="${key}" ${f.dataField === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn-outline btn-sm" onclick="selectContractField('${f.id}')">Select</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="removeContractField('${f.id}')">&times;</button>
+      </div>
+    `).join('') : '<p class="small-muted">No fields yet — click "+ Add Field" above.</p>';
+    qsa('.cfbox-field').forEach(sel => sel.onchange = () => { const f = fields.find(x => x.id === sel.dataset.fid); f.dataField = sel.value; renderBoxes(); });
+  }
+
+  window.addContractField = () => {
+    const id = 'f' + Math.random().toString(36).slice(2, 9);
+    fields.push({ id, dataField: availableFields[0][0], x: 0.1, y: 0.1, width: 0.35, height: 0.06 });
+    activeId = id;
+    renderBoxes(); renderFieldsList();
+  };
+  window.removeContractField = (id) => {
+    fields = fields.filter(f => f.id !== id);
+    if (activeId === id) activeId = fields[0]?.id || null;
+    renderBoxes(); renderFieldsList();
+  };
+  window.selectContractField = (id) => { activeId = id; renderBoxes(); renderFieldsList(); };
+
+  renderBoxes();
+  renderFieldsList();
+  cfBoxState = { kind, get: () => fields };
+};
+window.saveContractFields = async (kind) => {
+  const fields = cfBoxState?.kind === kind ? cfBoxState.get() : null;
+  if (!fields) return;
+  try {
+    await api(`/settings/contract-fields/${kind}`, { method: 'PUT', body: { fields } });
+    toast('Field placement saved');
     closeModal();
   } catch (err) { toast(err.message, true); }
 };

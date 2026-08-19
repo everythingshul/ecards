@@ -106,6 +106,7 @@ renderShell('/admin/settings', `
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" onclick="saveContractText()">Save Text</button>
         <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('shul','Shul Contract Signature Placement')">Edit Signature Placement</button>
+        <button class="btn btn-sm btn-outline" id="btn-fields-shul" style="display:none" onclick="openContractFieldEditor('shul','Shul Contract Field Placement')">Edit Contract Field Placement</button>
       </div>
     </div>
     <div class="card" style="margin-top:16px">
@@ -121,6 +122,7 @@ renderShell('/admin/settings', `
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" onclick="saveDocText('applicant')">Save Text</button>
         <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('applicant','Applicant Agreement Signature Placement')">Edit Signature Placement</button>
+        <button class="btn btn-sm btn-outline" id="btn-fields-applicant" style="display:none" onclick="openContractFieldEditor('applicant','Applicant Agreement Field Placement')">Edit Contract Field Placement</button>
       </div>
     </div>
     <div class="card" style="margin-top:16px">
@@ -136,6 +138,7 @@ renderShell('/admin/settings', `
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="btn btn-sm btn-primary" onclick="saveDocText('store')">Save Text</button>
         <button class="btn btn-sm btn-outline" onclick="openSignatureBoxEditor('store','Store Agreement Signature Placement')">Edit Signature Placement</button>
+        <button class="btn btn-sm btn-outline" id="btn-fields-store" style="display:none" onclick="openContractFieldEditor('store','Store Agreement Field Placement')">Edit Contract Field Placement</button>
       </div>
     </div>
   </div>
@@ -522,6 +525,7 @@ async function loadContractPdfStatus() {
     ? '<strong style="color:var(--success)">A custom contract PDF is currently in use.</strong>'
     : 'No custom PDF uploaded. Using the generated text template below.';
   qs('#btn-remove-pdf').style.display = hasCustomTemplate ? 'inline-flex' : 'none';
+  qs('#btn-fields-shul').style.display = hasCustomTemplate ? 'inline-flex' : 'none';
 }
 window.uploadContractPdf = async () => {
   const file = qs('#contract-pdf-file').files[0];
@@ -540,6 +544,7 @@ async function loadDocPdfStatus(entityType) {
     ? '<strong style="color:var(--success)">A custom PDF is currently in use.</strong>'
     : 'No custom PDF uploaded. Using the generated text template below.';
   qs(`#btn-remove-doc-pdf-${entityType}`).style.display = hasCustomTemplate ? 'inline-flex' : 'none';
+  qs(`#btn-fields-${entityType}`).style.display = hasCustomTemplate ? 'inline-flex' : 'none';
 }
 window.uploadDocPdf = async (entityType) => {
   const file = qs(`#doc-pdf-file-${entityType}`).files[0];

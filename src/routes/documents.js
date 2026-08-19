@@ -10,9 +10,13 @@ function resolveEntity(entityType, entityId, orgId) {
   if (entityType === 'applicant') {
     const a = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(entityId, orgId);
     if (!a) return null;
+    const shul = a.shul_id ? db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(a.shul_id) : null;
+    const season = a.season_id ? db.prepare('SELECT name FROM seasons WHERE id = ?').get(a.season_id) : null;
     return {
       contactEmail: a.email,
       displayName: `${a.first_name} ${a.last_name}`,
+      record: a,
+      extra: { shulName: shul?.name_en || '', seasonName: season?.name || '' },
       fieldLines: [
         `Applicant: ${a.first_name} ${a.last_name}`,
         `Address: ${[a.address, a.city, a.state, a.zip].filter(Boolean).join(', ')}`,
@@ -27,6 +31,8 @@ function resolveEntity(entityType, entityId, orgId) {
     return {
       contactEmail: s.owner_email || s.manager_email,
       displayName: s.name,
+      record: s,
+      extra: {},
       fieldLines: [
         `Store: ${s.name}`,
         `Address: ${[s.address, s.city, s.state, s.zip].filter(Boolean).join(', ')}`,
@@ -59,6 +65,7 @@ router.post('/generate', auth, requireAdmin, async (req, res) => {
   const pdfPath = await generateGenericDocumentPdf({
     entityType: entity_type, entityId: entity_id, title, fieldLines: entity.fieldLines,
     templateText: templateSetting?.value, orgName: org.name,
+    record: entity.record, extra: entity.extra, orgId: req.user.org_id,
   });
 
   const id = uuid();
