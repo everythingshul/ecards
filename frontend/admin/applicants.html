@@ -398,7 +398,7 @@ const APPLICANT_COMPARE_FIELDS = [
 
 async function showDuplicates() {
   try {
-    const { flags } = await api('/applicants/duplicates/open');
+    const { flags } = await api('/applicants/duplicates/open' + (state.season_id ? `?season_id=${state.season_id}` : ''));
     dupFlagsCache = flags;
     const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
         <strong>${esc(f.entity?.first_name)} ${esc(f.entity?.last_name)}</strong> may duplicate <strong>${esc(f.matched?.first_name)} ${esc(f.matched?.last_name)}</strong><br>
@@ -423,8 +423,14 @@ window.compareDup = (flagId) => {
 };
 window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
 
+// Deliberately no load() in this initial-resolution .then() (only in the
+// onChange callback above, fired later by an actual reorder) — the season
+// filter below hasn't set state.season_id yet at this point, so calling
+// load() here raced against populateSeasonFilter and could win, flashing
+// every season's applicants for a moment before the season-filtered load()
+// replaced it.
 attachColumnCustomizer('btn-columns', 'columns_applicants', APPLICANT_COLUMNS, DEFAULT_APPLICANT_COLUMNS, (order) => { activeColumns = order; renderThead(); load(); })
-  .then(order => { activeColumns = order; renderThead(); load(); });
+  .then(order => { activeColumns = order; renderThead(); });
 populateShulFilter('f-shul');
 populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
 attachLiveRefresh('live-banner', async () => {

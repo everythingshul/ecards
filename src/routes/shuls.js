@@ -795,9 +795,18 @@ router.post('/mass-unpause', requireAdmin, (req, res) => {
   res.json({ unpaused, skipped });
 });
 
-// Duplicate flags involving shuls
+// Duplicate flags involving shuls. season_id (optional) scopes this to
+// flags whose FLAGGED shul (entity_id) belongs to that season — matching
+// stays cross-season (checkShulDuplicate looks at every season on
+// purpose), so the matched-against shul can legitimately be from an older
+// season; this only filters out flags for a *different* season's shul
+// entirely, unrelated to whatever season the admin is currently working in.
 router.get('/duplicates/open', requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM duplicate_flags WHERE org_id = ? AND entity_type='shul' AND status='open' ORDER BY created_at DESC`).all(req.user.org_id);
+  const { season_id } = req.query;
+  const rows = season_id
+    ? db.prepare(`SELECT df.* FROM duplicate_flags df JOIN shuls s ON s.id = df.entity_id
+        WHERE df.org_id = ? AND df.entity_type='shul' AND df.status='open' AND s.season_id = ? ORDER BY df.created_at DESC`).all(req.user.org_id, season_id)
+    : db.prepare(`SELECT * FROM duplicate_flags WHERE org_id = ? AND entity_type='shul' AND status='open' ORDER BY created_at DESC`).all(req.user.org_id);
   const withEntities = rows.map(r => ({
     ...r,
     entity: db.prepare('SELECT * FROM shuls WHERE id = ?').get(r.entity_id),

@@ -805,8 +805,21 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
   res.json({ jobId, total: rows.length, success, updated, duplicates: dupes, errors });
 });
 
+// season_id (optional) scopes this to flags whose FLAGGED applicant
+// (entity_id) belongs to that season — matching is deliberately still
+// cross-season (see services/duplicates.js), so the record it matched
+// against can legitimately be from an older season; that's the whole point
+// of catching "this looks like last season's applicant again". What this
+// filters out is flags for a *different* season's applicant entirely,
+// which have nothing to do with whatever season the admin is currently
+// working in and were otherwise always mixed into this list regardless of
+// the season filter selected on the main list.
 router.get('/duplicates/open', requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM duplicate_flags WHERE org_id = ? AND entity_type='applicant' AND status='open' ORDER BY created_at DESC`).all(req.user.org_id);
+  const { season_id } = req.query;
+  const rows = season_id
+    ? db.prepare(`SELECT df.* FROM duplicate_flags df JOIN applicants a ON a.id = df.entity_id
+        WHERE df.org_id = ? AND df.entity_type='applicant' AND df.status='open' AND a.season_id = ? ORDER BY df.created_at DESC`).all(req.user.org_id, season_id)
+    : db.prepare(`SELECT * FROM duplicate_flags WHERE org_id = ? AND entity_type='applicant' AND status='open' ORDER BY created_at DESC`).all(req.user.org_id);
   const withEntities = rows.map(r => ({
     ...r,
     entity: db.prepare('SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id=a.shul_id WHERE a.id = ?').get(r.entity_id),

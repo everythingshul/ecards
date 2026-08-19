@@ -476,7 +476,7 @@ const SHUL_COMPARE_FIELDS = [
 
 async function showDuplicates() {
   try {
-    const { flags } = await api('/shuls/duplicates/open');
+    const { flags } = await api('/shuls/duplicates/open' + (state.season_id ? `?season_id=${state.season_id}` : ''));
     dupFlagsCache = flags;
     const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
         <strong>${esc(f.entity?.name_en)}</strong> (${fmtDate(f.entity?.created_at)}) may duplicate <strong>${esc(f.matched?.name_en)}</strong> (${fmtDate(f.matched?.created_at)})<br>
