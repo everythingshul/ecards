@@ -656,6 +656,23 @@ router.get('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
   }
 });
 
+// Diagnostic-only: PATCH external_id onto a customer known to exist
+// (?provider_id=74412) — tests whether external_id is settable via PATCH
+// even though it came back null after CREATE, i.e. whether it's read-only
+// on create specifically or unwritable everywhere.
+router.put('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const providerId = req.query.provider_id;
+  if (!providerId) return res.status(400).json({ error: 'provider_id query param is required' });
+  try {
+    const customer = await giftcard.updateCustomer(applicant.season_id, providerId, { externalId: applicant.external_id });
+    res.json({ customer });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });

@@ -280,13 +280,21 @@ export async function listAllTransactions(seasonId, { since }) {
 // side but one free-text `address` on ours — sent whole as `street` (with
 // house_number left unset) rather than guessing a split that would silently
 // mis-parse real addresses.
-function customerPayload({ firstName, lastName, groupName, homePhone, cell, email, phone2, address, city, state, zip, officeNotes, isActive, cardNumber, amount }) {
+function customerPayload({ firstName, lastName, groupName, homePhone, cell, email, phone2, address, city, state, zip, officeNotes, isActive, cardNumber, amount, externalId }) {
   const body = {
     first_name: firstName, last_name: lastName, group_name: groupName,
     home_phone: homePhone, cell, email, phone2,
     street: address, city, state, zip,
     office_notes: officeNotes, is_active: isActive,
     card_number: cardNumber, amount,
+    // Live-tested 2026-08-19: external_id came back null on a customer
+    // whose CREATE payload included it — every other field round-tripped
+    // fine, so it's specifically that field being dropped, not a payload
+    // problem in general. Included here too so a PATCH can be tried as a
+    // diagnostic (see GET .../provider-customer-by-id's PATCH sibling in
+    // routes/applicants.js) to tell "read-only on create" apart from
+    // "read-only everywhere".
+    external_id: externalId,
   };
   for (const k of Object.keys(body)) if (body[k] === undefined || body[k] === '') delete body[k];
   return body;
@@ -330,7 +338,7 @@ export async function getCustomerById(seasonId, customerId) {
 export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
-  return call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify({ external_id: externalId, ...customerPayload(opts) }) });
+  return call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify(customerPayload(opts)) });
 }
 
 // Their docs show PATCH at '/org/customers/{id}' with no trailing slash,
