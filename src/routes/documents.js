@@ -87,11 +87,15 @@ router.post('/store-agreement', auth, async (req, res) => {
   const storeId = req.user.store_id;
   const entity = resolveEntity('store', storeId, req.user.org_id);
   if (!entity) return res.status(404).json({ error: 'Store not found' });
-  // Reuse an existing not-yet-signed agreement instead of piling up a new
-  // document (and a new signing token) every time onboarding re-renders
-  // this step.
-  const existing = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'store' AND entity_id = ? AND status != 'signed' ORDER BY created_at DESC LIMIT 1`)
+  // A store that already signed — most commonly via the public apply-store
+  // form's inline sign step, before it ever had a portal login — should
+  // never be asked to sign again just because it's now walking the portal
+  // onboarding wizard. Reuse an existing not-yet-signed agreement instead of
+  // piling up a new document (and a new signing token) every time onboarding
+  // re-renders this step.
+  const existing = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'store' AND entity_id = ? ORDER BY created_at DESC LIMIT 1`)
     .get(req.user.org_id, storeId);
+  if (existing?.status === 'signed') return res.json({ document: existing, sign_token: existing.sign_token, alreadySigned: true });
   if (existing) return res.json({ document: existing, sign_token: existing.sign_token });
 
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);

@@ -120,7 +120,6 @@ router.get('/:id', (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'store' && store.id !== req.user.store_id) return res.status(403).json({ error: 'Not your store' });
-  const billing = db.prepare('SELECT * FROM store_billing WHERE store_id = ? ORDER BY period DESC').all(store.id);
   const transactionTotals = db.prepare(`SELECT COUNT(*) count, COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END),0) total_purchases,
     COALESCE(SUM(CASE WHEN type='refund' THEN amount ELSE 0 END),0) total_refunds
     FROM card_transactions WHERE store_id = ?`).get(store.id);
@@ -129,7 +128,7 @@ router.get('/:id', (req, res) => {
   // numbers a store shouldn't be able to reconstruct their transaction
   // history's shape from.
   if (req.user.role === 'store') { delete transactionTotals.count; delete transactionTotals.total_refunds; }
-  res.json({ store: redact(store, req.permission.hidden_fields), billing, transactionTotals });
+  res.json({ store: redact(store, req.permission.hidden_fields), transactionTotals });
 });
 
 // Stores are one persistent record reused every season (unlike shuls and
@@ -319,39 +318,11 @@ router.put('/:id/onboarding', (req, res) => {
   res.json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(store.id) });
 });
 
-// ---- Billing ----
-router.get('/:id/billing', (req, res) => {
-  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!store) return res.status(404).json({ error: 'Not found' });
-  if (req.user.role === 'store' && store.id !== req.user.store_id) return res.status(403).json({ error: 'Not your store' });
-  res.json({ billing: db.prepare('SELECT * FROM store_billing WHERE store_id = ? ORDER BY period DESC').all(store.id) });
-});
-
-router.post('/:id/billing', requireAdmin, (req, res) => {
-  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!store) return res.status(404).json({ error: 'Not found' });
-  const { period, amount_owed, notes } = req.body || {};
-  if (!period) return res.status(400).json({ error: 'period is required (e.g. "2026-08")' });
-  const id = uuid();
-  db.prepare(`INSERT INTO store_billing (id, store_id, period, amount_owed, notes, status) VALUES (?,?,?,?,?,'open')`)
-    .run(id, store.id, period, amount_owed || 0, notes || '');
-  res.status(201).json({ billing: db.prepare('SELECT * FROM store_billing WHERE id = ?').get(id) });
-});
-
-router.put('/billing/:billingId', requireAdmin, (req, res) => {
-  const row = db.prepare(`SELECT b.* FROM store_billing b JOIN stores s ON s.id=b.store_id WHERE b.id=? AND s.org_id=?`).get(req.params.billingId, req.user.org_id);
-  if (!row) return res.status(404).json({ error: 'Not found' });
-  const { amount_owed, amount_paid, status, invoice_ref, notes } = req.body || {};
-  db.prepare(`UPDATE store_billing SET amount_owed=COALESCE(?,amount_owed), amount_paid=COALESCE(?,amount_paid),
-    status=COALESCE(?,status), invoice_ref=COALESCE(?,invoice_ref), notes=COALESCE(?,notes) WHERE id=?`)
-    .run(amount_owed, amount_paid, status, invoice_ref, notes, row.id);
-  res.json({ billing: db.prepare('SELECT * FROM store_billing WHERE id = ?').get(row.id) });
-});
-
 // ===================== Bills a store submits TO the org =====================
-// The opposite direction from store_billing above — e.g. a store claiming
-// reimbursement for gift-card redemptions it's already honored. A store
-// portal login submits these; an admin reviews and marks them paid.
+// We never bill a store — a store bills us (e.g. reimbursement for
+// gift-card redemptions it's already honored). A store portal login
+// submits these; an admin can also log one on the store's behalf (email,
+// paper) via the same endpoint. An admin reviews and marks them paid.
 router.get('/:id/bill-submissions', (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });

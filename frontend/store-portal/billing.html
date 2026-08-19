@@ -13,25 +13,14 @@
 <script>
 Auth.requireRole('store');
 renderShell('/store-portal/billing', `
-  <h2>Billing</h2>
-  <p class="small-muted">Amounts owed to the program are below. To bill us back — for example, reimbursement for gift-card redemptions you've already honored — submit a bill.</p>
-  <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Period</th><th>Amount Owed</th><th>Amount Paid</th><th>Status</th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody></table>
-  </div>
-  <div class="flex-between" style="margin-top:28px"><h3 style="margin:0">Bills You've Submitted To Us</h3><button class="btn btn-primary btn-sm" id="btn-submit-bill">Submit a Bill</button></div>
+  <div class="flex-between"><h2 style="margin:0">Bills You've Submitted To Us</h2><button class="btn btn-primary btn-sm" id="btn-submit-bill">Submit a Bill</button></div>
+  <p class="small-muted">To bill us back — for example, reimbursement for gift-card redemptions you've already honored — submit a bill below.</p>
   <div class="card" style="padding:0;overflow-x:auto;margin-top:10px">
     <table><thead><tr><th>Submitted</th><th>Period</th><th>Amount</th><th>Description</th><th>Attachment</th><th>Status</th></tr></thead>
     <tbody id="tbody-submitted"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
 const u = Auth.user();
-(async () => {
-  try {
-    const { billing } = await api(`/stores/${u.store_id}/billing`);
-    qs('#tbody').innerHTML = billing.length ? billing.map(b => `<tr><td>${esc(b.period)}</td><td>${fmtMoney(b.amount_owed)}</td><td>${fmtMoney(b.amount_paid)}</td><td>${badge(b.status,b.status)}</td></tr>`).join('') : '<tr><td colspan="4" class="empty-state">No billing history yet.</td></tr>';
-  } catch (err) { toast(err.message, true); }
-})();
 
 async function loadSubmitted() {
   try {

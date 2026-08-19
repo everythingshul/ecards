@@ -99,7 +99,14 @@ function attachHandlers() {
     try {
       const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, info } });
       store = s;
-      const { sign_token, document: doc } = await api('/documents/store-agreement', { method: 'POST' });
+      const { sign_token, alreadySigned } = await api('/documents/store-agreement', { method: 'POST' });
+      if (alreadySigned) {
+        // Already signed — most likely at application time, before this
+        // store even had a portal login. Don't make them sign again.
+        const { store: s2 } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, agree_terms: true } });
+        store = s2; step = 3; render();
+        return;
+      }
       agreementToken = sign_token;
       const { fields } = await api(`/documents/sign/${sign_token}`);
       if (fields && fields.length) agreementFields = fields;

@@ -96,11 +96,11 @@ qs('#btn-mass-apply').addEventListener('click', async () => {
 
 async function openStore(id) {
   try {
-    const [{ store: s, billing, transactionTotals }, { bills: submittedBills }] = await Promise.all([
+    const [{ store: s, transactionTotals }, { bills: submittedBills }] = await Promise.all([
       api(`/stores/${id}`), api(`/stores/${id}/bill-submissions`),
     ]);
     const body = `
-      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${billing.length})</button><button data-t="documents">Documents</button></div>
+      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${submittedBills.length})</button><button data-t="documents">Documents</button></div>
       <div id="stab-info">
         <div class="grid-2">
           <div><label>Store Name</label><input id="e-name" value="${esc(s.name)}"></div>
@@ -131,21 +131,8 @@ async function openStore(id) {
         <p class="small-muted">Transactions: ${transactionTotals.count} · Purchases: ${fmtMoney(transactionTotals.total_purchases)} · Refunds: ${fmtMoney(transactionTotals.total_refunds)}</p>
       </div>
       <div id="stab-billing" style="display:none">
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-          <div><label style="margin-top:0">Period</label><input id="b-period" placeholder="2026-08" style="width:120px"></div>
-          <div><label style="margin-top:0">Amount Owed</label><input id="b-amount" type="number" step="0.01" style="width:120px"></div>
-          <button class="btn btn-sm btn-primary" onclick="addBilling('${id}')">Add Period</button>
-        </div>
-        <div style="margin-top:14px">${billing.length ? billing.map(b => `<div class="card" style="margin-bottom:10px">
-            <div class="flex-between"><strong>${esc(b.period)}</strong>${badge(b.status,b.status)}</div>
-            <p class="small-muted">Owed: ${fmtMoney(b.amount_owed)} · Paid: ${fmtMoney(b.amount_paid)}</p>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm btn-outline" onclick="markPaid('${b.id}', ${b.amount_owed})">Mark Paid</button>
-              <button class="btn btn-sm btn-outline" onclick="markInvoiced('${b.id}')">Mark Invoiced</button>
-            </div>
-          </div>`).join('') : '<p class="small-muted">No billing periods yet.</p>'}</div>
-        <div class="divider"></div>
-        <h4>Bills This Store Submitted</h4>
+        <div class="flex-between"><h4 style="margin:0">Bills This Store Submitted</h4><button class="btn btn-sm btn-outline" onclick="openLogBillModal('${id}')">Log a Bill They Sent Us</button></div>
+        <p class="small-muted">We don't bill stores — they bill us (e.g. reimbursement for gift-card redemptions). Bills submitted through their portal appear here; use "Log a Bill" to record one that came in by email or paper.</p>
         <div>${submittedBills.length ? submittedBills.map(b => `<div class="card" style="margin-bottom:10px">
             <div class="flex-between"><strong>${fmtMoney(b.amount)}</strong>${badge(b.status, b.status === 'paid' ? 'active' : (b.status === 'reviewed' ? 'pending' : 'submitted'))}</div>
             <p class="small-muted">${b.period ? `Period: ${esc(b.period)} · ` : ''}${esc(b.description||'')}</p>
@@ -182,15 +169,38 @@ window.deleteStore = async (id) => {
   if (!confirm('Permanently delete this store? This removes the store and its billing records completely and cannot be undone.')) return;
   try { await api(`/stores/${id}/permanent`, { method: 'DELETE' }); toast('Store deleted'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
-window.addBilling = async (id) => {
-  const period = qs('#b-period').value.trim(), amount_owed = +qs('#b-amount').value || 0;
-  if (!period) return toast('Enter a period', true);
-  try { await api(`/stores/${id}/billing`, { method: 'POST', body: { period, amount_owed } }); closeModal(); openStore(id); } catch (err) { toast(err.message, true); }
-};
-window.markPaid = async (billingId, amount) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { amount_paid: amount, status: 'paid' } }); toast('Marked paid'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
-window.markInvoiced = async (billingId) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { status: 'invoiced' } }); toast('Marked invoiced'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.markBillReviewed = async (storeId, billId) => { try { await api(`/stores/bill-submissions/${billId}`, { method: 'PUT', body: { status: 'reviewed' } }); toast('Marked reviewed'); closeModal(); openStore(storeId); } catch (err) { toast(err.message, true); } };
 window.markBillPaid = async (storeId, billId) => { try { await api(`/stores/bill-submissions/${billId}`, { method: 'PUT', body: { status: 'paid' } }); toast('Marked paid'); closeModal(); openStore(storeId); } catch (err) { toast(err.message, true); } };
+
+// Admin logging a bill that came in outside the store's own portal (email,
+// paper) — same store_bill_submissions row a store creates themselves via
+// POST /:id/bill-submissions, just entered on their behalf.
+window.openLogBillModal = (storeId) => {
+  closeModal();
+  const body = `
+    <label>Period <span class="small-muted">(e.g. "2026-08", optional)</span></label><input id="lb-period">
+    <label>Amount <span class="req">*</span></label><input id="lb-amount" type="number" step="0.01" min="0.01">
+    <label>Description</label><textarea id="lb-description" rows="3" placeholder="What this bill is for"></textarea>
+    <label>Attachment <span class="small-muted">(optional)</span></label><input id="lb-file" type="file" accept="image/*,application/pdf">
+  `;
+  openModal('Log a Bill They Sent Us', body, `<button class="btn btn-primary btn-sm" onclick="submitLoggedBill('${storeId}')">Save</button>`);
+};
+window.submitLoggedBill = async (storeId) => {
+  const amount = +qs('#lb-amount').value;
+  if (!amount || amount <= 0) return toast('Enter a valid amount', true);
+  const fd = new FormData();
+  fd.append('period', qs('#lb-period').value);
+  fd.append('amount', amount);
+  fd.append('description', qs('#lb-description').value);
+  const file = qs('#lb-file').files[0];
+  if (file) fd.append('file', file);
+  try {
+    await api(`/stores/${storeId}/bill-submissions`, { method: 'POST', isForm: true, body: fd });
+    toast('Bill logged');
+    closeModal();
+    openStore(storeId);
+  } catch (err) { toast(err.message, true); }
+};
 
 function openStoreForm() {
   const body = `<label>Store Name *</label><input id="n-name">
