@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { generateGenericDocumentPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
-import { sendMailChecked } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 
 const router = Router();
 
@@ -124,11 +124,10 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
     .run(token, expires, document.id);
 
   const signUrl = `${process.env.APP_URL || ''}/sign-document?token=${token}`;
-  const subject = `${document.title || 'Document'} ready to sign: ${entity.displayName}`;
-  const body = `<p>Shalom,</p><p>Please review and sign the following document: <strong>${document.title || 'Agreement'}</strong>.</p>
-    <p style="text-align:center;margin:28px 0;"><a href="${signUrl}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review & Sign</a></p>
-    <p>If the button doesn't work, copy this link: ${signUrl}</p>`;
-  const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body);
+  const { subject, body, replyTo } = renderSystemTemplate(req.user.org_id, 'documentReady', {
+    docTitle: document.title || 'Document', entityName: entity.displayName, signUrl,
+  });
+  const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body, { replyTo });
   if (emailError) console.error('[mail] document send failed:', emailError);
 
   res.json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id), emailError });

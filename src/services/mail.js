@@ -158,6 +158,13 @@ export const SYSTEM_EMAIL_TEMPLATES = {
     subject: 'Applicant approved: {{name}}',
     body: '<p><strong>{{name}}</strong> has been approved and a gift card will be issued.</p>',
   },
+  documentReady: {
+    label: 'Document Ready to Sign', vars: ['docTitle', 'entityName', 'signUrl'],
+    subject: '{{docTitle}} ready to sign: {{entityName}}',
+    body: `<p>Shalom,</p><p>Please review and sign the following document: <strong>{{docTitle}}</strong>.</p>
+      <p style="text-align:center;margin:28px 0;"><a href="{{signUrl}}" style="background:#c9a76a;color:#241a15;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Review &amp; Sign</a></p>
+      <p>If the button doesn't work, copy this link: {{signUrl}}</p>`,
+  },
   storeSetup: {
     label: 'Store Welcome', vars: ['storeName', 'portalUrl'],
     subject: 'Welcome, {{storeName}}',
