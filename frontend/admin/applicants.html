@@ -132,7 +132,15 @@ qs('#f-search').addEventListener('input', debounce(() => { state.search = qs('#f
 qs('#f-status').addEventListener('change', () => { state.status = qs('#f-status').value; state.page = 1; load(); });
 qs('#f-marital').addEventListener('change', () => { state.marital_status = qs('#f-marital').value; state.page = 1; load(); });
 qs('#f-shul').addEventListener('change', () => { state.shul_id = qs('#f-shul').value; state.page = 1; load(); });
-qs('#f-season').addEventListener('change', () => { state.season_id = qs('#f-season').value; state.page = 1; load(); });
+qs('#f-season').addEventListener('change', () => {
+  state.season_id = qs('#f-season').value; state.page = 1;
+  // The shul filter is scoped to the season (a shul is a fresh row every
+  // season) — a shul picked under the old season almost certainly isn't a
+  // valid id in the new one, so reset the filter along with the list rather
+  // than silently keep filtering by a shul_id that can never match anything.
+  state.shul_id = ''; populateShulFilter('f-shul', state.season_id);
+  load();
+});
 qs('#f-pagesize').value = state.pageSize;
 qs('#f-pagesize').addEventListener('change', () => { state.pageSize = +qs('#f-pagesize').value; state.page = 1; load(); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -342,7 +350,7 @@ function openApplicantForm() {
     <div class="checkbox-row"><input type="checkbox" id="n-bypass"><label style="margin:0">Bypass required fields for this submission</label></div>
   `;
   openModal('Add Applicant', body, `<button class="btn btn-primary btn-sm" onclick="createApplicant()">Create</button>`);
-  attachShulSelect('n-shul_id');
+  attachShulSelect('n-shul_id', '', state.season_id);
 }
 window.createApplicant = async () => {
   const body = {
@@ -431,8 +439,11 @@ window.resolveDup = async (id, action) => { try { await api(`/applicants/duplica
 // replaced it.
 attachColumnCustomizer('btn-columns', 'columns_applicants', APPLICANT_COLUMNS, DEFAULT_APPLICANT_COLUMNS, (order) => { activeColumns = order; renderThead(); load(); })
   .then(order => { activeColumns = order; renderThead(); });
-populateShulFilter('f-shul');
-populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; load(); });
+// Scoped to the resolved season, not called unscoped first — an unscoped
+// call would flash every shul from every past season into the list for a
+// moment before this one replaced it (same race shape #5 fixed for load()
+// above).
+populateSeasonFilter('f-season').then(activeId => { state.season_id = activeId; populateShulFilter('f-shul', activeId); load(); });
 attachLiveRefresh('live-banner', async () => {
   const params = new URLSearchParams({ search: state.search, status: state.status, marital_status: state.marital_status, shul_id: state.shul_id, season_id: state.season_id, pageSize: 1 });
   const { total } = await api('/applicants?' + params);

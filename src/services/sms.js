@@ -12,6 +12,26 @@
 // ---------------------------------------------------------------------------
 
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
+import { findAccountByPhone } from '../utils/contactLookup.js';
+
+// A shul/applicant is a fresh row every season, so a message tied to one of
+// those directly (meta.relatedEntityType/Id, set by whichever profile page
+// sent it) is scoped to THAT row's own season — exact, no ambiguity, since
+// the entity id already pins the specific season. Stores/staff users and
+// group/broadcast sends have no meaningful season and get null.
+function resolveSeasonId(orgId, meta, to) {
+  if (meta.relatedEntityType === 'shul' && meta.relatedEntityId) {
+    return db.prepare('SELECT season_id FROM shuls WHERE id = ?').get(meta.relatedEntityId)?.season_id || null;
+  }
+  if (meta.relatedEntityType === 'applicant' && meta.relatedEntityId) {
+    return db.prepare('SELECT season_id FROM applicants WHERE id = ?').get(meta.relatedEntityId)?.season_id || null;
+  }
+  if (meta.relatedEntityType === 'store' || meta.relatedEntityType === 'user') return null;
+  // No related entity given (inbound, or an outbound send with no known
+  // link) — fall back to the same phone-match the "Account" column uses,
+  // which already prefers the active season on ties (see contactLookup.js).
+  return findAccountByPhone(orgId, to)?.season_id || null;
+}
 
 const CONFIG = {
   apiBase: process.env.SMS_API_BASE || '',
@@ -67,9 +87,10 @@ export async function sendSmsChecked(orgId, to, body, meta = {}) {
     }
   }
   try {
-    db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, error_message, related_entity_type, related_entity_id, sent_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .run(uuid(), orgId || DEFAULT_ORG_ID, 'outbound', to, body, status, error, meta.relatedEntityType || null, meta.relatedEntityId || null, meta.sentBy || null);
+    const seasonId = resolveSeasonId(orgId || DEFAULT_ORG_ID, meta, to);
+    db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, error_message, related_entity_type, related_entity_id, season_id, sent_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(uuid(), orgId || DEFAULT_ORG_ID, 'outbound', to, body, status, error, meta.relatedEntityType || null, meta.relatedEntityId || null, seasonId, meta.sentBy || null);
   } catch (e) { console.error('[sms] failed to log sent message:', e.message); }
   return { emailError: error };
 }
@@ -78,8 +99,9 @@ export async function sendSmsChecked(orgId, to, body, meta = {}) {
 // payload shapes vary; the webhook route normalizes to {from, body} before
 // calling this.
 export function logInboundSms(orgId, from, body) {
-  db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status) VALUES (?,?,?,?,?,'received')`)
-    .run(uuid(), orgId || DEFAULT_ORG_ID, 'inbound', from, body);
+  const seasonId = findAccountByPhone(orgId || DEFAULT_ORG_ID, from)?.season_id || null;
+  db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, season_id) VALUES (?,?,?,?,?,'received',?)`)
+    .run(uuid(), orgId || DEFAULT_ORG_ID, 'inbound', from, body, seasonId);
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +158,7 @@ export async function syncInboundSms(orgId, ownNumber) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
 
   let imported = 0, skipped = 0, classified = 0;
-  const insert = db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, provider_message_id) VALUES (?,?,?,?,?,'received',?)`);
+  const insert = db.prepare(`INSERT INTO sms_messages (id, org_id, direction, phone, body, status, provider_message_id, season_id) VALUES (?,?,?,?,?,'received',?,?)`);
   const findByProviderId = db.prepare(`SELECT 1 FROM sms_messages WHERE org_id = ? AND provider_message_id = ?`);
   const findByPhoneBody = db.prepare(`SELECT 1 FROM sms_messages WHERE org_id = ? AND direction = 'inbound' AND phone = ? AND body = ? AND created_at > datetime('now', '-2 days')`);
 
@@ -153,7 +175,7 @@ export async function syncInboundSms(orgId, ownNumber) {
     } else if (findByPhoneBody.get(orgId, phone, body)) {
       continue;
     }
-    insert.run(uuid(), orgId, 'inbound', phone, body, providerId);
+    insert.run(uuid(), orgId, 'inbound', phone, body, providerId, findAccountByPhone(orgId, phone)?.season_id || null);
     imported++;
   }
   // Diagnostics for whichever failure mode is actually happening in

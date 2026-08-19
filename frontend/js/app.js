@@ -409,12 +409,19 @@ async function populateSeasonFilter(selectId) {
 // Same idea as populateSeasonFilter above, for a "filter by shul" dropdown —
 // unlike attachShulSelect (a single-select form field with a placeholder),
 // this always leads with an "All Shuls" option since it's a list filter.
-async function populateShulFilter(selectId) {
+// seasonId scopes the list to that season's shuls (a shul is a fresh row
+// every season) — pass it whenever the caller's own season filter has
+// resolved, otherwise every shul that ever existed shows up in one flat,
+// unscoped list. Re-callable: pass the same selectId again with a new
+// seasonId (e.g. on a season-filter change) to repopulate in place, keeping
+// whichever value is still valid in the new list selected.
+async function populateShulFilter(selectId, seasonId = '') {
   try {
-    const { shuls } = await api('/shuls/all-list');
+    const { shuls } = await api('/shuls/all-list' + (seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''));
     const el = qs('#' + selectId);
     if (!el) return;
-    el.innerHTML = `<option value="">All Shuls</option>` + shuls.map(s => `<option value="${s.id}">${esc(s.name_en)}</option>`).join('');
+    const current = el.value;
+    el.innerHTML = `<option value="">All Shuls</option>` + shuls.map(s => `<option value="${s.id}" ${s.id === current ? 'selected' : ''}>${esc(s.name_en)}</option>`).join('');
   } catch { /* leave the dropdown with just "All Shuls" if the list fails to load */ }
 }
 

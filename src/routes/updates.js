@@ -5,6 +5,7 @@ import { writeFileSync } from 'fs';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { sendMailChecked } from '../services/mail.js';
+import { getActiveSeasonId } from '../utils/formSchedule.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
@@ -16,7 +17,17 @@ router.use(auth);
 // a deduped [{entity_type, entity_id, label, email}] array. Locked system
 // shuls (e.g. Ezras Habayis) are never valid recipients — same reasoning as
 // the Ezras Habayis shul being excluded from the shul picker.
-function resolveRecipients(orgId, { recipients = [], groups = [] }) {
+//
+// seasonId scopes the 'all_shuls' group only — a shul is a fresh row every
+// season, so "All Shuls" used to mean every shul that ever existed across
+// every season, blasting a current announcement at shuls from seasons long
+// closed. Individually hand-picked shul recipients are never re-filtered by
+// season here — the compose UI's own checklist is what's season-scoped (see
+// updates.html), so an explicit pick is trusted as intentional. Stores
+// aren't scoped at all: a store is one persistent record reused every
+// season, not a fresh per-season row (see routes/stores.js's
+// /:id/season-history), so "All Stores" has no seasons to filter between.
+function resolveRecipients(orgId, { recipients = [], groups = [] }, seasonId) {
   const out = new Map();
   for (const r of recipients) {
     if (r.entity_type === 'shul') {
@@ -28,7 +39,9 @@ function resolveRecipients(orgId, { recipients = [], groups = [] }) {
     }
   }
   if (groups.includes('all_shuls')) {
-    for (const s of db.prepare('SELECT id, name_en, gabai_email FROM shuls WHERE org_id = ? AND is_locked = 0').all(orgId)) {
+    const clause = seasonId ? ' AND season_id = ?' : '';
+    const params = seasonId ? [orgId, seasonId] : [orgId];
+    for (const s of db.prepare(`SELECT id, name_en, gabai_email FROM shuls WHERE org_id = ? AND is_locked = 0${clause}`).all(...params)) {
       out.set(`shul:${s.id}`, { entity_type: 'shul', entity_id: s.id, label: s.name_en, email: s.gabai_email });
     }
   }
@@ -62,7 +75,11 @@ router.post('/', requireAdmin, upload.array('files', 10), async (req, res) => {
   if (!title || !body) return res.status(400).json({ error: 'Title and body are required' });
   let recipientSpec;
   try { recipientSpec = JSON.parse(req.body.recipients || '{}'); } catch { return res.status(400).json({ error: 'Invalid recipients payload' }); }
-  const targets = resolveRecipients(req.user.org_id, recipientSpec);
+  // Defaults to the org's active season if the composer didn't send one —
+  // "All Shuls" should never silently mean "every shul ever," even from an
+  // older client build that hasn't sent season_id yet.
+  const seasonId = recipientSpec.season_id || getActiveSeasonId(req.user.org_id);
+  const targets = resolveRecipients(req.user.org_id, recipientSpec, seasonId);
   if (!targets.length) return res.status(400).json({ error: 'No valid recipients selected' });
 
   const id = uuid();

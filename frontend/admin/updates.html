@@ -52,23 +52,40 @@ window.viewUpdate = async (id) => {
   } catch (err) { toast(err.message, true); }
 };
 
-let shulsCache = [], storesCache = [];
+let shulsCache = [], storesCache = [], seasonsCache = [];
+// Shuls are scoped to whichever season is picked (default: active) — a shul
+// is a fresh row every season, so an unscoped list mixes in every shul from
+// every past season too, and "All Shuls" would otherwise blast a current
+// announcement at shuls from seasons long closed (see routes/updates.js's
+// resolveRecipients). Stores aren't scoped: a store is one persistent
+// record reused every season, not a fresh per-season row.
+async function loadShulsForSeason(seasonId) {
+  const { shuls } = await api('/shuls/all-list' + (seasonId ? `?season_id=${seasonId}` : ''));
+  shulsCache = shuls;
+  qs('#up-shuls-list').innerHTML = shulsCache.map(s => `<label class="checkbox-row"><input type="checkbox" class="up-shul" value="${s.id}">${esc(s.name_en)}</label>`).join('') || '<span class="small-muted">No shuls in this season.</span>';
+  qs('#up-all-shuls').checked = false;
+}
 qs('#btn-compose').addEventListener('click', async () => {
+  let activeSeasonId = '';
   try {
-    const [{ shuls }, { stores }] = await Promise.all([api('/shuls?pageSize=500'), api('/stores')]);
-    shulsCache = shuls; storesCache = stores;
+    const [{ seasons }, { season: active }, { stores }] = await Promise.all([api('/seasons'), api('/seasons/active'), api('/stores')]);
+    seasonsCache = seasons; storesCache = stores; activeSeasonId = active?.id || '';
   } catch { /* recipient lists just won't populate */ }
   const body = `
     <label>Title <span class="req">*</span></label><input id="up-title">
     <label>Message <span class="req">*</span></label><textarea id="up-body" rows="6"></textarea>
     <label>Attachments <span class="small-muted">(images or PDFs, optional)</span></label><input id="up-files" type="file" multiple accept="image/*,application/pdf">
     <div class="divider"></div>
-    <label class="checkbox-row"><input type="checkbox" id="up-all-shuls"><strong>All Shuls</strong></label>
-    <div id="up-shuls-list" style="max-height:140px;overflow-y:auto;margin:8px 0">${shulsCache.map(s => `<label class="checkbox-row"><input type="checkbox" class="up-shul" value="${s.id}">${esc(s.name_en)}</label>`).join('') || '<span class="small-muted">No shuls yet.</span>'}</div>
+    <label>Shuls Season <span class="small-muted">(which season's shuls to choose from / "All Shuls" means)</span></label>
+    <select id="up-season">${seasonsCache.map(s => `<option value="${s.id}" ${s.id === activeSeasonId ? 'selected' : ''}>${esc(s.name)}${s.id === activeSeasonId ? ' (active)' : ''}</option>`).join('')}</select>
+    <label class="checkbox-row"><input type="checkbox" id="up-all-shuls"><strong>All Shuls</strong> (in the season above)</label>
+    <div id="up-shuls-list" style="max-height:140px;overflow-y:auto;margin:8px 0"><span class="small-muted">Loading…</span></div>
     <label class="checkbox-row"><input type="checkbox" id="up-all-stores"><strong>All Stores</strong></label>
     <div id="up-stores-list" style="max-height:140px;overflow-y:auto;margin:8px 0">${storesCache.map(s => `<label class="checkbox-row"><input type="checkbox" class="up-store" value="${s.id}">${esc(s.name)}</label>`).join('') || '<span class="small-muted">No stores yet.</span>'}</div>
   `;
   openModal('Send Update', body, `<button class="btn btn-primary btn-sm" onclick="sendUpdate()">Send</button>`);
+  loadShulsForSeason(activeSeasonId);
+  qs('#up-season').addEventListener('change', (e) => loadShulsForSeason(e.target.value));
   qs('#up-all-shuls').addEventListener('change', (e) => qsa('.up-shul').forEach(c => c.checked = e.target.checked));
   qs('#up-all-stores').addEventListener('change', (e) => qsa('.up-store').forEach(c => c.checked = e.target.checked));
 });
@@ -90,7 +107,7 @@ window.sendUpdate = async () => {
   const fd = new FormData();
   fd.append('title', title);
   fd.append('body', bodyText);
-  fd.append('recipients', JSON.stringify({ recipients, groups }));
+  fd.append('recipients', JSON.stringify({ recipients, groups, season_id: qs('#up-season')?.value || '' }));
   const files = qs('#up-files').files;
   for (const f of files) fd.append('files', f);
 

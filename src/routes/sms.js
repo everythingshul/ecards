@@ -4,6 +4,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms, getOwnSmsNumber } from '../services/sms.js';
 import { sendXlsx } from '../services/xlsx.js';
 import { findAccountByPhone } from '../utils/contactLookup.js';
+import { getActiveSeasonId } from '../utils/formSchedule.js';
 
 const router = Router();
 
@@ -73,13 +74,19 @@ router.post('/inbox/sync', async (req, res) => {
 });
 
 // ============================= Message log =============================
+// season_id filters to that season's shul/applicant-linked messages PLUS
+// every message with no season (store/staff/unmatched/group-broadcast) —
+// a season filter narrowing the list shouldn't also make store or
+// unattributable messages vanish, since those were never "in" any season
+// to begin with (see services/sms.js's resolveSeasonId).
 router.get('/', (req, res) => {
-  const { search, status, direction, page = 1, pageSize = 50 } = req.query;
+  const { search, status, direction, season_id, page = 1, pageSize = 50 } = req.query;
   let where = 'WHERE org_id = ?';
   const params = [req.user.org_id];
   if (status) { where += ' AND status = ?'; params.push(status); }
   if (direction) { where += ' AND direction = ?'; params.push(direction); }
   if (search) { where += ' AND (phone LIKE ? OR body LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  if (season_id) { where += ' AND (season_id = ? OR season_id IS NULL)'; params.push(season_id); }
   const total = db.prepare(`SELECT COUNT(*) c FROM sms_messages ${where}`).get(...params).c;
   const offset = (Math.max(1, +page) - 1) * +pageSize;
   const rows = db.prepare(`SELECT * FROM sms_messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
@@ -88,8 +95,12 @@ router.get('/', (req, res) => {
 });
 
 router.get('/export', (req, res) => {
+  const { season_id } = req.query;
+  let where = 'WHERE org_id = ?';
+  const params = [req.user.org_id];
+  if (season_id) { where += ' AND (season_id = ? OR season_id IS NULL)'; params.push(season_id); }
   const rows = db.prepare(`SELECT direction, phone, body, status, error_message, related_entity_type, related_entity_id, created_at
-    FROM sms_messages WHERE org_id = ? ORDER BY created_at DESC`).all(req.user.org_id);
+    FROM sms_messages ${where} ORDER BY created_at DESC`).all(...params);
   const withAccount = rows.map(r => {
     const account = findAccountByPhone(req.user.org_id, r.phone);
     return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
@@ -158,16 +169,24 @@ router.get('/groups/:group', (req, res) => {
 // `variables` for single sends (groups don't get per-recipient variables —
 // send the same message to everyone).
 router.post('/send', async (req, res) => {
-  const { to, group, body, variables } = req.body || {};
+  const { to, group, body, variables, season_id } = req.body || {};
   if (!body) return res.status(400).json({ error: 'body is required' });
   const substitute = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, key) => (variables && variables[key] != null ? variables[key] : m));
 
   if (group) {
     let recipients = [];
     const orgId = req.user.org_id;
-    if (group === 'shuls') recipients = db.prepare(`SELECT gabai_cell AS phone FROM shuls WHERE org_id = ? AND gabai_cell IS NOT NULL AND gabai_cell != ''`).all(orgId);
+    // Shuls/applicants get a fresh row every season — an unscoped "All
+    // Shuls"/"All Applicants" blast used to text literally every one of
+    // those rows ever created, including shuls that never renewed and
+    // applicants from seasons long over. Scoped to the given season,
+    // defaulting to the org's active one. Stores/staff aren't scoped: a
+    // store is one persistent record reused every season, and staff aren't
+    // seasonal at all.
+    const seasonId = season_id || getActiveSeasonId(orgId);
+    if (group === 'shuls') recipients = db.prepare(`SELECT gabai_cell AS phone FROM shuls WHERE org_id = ? AND gabai_cell IS NOT NULL AND gabai_cell != '' AND season_id = ?`).all(orgId, seasonId);
     else if (group === 'stores') recipients = db.prepare(`SELECT COALESCE(NULLIF(manager_phone,''), owner_phone) AS phone FROM stores WHERE org_id = ?`).all(orgId);
-    else if (group === 'applicants') recipients = db.prepare(`SELECT COALESCE(NULLIF(husband_cell,''), NULLIF(wife_cell,''), home_phone) AS phone FROM applicants WHERE org_id = ?`).all(orgId);
+    else if (group === 'applicants') recipients = db.prepare(`SELECT COALESCE(NULLIF(husband_cell,''), NULLIF(wife_cell,''), home_phone) AS phone FROM applicants WHERE org_id = ? AND season_id = ?`).all(orgId, seasonId);
     else if (group === 'staff') recipients = db.prepare(`SELECT phone FROM users WHERE org_id = ? AND role IN ('super_admin','org_admin','staff') AND is_active = 1 AND phone IS NOT NULL AND phone != ''`).all(orgId);
     else return res.status(400).json({ error: 'Invalid group' });
     const phones = [...new Set(recipients.map(r => r.phone).filter(Boolean))];

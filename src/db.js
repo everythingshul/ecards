@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS sms_messages (
   error_message TEXT,
   related_entity_type TEXT,
   related_entity_id TEXT,
+  season_id TEXT REFERENCES seasons(id), -- resolved from the related/matched shul or applicant; NULL for store/staff/unmatched messages (see services/sms.js)
   sent_by TEXT REFERENCES users(id), -- null for inbound or automatic sends
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -592,6 +593,7 @@ safeAlter(`ALTER TABLE forms ADD COLUMN season_id TEXT REFERENCES seasons(id)`);
 // syncInboundSms) — this is how re-polling the same messages is recognized
 // as already-imported instead of creating duplicate rows every sweep.
 safeAlter(`ALTER TABLE sms_messages ADD COLUMN provider_message_id TEXT`);
+safeAlter(`ALTER TABLE sms_messages ADD COLUMN season_id TEXT REFERENCES seasons(id)`);
 // Per-template Reply-To override — falls back to the org-wide default
 // (settings key email_reply_to) when null, and to no Reply-To header at all
 // when neither is set. See services/mail.js renderSystemTemplate().
