@@ -55,9 +55,12 @@ api(`/shuls/${Auth.user().shul_id}`).then(({ shul, missingInfo }) => {
   }
   if (!shul.slots_allocated) return;
   const used = shul.applicants.filter(a => !['rejected', 'incomplete'].includes(a.approval_status)).length;
+  const approved = shul.applicants.filter(a => a.approval_status === 'approved').length;
+  const pending = shul.applicants.filter(a => a.approval_status === 'pending').length;
   const full = used >= shul.slots_allocated;
   qs('#slots-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${full ? 'border-color:var(--danger)' : ''}">
-    <strong>Slots:</strong> ${used} of ${shul.slots_allocated} used (${Math.max(0, shul.slots_allocated - used)} remaining)
+    <strong>Slots:</strong> ${used} of ${shul.slots_allocated} used (${Math.max(0, shul.slots_allocated - used)} available)
+    &mdash; ${approved} approved, ${pending} pending review
     ${full ? ' <strong style="color:var(--danger)">All allocated slots are used.</strong>' : ''}
   </div>`;
 }).catch(() => {});
