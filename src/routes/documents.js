@@ -6,7 +6,7 @@ import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 
 const router = Router();
 
-function resolveEntity(entityType, entityId, orgId) {
+export function resolveEntity(entityType, entityId, orgId) {
   if (entityType === 'applicant') {
     const a = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(entityId, orgId);
     if (!a) return null;

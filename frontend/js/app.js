@@ -1121,6 +1121,13 @@ async function renderPdfSigningPages(pdfUrl, fields, containerId) {
     pageWrap.appendChild(canvas);
     container.appendChild(pageWrap);
 
+    // CSS-pixel size of the rendered page, independent of devicePixelRatio,
+    // so field font-size can be computed from the box's actual on-screen
+    // size rather than a fixed guess — a field the admin configured small
+    // (or squeezed into a tight spot on the source PDF) gets a smaller font
+    // instead of overflowing/looking condensed.
+    const pageHeightCss = targetWidth * unscaledViewport.height / unscaledViewport.width;
+
     // Same page-index convention as stampSignatureFields() (services/pdf.js):
     // an out-of-range/omitted `page` means "the last page".
     const pageIndex = i - 1;
@@ -1140,10 +1147,20 @@ async function renderPdfSigningPages(pdfUrl, fields, containerId) {
       if (f.type === 'signature' || f.type === 'initial') {
         overlay.innerHTML = `<canvas id="sig-${f.id}" class="sign-field-canvas" style="width:100%;height:100%;background:rgba(255,247,225,.65);border:1.5px dashed var(--brand-gold-dark);border-radius:4px;cursor:crosshair"></canvas>
           <div style="position:absolute;top:2px;left:4px;font-size:10px;color:var(--brand-gold-dark);pointer-events:none;font-weight:600">${esc(f.label || (f.type === 'signature' ? 'Signature' : 'Initial'))}${f.required !== false ? ' *' : ''}</div>`;
-      } else if (f.type === 'date') {
-        overlay.innerHTML = `<input type="date" class="sign-field-text" data-fid="${f.id}" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;height:100%;box-sizing:border-box;font-size:14px;border:1.5px solid var(--brand-gold-dark);border-radius:4px;padding:2px 4px">`;
       } else {
-        overlay.innerHTML = `<input type="text" class="sign-field-text" data-fid="${f.id}" placeholder="${esc(f.label || 'Text')}${f.required !== false ? ' *' : ''}" style="width:100%;height:100%;box-sizing:border-box;font-size:14px;border:1.5px solid var(--brand-gold-dark);border-radius:4px;padding:2px 4px">`;
+        // Font-size scales down for small boxes (floor 8px so it never goes
+        // illegible), and padding is cut to the minimum needed to keep the
+        // border from touching the glyphs — both give a cramped field more
+        // usable width for the same text instead of clipping/scrolling it.
+        const boxHeightPx = h * pageHeightCss;
+        const boxWidthPx = w * targetWidth;
+        const fontSize = Math.max(8, Math.min(14, boxHeightPx * 0.55, boxWidthPx / 7));
+        const fieldStyle = `width:100%;height:100%;box-sizing:border-box;font-size:${fontSize.toFixed(1)}px;border:1.5px solid var(--brand-gold-dark);border-radius:4px;padding:0 2px`;
+        if (f.type === 'date') {
+          overlay.innerHTML = `<input type="date" class="sign-field-text" data-fid="${f.id}" value="${new Date().toISOString().slice(0, 10)}" style="${fieldStyle}">`;
+        } else {
+          overlay.innerHTML = `<input type="text" class="sign-field-text" data-fid="${f.id}" placeholder="${esc(f.label || 'Text')}${f.required !== false ? ' *' : ''}" style="${fieldStyle}">`;
+        }
       }
       pageWrap.appendChild(overlay);
     }

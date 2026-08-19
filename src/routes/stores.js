@@ -12,6 +12,8 @@ import { validateBySchema } from '../utils/formValidation.js';
 import { STORE_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
+import { generateGenericDocumentPdf } from '../services/pdf.js';
+import { resolveEntity } from './documents.js';
 
 const router = Router();
 const billUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -39,6 +41,37 @@ router.post('/apply', (req, res) => {
       b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email, samePerson ? 1 : 0,
       b.comments || '', b.has_provider_account ? 1 : 0);
   res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
+});
+
+// Public: immediately generate the store's participation agreement right
+// after application submission, so it can be signed in the same sitting —
+// same "fill out a form, then esign right here" flow as shuls (see
+// shuls.js POST /:id/generate-contract), just backed by the generic
+// documents system instead of a dedicated contracts table. Idempotent per
+// store. Signing itself goes through documents.js's public token endpoints
+// (GET/POST /documents/sign/:token...) since a store's agreement is just
+// another entity_type='store' document.
+router.post('/:id/generate-contract', async (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.params.id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  const existing = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'store' AND entity_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .get(store.org_id, store.id);
+  if (existing) return res.json({ sign_token: existing.status === 'signed' ? null : existing.sign_token, alreadySigned: existing.status === 'signed' });
+
+  const entity = resolveEntity('store', store.id, store.org_id);
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(store.org_id);
+  const templateSetting = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'document_template_text_store'`).get(store.org_id);
+  const pdfPath = await generateGenericDocumentPdf({
+    entityType: 'store', entityId: store.id, title: 'Store Participation Agreement', fieldLines: entity.fieldLines,
+    templateText: templateSetting?.value, orgName: org?.name,
+    record: entity.record, extra: entity.extra, orgId: store.org_id,
+  });
+  const id = uuid();
+  const token = uuid();
+  const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  db.prepare(`INSERT INTO documents (id, org_id, entity_type, entity_id, title, pdf_path, status, sign_token, sign_token_expires, sent_at)
+    VALUES (?,?,'store',?,?,?,'sent',?,?,datetime('now'))`).run(id, store.org_id, store.id, 'Store Participation Agreement', pdfPath, token, expires);
+  res.json({ sign_token: token, alreadySigned: false });
 });
 
 router.use(auth, requirePermission('stores'));
