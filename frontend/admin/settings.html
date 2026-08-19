@@ -217,6 +217,16 @@ renderShell('/admin/settings', `
       <p class="small-muted">A full snapshot of the database is taken automatically every few hours (kept on this server's disk). "Run Backup" takes one immediately; "Download Backup Now" takes one and downloads it straight to your computer — the only copy that's off this server, so do this periodically and keep it somewhere safe.</p>
       <div id="backups-list" style="margin-top:14px">Loading…</div>
     </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Full Data Export / Migration</h3>
+      <p class="small-muted">The backups above are the database only. This exports <strong>everything</strong> on this server — the database plus every uploaded file (signed contracts, signatures, logos, store bills, form images, update attachments) — as one archive. Use it to move to a different Render account: download it here, then upload it on the new (empty) service's own Settings &gt; Backups page.</p>
+      <div class="pill-row">
+        <button class="btn btn-sm btn-primary" onclick="downloadFullExport()">Download Full Export</button>
+        <button class="btn btn-sm btn-outline" onclick="qs('#migration-import-file').click()">Restore From Full Export…</button>
+        <input type="file" id="migration-import-file" accept=".tar.gz,.gz" style="display:none" onchange="uploadFullImport(this)">
+      </div>
+      <p class="small-muted" style="margin-top:10px">Restore only works on a service that has no shuls/applicants yet — it refuses to overwrite a live instance. The service restarts automatically once the restore finishes; give it about a minute, then log back in.</p>
+    </div>
   </div>` : ''}
 `);
 
@@ -634,6 +644,19 @@ window.runBackupNow = async () => {
   try { await api('/settings/backups/run', { method: 'POST' }); toast('Backup created'); loadBackups(); } catch (err) { toast(err.message, true); }
 };
 window.downloadBackupNow = () => downloadAuthed('/settings/backups/download-now', `ecards-backup-${Date.now()}.sqlite`);
+window.downloadFullExport = () => downloadAuthed('/migration/export', `kipas-hair-bp-full-data-${Date.now()}.tar.gz`);
+window.uploadFullImport = async (input) => {
+  const file = input.files[0];
+  if (!file) return;
+  if (!confirm(`Restore "${file.name}" onto THIS server? This only works if this service has no shuls/applicants yet, and will restart the app once done.`)) { input.value = ''; return; }
+  const fd = new FormData();
+  fd.append('archive', file);
+  try {
+    const r = await api('/migration/import', { method: 'POST', isForm: true, body: fd });
+    toast(r.message, false);
+  } catch (err) { toast(err.message, true); }
+  input.value = '';
+};
 
 loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
