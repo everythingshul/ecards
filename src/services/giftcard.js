@@ -335,10 +335,28 @@ export async function getCustomerById(seasonId, customerId) {
   return call(seasonId, `/org/customers/${customerId}/`);
 }
 
+// Live-tested 2026-08-19: disccardpromos silently drops external_id from
+// the CREATE payload (every other field — name, phone, email, address,
+// group — round-trips fine, only this one comes back null) but DOES accept
+// it via PATCH on the same customer right after. Their create serializer
+// evidently treats it as read-only while their update serializer doesn't —
+// an inconsistency on their end, not ours, but the practical fix is the
+// same regardless of why: follow every create with a PATCH that sets it,
+// so every caller of this function gets a customer whose external_id
+// actually stuck without needing to know about the quirk.
 export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
-  return call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify(customerPayload(opts)) });
+  const created = await call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify(customerPayload(opts)) });
+  if (created?.id && externalId) {
+    try {
+      return await updateCustomer(seasonId, created.id, { externalId });
+    } catch (e) {
+      console.error(`[giftcard] customer ${created.id} created but the external_id=${externalId} follow-up PATCH failed:`, e.message);
+      return created;
+    }
+  }
+  return created;
 }
 
 // Their docs show PATCH at '/org/customers/{id}' with no trailing slash,
