@@ -18,12 +18,12 @@ export const SHUL_APPLICATION_SCHEMA = [
   { key: 'city', label: 'City', type: 'text', required: true }, { key: 'state', label: 'State', type: 'text', required: true }, { key: 'zip', label: 'Zip', type: 'text', required: true },
   { key: 'ruv_first_name', label: 'Rav First Name', type: 'text', required: true }, { key: 'ruv_last_name', label: 'Rav Last Name', type: 'text', required: true },
   { key: 'ruv_phone', label: 'Rav Phone Number', type: 'tel', required: true },
-  { key: 'ruv_address', label: 'Rav Address', type: 'text', required: false }, { key: 'ruv_city', label: 'Rav City', type: 'text', required: false },
-  { key: 'ruv_state', label: 'Rav State', type: 'text', required: false }, { key: 'ruv_zip', label: 'Rav Zip', type: 'text', required: false },
+  { key: 'ruv_address', label: 'Rav Address', type: 'text', required: true }, { key: 'ruv_city', label: 'Rav City', type: 'text', required: true },
+  { key: 'ruv_state', label: 'Rav State', type: 'text', required: true }, { key: 'ruv_zip', label: 'Rav Zip', type: 'text', required: true },
   { key: 'gabai_first_name', label: 'Gabai First Name', type: 'text', required: true }, { key: 'gabai_last_name', label: 'Gabai Last Name', type: 'text', required: true },
   { key: 'gabai_cell', label: 'Gabai Cell Number', type: 'tel', required: true }, { key: 'gabai_email', label: 'Gabai Email', type: 'email', required: true },
-  { key: 'gabai_address', label: 'Gabai Address', type: 'text', required: false }, { key: 'gabai_city', label: 'Gabai City', type: 'text', required: false },
-  { key: 'gabai_state', label: 'Gabai State', type: 'text', required: false }, { key: 'gabai_zip', label: 'Gabai Zip', type: 'text', required: false },
+  { key: 'gabai_address', label: 'Gabai Address', type: 'text', required: true }, { key: 'gabai_city', label: 'Gabai City', type: 'text', required: true },
+  { key: 'gabai_state', label: 'Gabai State', type: 'text', required: true }, { key: 'gabai_zip', label: 'Gabai Zip', type: 'text', required: true },
 ];
 export const STORE_APPLICATION_SCHEMA = [
   { key: 'name', label: 'Store Name', type: 'text', required: true },
