@@ -379,6 +379,49 @@ router.post('/:id/complete-reenrollment', requirePermission('applicants', 'can_e
   res.json({ applicant: maskForShul(db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), req.user.role, req.user.org_id) });
 });
 
+// Bulk version of the above: re-enrolls every one of a shul's carried-over
+// 'incomplete' applicants whose already-known data (from being carried
+// forward) already satisfies every required field on the application — no
+// per-applicant review needed since nothing is missing on that one. Anyone
+// still missing something is left alone rather than partially submitted, so
+// the shul still goes through the normal one-at-a-time completion flow for
+// those specific applicants. Same ownership, shul-info-complete (#147), and
+// allocated-slots gates as the single-applicant route above — re-checked
+// per applicant since completing one changes how many slots are left for
+// the next.
+router.post('/mass-complete-reenrollment', requirePermission('applicants', 'can_edit'), (req, res) => {
+  const shulId = req.user.role === 'shul' ? req.user.shul_id : req.body?.shul_id;
+  if (!shulId) return res.status(400).json({ error: 'shul_id is required' });
+  const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(shulId, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Shul not found' });
+  if (req.user.role === 'shul' && shul.id !== req.user.shul_id) return res.status(403).json({ error: 'Not your shul' });
+  if (req.user.role === 'shul') {
+    const shulErrors = shulInfoErrors(shul);
+    if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before re-enrolling applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+  }
+
+  const candidates = db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND approval_status = 'incomplete'`).all(shulId);
+  let completed = 0, skippedIncomplete = 0, skippedSlotsFull = 0;
+  const affectedIds = [], names = [];
+  for (const applicant of candidates) {
+    if (shul.slots_allocated) {
+      const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(shulId).c;
+      if (used >= shul.slots_allocated) { skippedSlotsFull++; continue; }
+    }
+    const errors = validateBySchema(APPLICANT_APPLICATION_SCHEMA, applicant, { isAdmin: false });
+    if (errors.length) { skippedIncomplete++; continue; }
+    const initialStatus = isZipAllowed(req.user.org_id, applicant.zip) ? 'pending' : 'rejected';
+    db.prepare(`UPDATE applicants SET approval_status=?, updated_at=datetime('now') WHERE id=?`).run(initialStatus, applicant.id);
+    const updated = db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id);
+    detectAndFlag(req.user.org_id, 'applicant', updated);
+    affectedIds.push(applicant.id); names.push(`${applicant.first_name} ${applicant.last_name}`);
+    completed++;
+  }
+  logMassAudit(req.user.org_id, req.user.id, 'mass-complete-reenrollment', 'applicant', affectedIds,
+    { skippedIncomplete, skippedSlotsFull, shul_id: shulId, names }, req.ip);
+  res.json({ completed, skippedIncomplete, skippedSlotsFull });
+});
+
 // Manually move an applicant back to 'pending' — for un-rejecting one after
 // a decision was made too early/in error, or un-approving one to reconsider
 // (approved_by/approved_at/card_amount are left as-is so there's a record of

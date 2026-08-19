@@ -68,7 +68,11 @@ async function load() {
     const { applicants, total } = await api('/applicants?' + params);
     const needsReenrollment = applicants.filter(a => a.approval_status === 'incomplete');
     qs('#reenroll-banner').innerHTML = needsReenrollment.length
-      ? `<div class="card" style="margin-bottom:16px;border-color:var(--danger)"><strong>${needsReenrollment.length}</strong> carried-over applicant(s) need re-enrollment — click one below to review and complete their information for this season.</div>`
+      ? `<div class="card" style="margin-bottom:16px;border-color:var(--danger)">
+          <strong>${needsReenrollment.length}</strong> carried-over applicant(s) need re-enrollment — click one below to review and complete their information for this season.
+          <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="massReenroll()">Re-enroll All Complete</button>
+          <span class="small-muted" style="display:block;margin-top:4px">Only re-enrolls the ones with nothing missing — anyone still needing info stays in the list below.</span>
+        </div>`
       : '';
     qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer${a.approval_status==='incomplete'?';background:rgba(183,28,28,.06)':''}">
         <td><code>${esc(a.external_id||'')}</code></td>
@@ -135,6 +139,21 @@ window.submitReenrollment = async (id) => {
     await api(`/applicants/${id}/complete-reenrollment`, { method: 'POST', body });
     toast('Re-enrollment submitted');
     closeModal(); load();
+  } catch (err) { toast(err.message, true); }
+};
+// Server decides per applicant whether their carried-over data already
+// satisfies every required field — this just fires the request and reports
+// what happened; nobody's info is guessed at or partially filled in here.
+window.massReenroll = async () => {
+  try {
+    const r = await api('/applicants/mass-complete-reenrollment', { method: 'POST' });
+    let msg = `Re-enrolled ${r.completed}`;
+    const notes = [];
+    if (r.skippedIncomplete) notes.push(`${r.skippedIncomplete} still missing information`);
+    if (r.skippedSlotsFull) notes.push(`${r.skippedSlotsFull} skipped — all slots used`);
+    if (notes.length) msg += ` (${notes.join(', ')})`;
+    toast(msg, !r.completed && (r.skippedIncomplete || r.skippedSlotsFull));
+    load();
   } catch (err) { toast(err.message, true); }
 };
 async function openApplicant(id) {
