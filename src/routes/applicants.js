@@ -655,24 +655,6 @@ router.get('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
   }
 });
 
-// Temporary cleanup-only: delete a disccardpromos customer directly by
-// their numeric provider id — used once to remove the test customers
-// created while diagnosing the assign-card/external_id bugs. Remove this
-// route once cleanup is done; it's not meant to be a permanent admin tool
-// (deleting a live customer record has real consequences).
-router.delete('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
-  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!applicant) return res.status(404).json({ error: 'Not found' });
-  const providerId = req.query.provider_id;
-  if (!providerId) return res.status(400).json({ error: 'provider_id query param is required' });
-  try {
-    const result = await giftcard.deleteCustomer(applicant.season_id, providerId);
-    res.json({ result });
-  } catch (e) {
-    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
-  }
-});
-
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
