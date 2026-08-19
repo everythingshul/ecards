@@ -51,6 +51,16 @@ import { db } from '../db.js';
 // which many API gateways 404 on.
 function stripTrailingSlash(url) { return (url || '').replace(/\/+$/, ''); }
 
+// Defense-in-depth against already-stored corrupted ids: provider_account_id
+// is a TEXT column that got a plain JS number bound into it before the fix
+// above existed (upsertAccountForApproval now always stores a clean
+// String()), so any customer id already saved for an applicant approved
+// earlier is "74421.0" rather than "74421" — which 404s when used to build
+// a URL. Every function below that takes a raw customerId strips a
+// trailing ".0" so those existing rows keep working without a data
+// migration, not just newly-approved ones.
+function normalizeCustomerId(id) { return String(id).replace(/\.0$/, ''); }
+
 const globalConfig = {
   apiBase: stripTrailingSlash(process.env.DISCCARDPROMOS_API_BASE || ''),
   apiKey: process.env.DISCCARDPROMOS_API_KEY || '',
@@ -332,7 +342,7 @@ export async function findCustomerByExternalId(seasonId, externalId) {
 // the way we assumed."
 export async function getCustomerById(seasonId, customerId) {
   if (isMockMode(seasonId)) return null;
-  return call(seasonId, `/org/customers/${customerId}/`);
+  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`);
 }
 
 // Live-tested 2026-08-19: disccardpromos silently drops external_id from
@@ -348,19 +358,14 @@ export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
   const created = await call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify(customerPayload(opts)) });
-  console.log(`[giftcard] createCustomer POST returned id=${created?.id ?? '(none)'} for externalId=${externalId}`);
   if (created?.id && externalId) {
     try {
-      const patched = await updateCustomer(seasonId, created.id, { externalId });
-      console.log(`[giftcard] createCustomer follow-up PATCH for id=${created.id} returned external_id=${patched?.external_id ?? '(none)'}`);
-      return patched;
+      return await updateCustomer(seasonId, created.id, { externalId });
     } catch (e) {
       console.error(`[giftcard] customer ${created.id} created but the external_id=${externalId} follow-up PATCH failed (status ${e.status}):`, e.message);
-      created._patchError = e.message;
       return created;
     }
   }
-  console.log(`[giftcard] createCustomer skipped follow-up PATCH — created?.id=${created?.id} externalId=${externalId}`);
   return created;
 }
 
@@ -376,12 +381,12 @@ export async function createCustomer(seasonId, opts) {
 // wrong the next occurrence will say so directly instead of a bare 404.
 export async function updateCustomer(seasonId, customerId, opts) {
   if (isMockMode(seasonId)) return { id: customerId, ...customerPayload(opts) };
-  return call(seasonId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
+  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
 }
 
 export async function deleteCustomer(seasonId, customerId) {
   if (isMockMode(seasonId)) return { ok: true };
-  return call(seasonId, `/org/customers/${customerId}/`, { method: 'DELETE' });
+  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`, { method: 'DELETE' });
 }
 
 // Full customer record including active_cards (masked numbers) and packages
@@ -413,7 +418,7 @@ export async function getCustomerByExternalId(seasonId, externalId, { balances =
 // number an admin has in hand (e.g. from a batch of physical cards).
 export async function linkCardToCustomer(seasonId, customerId, cardNumber) {
   if (isMockMode(seasonId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
-  return call(seasonId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
+  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
 }
 
 // Idempotent upsert used at applicant-approval time: an existing customer
@@ -431,12 +436,16 @@ export async function upsertAccountForApproval(seasonId, opts) {
   const existing = await findCustomerByExternalId(seasonId, externalId);
   if (existing) {
     const updated = await updateCustomer(seasonId, existing.id, opts);
-    return { created: false, accountId: updated.id ?? existing.id, _debugExistingId: existing.id, _debugExternalIdAfter: updated.external_id };
+    // Live-tested 2026-08-19: accountId gets stored into applicants.
+    // provider_account_id (a TEXT column) via a plain positional bind — a
+    // JS number bound directly into a TEXT-affinity column comes back out
+    // as "74421.0" (better-sqlite3/SQLite formats it as REAL, not INTEGER,
+    // even for whole numbers), and that corrupted value then 404s when
+    // later used to build a card-assign PATCH URL like
+    // /org/customers/74421.0/. Forcing a clean string here, at the one
+    // place accountId is produced, fixes every caller at once.
+    return { created: false, accountId: String(updated.id ?? existing.id) };
   }
   const created = await createCustomer(seasonId, opts);
-  // _debug* fields are temporary — investigating why external_id sometimes
-  // doesn't stick when this runs via the real approve route despite working
-  // in isolated testing. Harmless to leave on the return value; callers
-  // that don't look for them are unaffected.
-  return { created: true, accountId: created.id, _debugExternalIdAfter: created.external_id, _debugPatchError: created._patchError };
+  return { created: true, accountId: String(created.id) };
 }

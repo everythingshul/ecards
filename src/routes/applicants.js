@@ -577,7 +577,6 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     // same "external side-effect can fail without failing the action" pattern
     // as the approval email right above.
     let providerAccountError = null;
-    let _debugProviderResult = null;
     if (applicant.shul_id && !applicant.provider_exempt) {
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
@@ -587,7 +586,6 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
           homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
-        _debugProviderResult = result;
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
         await unlockApplicantCustomer(applicant.season_id, result.accountId);
       } catch (e) {
@@ -617,7 +615,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
         }
       }
     }
-    res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError, _debugProviderResult });
+    res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
   } finally {
     approvalsInFlight.delete(applicant.external_id);
   }
@@ -653,62 +651,6 @@ router.get('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
   try {
     const customer = await giftcard.getCustomerById(applicant.season_id, providerId);
     res.json({ customer });
-  } catch (e) {
-    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
-  }
-});
-
-// Diagnostic-only: PATCH external_id onto a customer known to exist
-// (?provider_id=74412) — tests whether external_id is settable via PATCH
-// even though it came back null after CREATE, i.e. whether it's read-only
-// on create specifically or unwritable everywhere.
-router.put('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
-  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!applicant) return res.status(404).json({ error: 'Not found' });
-  const providerId = req.query.provider_id;
-  if (!providerId) return res.status(400).json({ error: 'provider_id query param is required' });
-  try {
-    const customer = await giftcard.updateCustomer(applicant.season_id, providerId, { externalId: applicant.external_id });
-    res.json({ customer });
-  } catch (e) {
-    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
-  }
-});
-
-// Diagnostic-only: call createCustomer() directly, isolated from
-// upsertAccountForApproval/the approve route entirely, to see exactly what
-// it returns (including the create->PATCH follow-up) without the rest of
-// the approval flow in the way.
-router.post('/:id/provider-test-create', requireAdmin, async (req, res) => {
-  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!applicant) return res.status(404).json({ error: 'Not found' });
-  try {
-    const result = await giftcard.createCustomer(applicant.season_id, {
-      externalId: `dbg${Date.now().toString().slice(-6)}`, firstName: 'Diag', lastName: 'Test', groupName: 'Test Shul',
-    });
-    res.json({ result });
-  } catch (e) {
-    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
-  }
-});
-
-// Diagnostic-only: call upsertAccountForApproval() directly — the actual
-// function the real approve route uses — with a fresh unique externalId
-// (not the applicant's real one, so this never collides with real data),
-// to see whether the divergence from provider-test-create is in
-// createCustomer itself or in the existing-lookup/branching around it.
-router.post('/:id/provider-test-upsert', requireAdmin, async (req, res) => {
-  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
-  if (!applicant) return res.status(404).json({ error: 'Not found' });
-  const externalId = `dbg${Date.now().toString().slice(-6)}`;
-  try {
-    const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
-      externalId, firstName: applicant.first_name, lastName: applicant.last_name,
-      groupName: 'Test Shul', homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
-      email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
-    });
-    const customer = result.accountId ? await giftcard.getCustomerById(applicant.season_id, result.accountId) : null;
-    res.json({ externalId, result, customer });
   } catch (e) {
     res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
   }
