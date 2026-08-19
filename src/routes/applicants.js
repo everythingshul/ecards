@@ -690,6 +690,28 @@ router.post('/:id/provider-test-create', requireAdmin, async (req, res) => {
   }
 });
 
+// Diagnostic-only: call upsertAccountForApproval() directly — the actual
+// function the real approve route uses — with a fresh unique externalId
+// (not the applicant's real one, so this never collides with real data),
+// to see whether the divergence from provider-test-create is in
+// createCustomer itself or in the existing-lookup/branching around it.
+router.post('/:id/provider-test-upsert', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  const externalId = `dbg${Date.now().toString().slice(-6)}`;
+  try {
+    const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
+      externalId, firstName: applicant.first_name, lastName: applicant.last_name,
+      groupName: 'Test Shul', homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
+      email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
+    });
+    const customer = result.accountId ? await giftcard.getCustomerById(applicant.season_id, result.accountId) : null;
+    res.json({ externalId, result, customer });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: e.status, rawText: e.rawText });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
