@@ -26,7 +26,11 @@ router.get('/', (req, res) => {
   const rows = db.prepare(`SELECT c.*, a.first_name, a.last_name, a.email, s.name_en as shul_name
     FROM cards c LEFT JOIN applicants a ON a.id=c.applicant_id LEFT JOIN shuls s ON s.id=a.shul_id
     ${where} ORDER BY c.created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
-  res.json({ cards: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize, mockMode: giftcard.isMockMode(req.user.org_id) });
+  // mockMode here is a UI badge, not action-critical — a list spanning
+  // multiple seasons with different overrides has no single true answer, so
+  // report the filtered season's status if one's selected, else the
+  // org-wide default every season without its own override actually uses.
+  res.json({ cards: redact(rows, req.permission.hidden_fields), total, page: +page, pageSize: +pageSize, mockMode: giftcard.isMockMode(season_id || null) });
 });
 
 // Full-detail CSV export — every field, no pagination. Must be registered before /:id.
@@ -103,7 +107,7 @@ router.post('/assign', requireAdmin, async (req, res) => {
   const finalAmount = applicant.card_amount ?? 0;
   let result;
   try {
-    result = await giftcard.linkCardToCustomer(req.user.org_id, applicant.provider_account_id, card_number);
+    result = await giftcard.linkCardToCustomer(applicant.season_id, applicant.provider_account_id, card_number);
   } catch (e) {
     console.error('[cards] assign failed:', e.message);
     return res.status(502).json({ error: `disccardpromos rejected the card assignment: ${e.message}` });
@@ -134,7 +138,7 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
   if (!phone) return res.status(400).json({ error: 'Activation phone number is required' });
   let result;
   try {
-    result = await giftcard.activateCard(req.user.org_id, { providerCardId: card.provider_card_id, phone });
+    result = await giftcard.activateCard(card.season_id, { providerCardId: card.provider_card_id, phone });
   } catch (e) {
     console.error('[cards] activate failed:', e.message);
     return res.status(502).json({ error: `disccardpromos rejected the activation: ${e.message}` });
@@ -149,7 +153,7 @@ router.post('/:id/deactivate', requireAdmin, async (req, res) => {
   if (!card) return res.status(404).json({ error: 'Not found' });
   let result;
   try {
-    result = await giftcard.deactivateCard(req.user.org_id, { providerCardId: card.provider_card_id, reason: req.body?.reason });
+    result = await giftcard.deactivateCard(card.season_id, { providerCardId: card.provider_card_id, reason: req.body?.reason });
   } catch (e) {
     console.error('[cards] deactivate failed:', e.message);
     return res.status(502).json({ error: `disccardpromos rejected the deactivation: ${e.message}` });
@@ -163,7 +167,7 @@ router.post('/:id/sync', requireAdmin, async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   const synced = await syncOneCard(req.user.org_id, card);
-  res.json({ synced, mockMode: giftcard.isMockMode(req.user.org_id) });
+  res.json({ synced, mockMode: giftcard.isMockMode(card.season_id) });
 });
 
 // Sweep every assigned/activated card at once — also runs automatically on a
@@ -171,7 +175,10 @@ router.post('/:id/sync', requireAdmin, async (req, res) => {
 // anyone needing to click in.
 router.post('/sync-all', requireAdmin, async (req, res) => {
   const result = await syncAllCards(req.user.org_id);
-  res.json({ ...result, mockMode: giftcard.isMockMode(req.user.org_id) });
+  // Sweeps every season's cards at once (syncAllCards resolves each card's
+  // own season internally) — mockMode here is just the org-wide default for
+  // the summary badge, not a per-card truth.
+  res.json({ ...result, mockMode: giftcard.isMockMode(null) });
 });
 
 router.get('/:id/transactions', (req, res) => {

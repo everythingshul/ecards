@@ -657,6 +657,14 @@ safeAlter(`ALTER TABLE shuls ADD COLUMN permanent_comments TEXT`);
 // action is re-run for the same shul/season pair.
 safeAlter(`ALTER TABLE applicants ADD COLUMN carried_from_applicant_id TEXT REFERENCES applicants(id)`);
 
+// Per-season disccardpromos credentials (see services/giftcard.js) — for
+// now, each season can hold its own API base/key, entered on the season's
+// edit form. Empty on a season falls back to the org-wide
+// DISCCARDPROMOS_API_BASE/KEY env vars, so existing seasons keep working
+// unchanged until someone deliberately sets an override.
+safeAlter(`ALTER TABLE seasons ADD COLUMN disccardpromos_api_base TEXT`);
+safeAlter(`ALTER TABLE seasons ADD COLUMN disccardpromos_api_key TEXT`);
+
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
 // re-running it on already-normalized numbers is a no-op — so it's safe to

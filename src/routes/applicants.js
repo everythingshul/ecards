@@ -580,14 +580,14 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     if (applicant.shul_id && !applicant.provider_exempt) {
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-        const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
+        const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
           externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
           groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
           homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
-        await unlockApplicantCustomer(req.user.org_id, result.accountId);
+        await unlockApplicantCustomer(applicant.season_id, result.accountId);
       } catch (e) {
         providerAccountError = e.message;
         console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
@@ -608,7 +608,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
         providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
       } else {
         try {
-          await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount });
+          await giftcard.addFunds(applicant.season_id, { externalId: applicant.external_id, discountId, amount });
         } catch (e) {
           providerFundsError = e.message;
           console.error('[giftcard] failed to load funds on approval:', e.message);
@@ -631,8 +631,8 @@ router.get('/:id/provider-customer', requireAdmin, async (req, res) => {
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (!applicant.external_id) return res.status(400).json({ error: 'This applicant has no external_id yet' });
   try {
-    const customer = await giftcard.getCustomerByExternalId(req.user.org_id, applicant.external_id, { balances: true });
-    res.json({ customer, mockMode: giftcard.isMockMode(req.user.org_id) });
+    const customer = await giftcard.getCustomerByExternalId(applicant.season_id, applicant.external_id, { balances: true });
+    res.json({ customer, mockMode: giftcard.isMockMode(applicant.season_id) });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
@@ -691,21 +691,21 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
       let accountOk = false;
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-        const result = await giftcard.upsertAccountForApproval(req.user.org_id, {
+        const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
           externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
           groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
           homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
-        await unlockApplicantCustomer(req.user.org_id, result.accountId);
+        await unlockApplicantCustomer(applicant.season_id, result.accountId);
         accountOk = true;
       } catch (e) {
         providerErrors++;
         console.error('[giftcard] failed to write disccardpromos account on mass-approve:', e.message);
       }
       if (accountOk && amount > 0 && discountId) {
-        try { await giftcard.addFunds(req.user.org_id, { externalId: applicant.external_id, discountId, amount }); }
+        try { await giftcard.addFunds(applicant.season_id, { externalId: applicant.external_id, discountId, amount }); }
         catch (e) { providerErrors++; console.error('[giftcard] failed to load funds on mass-approve:', e.message); }
       } else if (accountOk && amount > 0 && !discountId) {
         providerErrors++;

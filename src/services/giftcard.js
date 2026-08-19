@@ -1,14 +1,15 @@
 // ---------------------------------------------------------------------------
-// disccardpromos.com gift card provider — single-org platform, single
-// disccardpromos account for the whole system. Set DISCCARDPROMOS_API_BASE /
-// DISCCARDPROMOS_API_KEY to go live; MOCK MODE (simulated card ids,
-// activation, empty transaction feed) until both are set.
+// disccardpromos.com gift card provider. Credentials are per-season for now
+// (each season can hold its own DISCCARDPROMOS_API_BASE/KEY, entered on the
+// season's edit form) — a season with no override falls back to the
+// org-wide DISCCARDPROMOS_API_BASE/DISCCARDPROMOS_API_KEY env vars. MOCK
+// MODE (simulated card ids, activation, empty transaction feed) applies
+// whenever neither is set for the resolved season.
 //
-// (This app previously supported a per-org disccardpromos account per
-// organization; that was reverted along with per-org email — the whole
-// platform now runs as one organization, one merchant account. Function
-// signatures still take an unused orgId first argument to avoid touching
-// every call site in routes/cards.js.)
+// (Every exported function's first argument is seasonId, not orgId — this
+// app is single-org, so orgId was never actually load-bearing for config
+// resolution; it's kept as the first argument shape so call sites didn't
+// need restructuring, just the value they pass.)
 //
 // This module is the only place in the app that talks to disccardpromos.com —
 // if the real API contract differs once confirmed (or they add an endpoint we
@@ -42,39 +43,67 @@
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
+import { db } from '../db.js';
 
-const CONFIG = {
-  // Every call below does `${apiBase}${path}` with a path that already
-  // starts with '/' (e.g. '/org/customers/') — a trailing slash on the
-  // configured base (a very easy copy-paste mistake, e.g.
-  // 'https://api.disccardpromos.com/') would silently double it up into
-  // '...com//org/customers/', which many API gateways 404 on. Stripped here
-  // once so every caller is safe regardless of how the env var was entered.
-  apiBase: (process.env.DISCCARDPROMOS_API_BASE || '').replace(/\/+$/, ''),
+// Strips a trailing slash on a base URL (a very easy copy-paste mistake,
+// e.g. 'https://api.disccardpromos.com/') so `${apiBase}${path}` (path
+// already starts with '/') never silently doubles up into '...com//org/...',
+// which many API gateways 404 on.
+function stripTrailingSlash(url) { return (url || '').replace(/\/+$/, ''); }
+
+const globalConfig = {
+  apiBase: stripTrailingSlash(process.env.DISCCARDPROMOS_API_BASE || ''),
   apiKey: process.env.DISCCARDPROMOS_API_KEY || '',
 };
 
-export function isMockMode() {
-  return !CONFIG.apiBase || !CONFIG.apiKey;
+// A season's own override wins only when BOTH fields are set — a
+// half-configured override (base without key, or vice versa) falls back to
+// the org-wide default rather than silently mock-mode-ing just that one
+// season, which would be a confusing, hard-to-spot state.
+function resolveConfig(seasonId) {
+  if (seasonId) {
+    const season = db.prepare('SELECT disccardpromos_api_base, disccardpromos_api_key FROM seasons WHERE id = ?').get(seasonId);
+    if (season?.disccardpromos_api_base && season?.disccardpromos_api_key) {
+      return { apiBase: stripTrailingSlash(season.disccardpromos_api_base), apiKey: season.disccardpromos_api_key };
+    }
+  }
+  return globalConfig;
+}
+
+export function isMockMode(seasonId) {
+  const cfg = resolveConfig(seasonId);
+  return !cfg.apiBase || !cfg.apiKey;
 }
 
 // Loud, unmissable startup log — every mock-mode function below returns a
 // fake success silently (no error, no thrown exception), so a half-set
-// config (e.g. the API key deployed but not the base URL, or vice versa)
-// otherwise looks identical to a fully-working live integration: approvals
-// "succeed", accounts "get created", funds "get added" — nothing on
-// disccardpromos' side ever actually happens, and there is no other signal
-// that anything is wrong. This runs once at process start so it's the first
-// thing visible in the deploy's server logs.
-if (isMockMode()) {
-  const missing = [!CONFIG.apiBase && 'DISCCARDPROMOS_API_BASE', !CONFIG.apiKey && 'DISCCARDPROMOS_API_KEY'].filter(Boolean);
-  console.warn(`[giftcard] MOCK MODE — disccardpromos calls are simulated, nothing is sent to the real API. Missing env var(s): ${missing.join(', ')}.`);
-} else {
-  console.log(`[giftcard] disccardpromos LIVE mode — base ${CONFIG.apiBase}`);
+// config otherwise looks identical to a fully-working live integration:
+// approvals "succeed", accounts "get created", funds "get added" — nothing
+// on disccardpromos' side ever actually happens, and there is no other
+// signal that anything is wrong. Runs once at process start, per season
+// (each can have its own override) plus the org-wide default they fall back
+// to, so it's the first thing visible in the deploy's server logs.
+function logStartupStatus() {
+  console.log(`[giftcard] org-wide default: ${isMockMode(null) ? 'MOCK MODE' : `LIVE (base ${globalConfig.apiBase})`}${isMockMode(null) ? ` — missing ${[!globalConfig.apiBase && 'DISCCARDPROMOS_API_BASE', !globalConfig.apiKey && 'DISCCARDPROMOS_API_KEY'].filter(Boolean).join(', ')}` : ''}`);
+  try {
+    const seasons = db.prepare('SELECT id, name, disccardpromos_api_base, disccardpromos_api_key FROM seasons').all();
+    for (const s of seasons) {
+      const hasBase = !!s.disccardpromos_api_base, hasKey = !!s.disccardpromos_api_key;
+      if (!hasBase && !hasKey) continue; // no override — inherits the org-wide default logged above
+      if (hasBase !== hasKey) {
+        console.warn(`[giftcard] season "${s.name}" has a PARTIAL disccardpromos override (${hasBase ? 'base set, key missing' : 'key set, base missing'}) — falling back to the org-wide default instead.`);
+      } else {
+        console.log(`[giftcard] season "${s.name}": LIVE override (base ${stripTrailingSlash(s.disccardpromos_api_base)})`);
+      }
+    }
+  } catch (e) {
+    console.warn('[giftcard] could not read per-season overrides at startup:', e.message);
+  }
 }
+logStartupStatus();
 
-async function call(orgId, path, opts = {}) {
-  const cfg = CONFIG;
+async function call(seasonId, path, opts = {}) {
+  const cfg = resolveConfig(seasonId);
   if (!cfg.apiBase || !cfg.apiKey) throw new Error('disccardpromos not configured (running in mock mode; this should not be reached)');
   const res = await fetch(`${cfg.apiBase}${path}`, {
     ...opts,
@@ -111,25 +140,25 @@ async function call(orgId, path, opts = {}) {
 // provider response (docs show a balance figure keyed off cardNum) so
 // callers can pick the field they need rather than this module guessing at
 // a normalized shape.
-export async function getCardBalance(orgId, { cardNum }) {
-  if (isMockMode(orgId)) return { balance: null, mock: true };
-  return call(orgId, `/v1/balances/?cardNum=${encodeURIComponent(cardNum)}`);
+export async function getCardBalance(seasonId, { cardNum }) {
+  if (isMockMode(seasonId)) return { balance: null, mock: true };
+  return call(seasonId, `/v1/balances/?cardNum=${encodeURIComponent(cardNum)}`);
 }
 
 // What a store's own register/card-reader calls at checkout to deduct from a
 // card's balance — this app doesn't run a POS, so nothing currently calls
 // this, but it's exposed as a correct, confirmed function in case a future
 // store-portal manual-charge feature needs it.
-export async function chargeCard(orgId, { cardNum, amount }) {
-  if (isMockMode(orgId)) return { success: true, mock: true };
-  return call(orgId, '/v1/charge/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
+export async function chargeCard(seasonId, { cardNum, amount }) {
+  if (isMockMode(seasonId)) return { success: true, mock: true };
+  return call(seasonId, '/v1/charge/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
 }
 
 // Store-side reversal of a charge — same "not called anywhere yet" caveat as
 // chargeCard above.
-export async function refundCard(orgId, { cardNum, amount }) {
-  if (isMockMode(orgId)) return { success: true, mock: true };
-  return call(orgId, '/v1/refund/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
+export async function refundCard(seasonId, { cardNum, amount }) {
+  if (isMockMode(seasonId)) return { success: true, mock: true };
+  return call(seasonId, '/v1/refund/', { method: 'POST', body: JSON.stringify({ cardNum, amount }) });
 }
 
 // Credits amount onto a customer's balance against one of their `packages`
@@ -139,9 +168,9 @@ export async function refundCard(orgId, { cardNum, amount }) {
 // mapping was explicitly ruled out; there's one org-wide Package/Discount ID
 // (Settings > Organization > Gift Card Loading, settings key
 // disccardpromos_discount_id) used for every approval regardless of season.
-export async function addFunds(orgId, { externalId, discountId, amount }) {
-  if (isMockMode(orgId)) return { success: true, mock: true };
-  return call(orgId, '/v1/add-funds/', { method: 'POST', body: JSON.stringify({
+export async function addFunds(seasonId, { externalId, discountId, amount }) {
+  if (isMockMode(seasonId)) return { success: true, mock: true };
+  return call(seasonId, '/v1/add-funds/', { method: 'POST', body: JSON.stringify({
     external_id: externalId, discount_id: discountId, amount,
   }) });
 }
@@ -157,50 +186,50 @@ export async function addFunds(orgId, { externalId, discountId, amount }) {
 // applicant's 4-digit external_id (see utils/externalId.js) — disccardpromos
 // uses this as its own external reference for the card, in place of our
 // internal UUID. Returns { providerCardId, maskedNumber }.
-export async function assignCard(orgId, { applicantId, externalId, amount }) {
-  if (isMockMode(orgId)) {
+export async function assignCard(seasonId, { applicantId, externalId, amount }) {
+  if (isMockMode(seasonId)) {
     const last4 = String(Math.floor(1000 + Math.random() * 9000));
     return { providerCardId: `mock_${randomUUID()}`, maskedNumber: `**** **** **** ${last4}`, amount };
   }
-  const body = await call(orgId, '/cards/assign', { method: 'POST', body: JSON.stringify({ external_ref: externalId || applicantId, amount }) });
+  const body = await call(seasonId, '/cards/assign', { method: 'POST', body: JSON.stringify({ external_ref: externalId || applicantId, amount }) });
   return { providerCardId: body.card_id, maskedNumber: body.masked_number, amount: body.amount ?? amount };
 }
 
 // Activate a card by the phone number the recipient provides — this is what
 // "writes" the card onto their account per the spec. Returns { activatedAt }.
-export async function activateCard(orgId, { providerCardId, phone }) {
-  if (isMockMode(orgId)) return { activatedAt: new Date().toISOString() };
-  const body = await call(orgId, `/cards/${providerCardId}/activate`, { method: 'POST', body: JSON.stringify({ phone }) });
+export async function activateCard(seasonId, { providerCardId, phone }) {
+  if (isMockMode(seasonId)) return { activatedAt: new Date().toISOString() };
+  const body = await call(seasonId, `/cards/${providerCardId}/activate`, { method: 'POST', body: JSON.stringify({ phone }) });
   return { activatedAt: body.activated_at || new Date().toISOString() };
 }
 
-export async function deactivateCard(orgId, { providerCardId, reason }) {
-  if (isMockMode(orgId)) return { deactivatedAt: new Date().toISOString() };
-  const body = await call(orgId, `/cards/${providerCardId}/deactivate`, { method: 'POST', body: JSON.stringify({ reason }) });
+export async function deactivateCard(seasonId, { providerCardId, reason }) {
+  if (isMockMode(seasonId)) return { deactivatedAt: new Date().toISOString() };
+  const body = await call(seasonId, `/cards/${providerCardId}/deactivate`, { method: 'POST', body: JSON.stringify({ reason }) });
   return { deactivatedAt: body.deactivated_at || new Date().toISOString() };
 }
 
 // Returns { balance, activatedAt, status }
-export async function getCardStatus(orgId, { providerCardId }) {
-  if (isMockMode(orgId)) return { balance: null, activatedAt: null, status: 'unknown (mock mode)' };
-  return call(orgId, `/cards/${providerCardId}`);
+export async function getCardStatus(seasonId, { providerCardId }) {
+  if (isMockMode(seasonId)) return { balance: null, activatedAt: null, status: 'unknown (mock mode)' };
+  return call(seasonId, `/cards/${providerCardId}`);
 }
 
 // Returns an array of raw transactions: { id, type, amount, store_name, occurred_at, ... }
-export async function listTransactions(orgId, { providerCardId, since }) {
-  if (isMockMode(orgId)) return [];
+export async function listTransactions(seasonId, { providerCardId, since }) {
+  if (isMockMode(seasonId)) return [];
   const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-  const body = await call(orgId, `/cards/${providerCardId}/transactions${qs}`);
+  const body = await call(seasonId, `/cards/${providerCardId}/transactions${qs}`);
   return body.transactions || body.data || [];
 }
 
 // Pull transactions across ALL cards since a timestamp, if the provider supports
 // a bulk feed (cheaper than per-card polling). Falls back to null so the caller
 // knows to loop per-card instead.
-export async function listAllTransactions(orgId, { since }) {
-  if (isMockMode(orgId)) return null;
+export async function listAllTransactions(seasonId, { since }) {
+  if (isMockMode(seasonId)) return null;
   try {
-    const body = await call(orgId, `/transactions?since=${encodeURIComponent(since || '')}`);
+    const body = await call(seasonId, `/transactions?since=${encodeURIComponent(since || '')}`);
     return body.transactions || body.data || null;
   } catch {
     return null; // endpoint may not exist — caller falls back to per-card polling
@@ -256,10 +285,10 @@ function customerPayload({ firstName, lastName, groupName, homePhone, cell, emai
 // Looks up an existing disccardpromos customer by OUR applicant's
 // external_id. Returns null if not found (a 404 from the provider) or in
 // mock mode.
-export async function findCustomerByExternalId(orgId, externalId) {
-  if (isMockMode(orgId)) return null;
+export async function findCustomerByExternalId(seasonId, externalId) {
+  if (isMockMode(seasonId)) return null;
   try {
-    const result = await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/`);
+    const result = await call(seasonId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/`);
     // Diagnostic for the "re-approving creates a duplicate customer instead
     // of updating" report: if this fires and shows found=false/no id on an
     // applicant that's been approved before, the by-external-id lookup
@@ -276,10 +305,10 @@ export async function findCustomerByExternalId(orgId, externalId) {
   }
 }
 
-export async function createCustomer(orgId, opts) {
+export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
-  if (isMockMode(orgId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
-  return call(orgId, '/org/customers/', { method: 'POST', body: JSON.stringify({ external_id: externalId, ...customerPayload(opts) }) });
+  if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
+  return call(seasonId, '/org/customers/', { method: 'POST', body: JSON.stringify({ external_id: externalId, ...customerPayload(opts) }) });
 }
 
 // Their docs show PATCH at '/org/customers/{id}' with no trailing slash,
@@ -292,14 +321,14 @@ export async function createCustomer(orgId, opts) {
 // Trailing slash added to match every sibling endpoint; call() now logs the
 // exact path/status/body on every failure (see below), so if this guess is
 // wrong the next occurrence will say so directly instead of a bare 404.
-export async function updateCustomer(orgId, customerId, opts) {
-  if (isMockMode(orgId)) return { id: customerId, ...customerPayload(opts) };
-  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
+export async function updateCustomer(seasonId, customerId, opts) {
+  if (isMockMode(seasonId)) return { id: customerId, ...customerPayload(opts) };
+  return call(seasonId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify(customerPayload(opts)) });
 }
 
-export async function deleteCustomer(orgId, customerId) {
-  if (isMockMode(orgId)) return { ok: true };
-  return call(orgId, `/org/customers/${customerId}/`, { method: 'DELETE' });
+export async function deleteCustomer(seasonId, customerId) {
+  if (isMockMode(seasonId)) return { ok: true };
+  return call(seasonId, `/org/customers/${customerId}/`, { method: 'DELETE' });
 }
 
 // Full customer record including active_cards (masked numbers) and packages
@@ -309,11 +338,11 @@ export async function deleteCustomer(orgId, customerId) {
 // side into our local `cards` table, which is the only way to pick up a
 // card that was assigned directly in their dashboard rather than through
 // this app.
-export async function getCustomerByExternalId(orgId, externalId, { balances = false, transactions = false } = {}) {
-  if (isMockMode(orgId)) return null;
+export async function getCustomerByExternalId(seasonId, externalId, { balances = false, transactions = false } = {}) {
+  if (isMockMode(seasonId)) return null;
   const qs = [balances && 'balances=true', transactions && 'transactions=true'].filter(Boolean).join('&');
   try {
-    return await call(orgId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/${qs ? `?${qs}` : ''}`);
+    return await call(seasonId, `/org/customers/by-external-id/${encodeURIComponent(externalId)}/${qs ? `?${qs}` : ''}`);
   } catch (e) {
     if (e.status === 404) return null;
     throw e;
@@ -324,9 +353,9 @@ export async function getCustomerByExternalId(orgId, externalId, { balances = fa
 // number the org already holds against a customer — there is no endpoint
 // that generates/provisions a fresh card number. cardNumber must be a real
 // number an admin has in hand (e.g. from a batch of physical cards).
-export async function linkCardToCustomer(orgId, customerId, cardNumber) {
-  if (isMockMode(orgId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
-  return call(orgId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
+export async function linkCardToCustomer(seasonId, customerId, cardNumber) {
+  if (isMockMode(seasonId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
+  return call(seasonId, `/org/customers/${customerId}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
 }
 
 // Idempotent upsert used at applicant-approval time: an existing customer
@@ -338,14 +367,14 @@ export async function linkCardToCustomer(orgId, customerId, cardNumber) {
 // too. A new customer gets created with the same full set. Returns
 // { created, accountId }. (seasonName isn't wired to anything yet — see
 // note above.)
-export async function upsertAccountForApproval(orgId, opts) {
+export async function upsertAccountForApproval(seasonId, opts) {
   const { externalId } = opts;
-  if (isMockMode(orgId)) return { created: true, accountId: `mock_acct_${externalId}` };
-  const existing = await findCustomerByExternalId(orgId, externalId);
+  if (isMockMode(seasonId)) return { created: true, accountId: `mock_acct_${externalId}` };
+  const existing = await findCustomerByExternalId(seasonId, externalId);
   if (existing) {
-    const updated = await updateCustomer(orgId, existing.id, opts);
+    const updated = await updateCustomer(seasonId, existing.id, opts);
     return { created: false, accountId: updated.id ?? existing.id };
   }
-  const created = await createCustomer(orgId, opts);
+  const created = await createCustomer(seasonId, opts);
   return { created: true, accountId: created.id };
 }

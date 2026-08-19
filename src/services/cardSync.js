@@ -7,7 +7,7 @@ import { resolveStoreId } from './storeMatch.js';
 // Shared by the manual per-card "Sync Now" button and the automatic
 // background sweep below.
 export async function syncOneCard(orgId, card) {
-  const txns = await giftcard.listTransactions(orgId, { providerCardId: card.provider_card_id, since: card.last_synced_at });
+  const txns = await giftcard.listTransactions(card.season_id, { providerCardId: card.provider_card_id, since: card.last_synced_at });
   const insert = db.prepare(`INSERT OR IGNORE INTO card_transactions (id, card_id, provider_txn_id, type, amount, balance_after, store_name, store_id, occurred_at, raw_payload)
     VALUES (?,?,?,?,?,?,?,?,?,?)`);
   for (const t of txns) {
@@ -37,7 +37,7 @@ export async function lockApplicantCards(orgId, applicant) {
   db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE applicant_id = ? AND status IN ('assigned','activated')`).run(applicant.id);
   if (!applicant.provider_account_id) return { errors: [] };
   try {
-    await giftcard.updateCustomer(orgId, applicant.provider_account_id, { isActive: false });
+    await giftcard.updateCustomer(applicant.season_id, applicant.provider_account_id, { isActive: false });
     return { errors: [] };
   } catch (e) {
     console.error('[cardSync] failed to lock disccardpromos customer for applicant', applicant.id, ':', e.message);
@@ -48,9 +48,9 @@ export async function lockApplicantCards(orgId, applicant) {
 // Reactivates the disccardpromos customer on (re-)approval, undoing
 // lockApplicantCards above for an applicant who was previously
 // rejected/pending and is now approved again.
-export async function unlockApplicantCustomer(orgId, providerAccountId) {
+export async function unlockApplicantCustomer(seasonId, providerAccountId) {
   if (!providerAccountId) return;
-  try { await giftcard.updateCustomer(orgId, providerAccountId, { isActive: true }); }
+  try { await giftcard.updateCustomer(seasonId, providerAccountId, { isActive: true }); }
   catch (e) { console.error('[cardSync] failed to reactivate disccardpromos customer', providerAccountId, ':', e.message); }
 }
 

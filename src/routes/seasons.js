@@ -17,7 +17,12 @@ export function withCapacity(season) {
   if (!season) return season;
   const accepted_count = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
   const remaining = season.max_accepted_applicants != null ? Math.max(0, season.max_accepted_applicants - accepted_count) : null;
-  return { ...season, accepted_count, remaining, is_full: season.max_accepted_applicants != null && accepted_count >= season.max_accepted_applicants };
+  // The disccardpromos key is a live financial credential — never echoed
+  // back in plaintext once saved, same treatment as a password field. The
+  // edit form only sees whether one is set, not its value; PUT only
+  // changes it when a caller explicitly sends a new non-empty value.
+  const { disccardpromos_api_key, ...rest } = season;
+  return { ...rest, has_disccardpromos_api_key: !!disccardpromos_api_key, accepted_count, remaining, is_full: season.max_accepted_applicants != null && accepted_count >= season.max_accepted_applicants };
 }
 
 router.get('/', (req, res) => {
@@ -74,9 +79,16 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (f.is_active) db.prepare('UPDATE seasons SET is_active = 0 WHERE org_id = ?').run(req.user.org_id);
   // Explicit null clears the cap (unlimited); undefined leaves it as-is.
   const maxCap = f.max_accepted_applicants === undefined ? undefined : (f.max_accepted_applicants === null || f.max_accepted_applicants === '' ? null : +f.max_accepted_applicants);
+  // Same "explicit empty string clears it back to inheriting the org-wide
+  // default" convention as system_email_templates' reply_to — undefined
+  // (field not sent) leaves whatever was already saved untouched.
+  const apiBase = f.disccardpromos_api_base === undefined ? undefined : (f.disccardpromos_api_base || null);
+  const apiKey = f.disccardpromos_api_key === undefined ? undefined : (f.disccardpromos_api_key || null);
   db.prepare(`UPDATE seasons SET name=COALESCE(?,name), start_date=COALESCE(?,start_date), end_date=COALESCE(?,end_date),
-    default_card_amount=COALESCE(?,default_card_amount), max_accepted_applicants=CASE WHEN ? THEN ? ELSE max_accepted_applicants END, is_active=COALESCE(?,is_active) WHERE id=?`)
-    .run(f.name, f.start_date, f.end_date, f.default_card_amount, maxCap !== undefined ? 1 : 0, maxCap, f.is_active === undefined ? undefined : (f.is_active ? 1 : 0), season.id);
+    default_card_amount=COALESCE(?,default_card_amount), max_accepted_applicants=CASE WHEN ? THEN ? ELSE max_accepted_applicants END, is_active=COALESCE(?,is_active),
+    disccardpromos_api_base=CASE WHEN ? THEN ? ELSE disccardpromos_api_base END, disccardpromos_api_key=CASE WHEN ? THEN ? ELSE disccardpromos_api_key END WHERE id=?`)
+    .run(f.name, f.start_date, f.end_date, f.default_card_amount, maxCap !== undefined ? 1 : 0, maxCap, f.is_active === undefined ? undefined : (f.is_active ? 1 : 0),
+      apiBase !== undefined ? 1 : 0, apiBase, apiKey !== undefined ? 1 : 0, apiKey, season.id);
   res.json({ season: withCapacity(db.prepare('SELECT * FROM seasons WHERE id = ?').get(season.id)) });
 });
 

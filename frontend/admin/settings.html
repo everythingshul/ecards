@@ -485,6 +485,7 @@ async function loadSeasons() {
       </div>
       <div class="divider"></div>
       <button class="btn btn-sm btn-outline" onclick="openSeasonNotes('${s.id}','${esc(s.name).replace(/'/g,"\\'")}')">Notes</button>
+      <button class="btn btn-sm btn-outline" onclick="openSeasonGiftCardApi('${s.id}','${esc(s.name).replace(/'/g,"\\'")}', ${JSON.stringify(s.disccardpromos_api_base||'')}, ${!!s.has_disccardpromos_api_key})">Gift Card API${s.disccardpromos_api_base && s.has_disccardpromos_api_key ? ' ' + badge('configured','active') : ''}</button>
     </div>`).join('') || '<p class="small-muted">No seasons yet.</p>';
 }
 window.updateSeason = async (id, body) => { try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); loadSeasons(); } catch (err) { toast(err.message, true); } };
@@ -502,6 +503,26 @@ window.addSeasonNote = async (id, name) => {
   const note = qs('#new-season-note').value.trim();
   if (!note) return;
   try { await api(`/seasons/${id}/notes`, { method: 'POST', body: { note } }); openSeasonNotes(id, name); } catch (err) { toast(err.message, true); }
+};
+// Per-season disccardpromos credentials (see services/giftcard.js) — for
+// now, each season can hold its own API base/key, falling back to the
+// org-wide DISCCARDPROMOS_API_BASE/KEY env vars when left blank. The key
+// itself is never sent back from the server once saved (same treatment as
+// a password) — the field just shows a placeholder indicating one is set,
+// and is left untouched unless a new value is typed.
+window.openSeasonGiftCardApi = (id, name, apiBase, hasKey) => {
+  const body = `
+    <p class="small-muted">Leave both blank to use the org-wide default (Settings above). Both must be set for this season's override to take effect.</p>
+    <label>API Base URL</label><input id="sg-base" value="${esc(apiBase)}" placeholder="https://api.disccardpromos.com">
+    <label>API Key</label><input id="sg-key" type="password" placeholder="${hasKey ? 'Already set — leave blank to keep it' : 'Not set — inherits the org-wide key'}">
+  `;
+  openModal(`${name}: Gift Card API`, body, `<button class="btn btn-primary btn-sm" onclick="saveSeasonGiftCardApi('${id}')">Save</button>`);
+};
+window.saveSeasonGiftCardApi = async (id) => {
+  const body = { disccardpromos_api_base: qs('#sg-base').value };
+  const key = qs('#sg-key').value;
+  if (key) body.disccardpromos_api_key = key;
+  try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
 };
 window.openNewSeason = () => {
   const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">
