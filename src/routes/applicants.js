@@ -621,6 +621,23 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
   }
 });
 
+// Raw disccardpromos customer record for this applicant — active_cards
+// (masked numbers), packages (with their real numeric ids, useful for
+// checking Settings > Organization > Gift Card Loading's Package/Discount
+// ID against what actually exists), and balances. A thin passthrough of
+// getCustomerByExternalId, not stored locally, so it's always live.
+router.get('/:id/provider-customer', requireAdmin, async (req, res) => {
+  const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  if (!applicant.external_id) return res.status(400).json({ error: 'This applicant has no external_id yet' });
+  try {
+    const customer = await giftcard.getCustomerByExternalId(req.user.org_id, applicant.external_id, { balances: true });
+    res.json({ customer, mockMode: giftcard.isMockMode(req.user.org_id) });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });

@@ -87,7 +87,14 @@ async function call(orgId, path, opts = {}) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     console.error(`[giftcard] ${opts.method || 'GET'} ${path} -> ${res.status}: ${JSON.stringify(body)}`);
-    const err = new Error(body?.message || `disccardpromos API error ${res.status}`);
+    // body.message covers their simple-error shape; a DRF-style validation
+    // error instead comes back as {field: ["reason", ...]} with no top-level
+    // message, which previously collapsed to an opaque "API error 500" with
+    // no way to tell (from the admin UI's providerFundsError/
+    // providerAccountError, the only place this ever surfaces outside server
+    // logs) which field was rejected or why.
+    const detail = body?.message || (body && Object.keys(body).length ? JSON.stringify(body) : null);
+    const err = new Error(detail ? `disccardpromos API error ${res.status}: ${detail}` : `disccardpromos API error ${res.status}`);
     err.status = res.status; err.body = body;
     throw err;
   }
