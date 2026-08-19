@@ -401,7 +401,7 @@ CREATE TABLE IF NOT EXISTS forms (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id),
   name TEXT NOT NULL,
-  type TEXT NOT NULL,           -- shul_application | applicant_application
+  type TEXT NOT NULL,           -- always 'general' (#9: custom forms are no longer categorized as shul/store/applicant application — those three live at fixed hardcoded URLs, see utils/builtinSchemas.js)
   visibility TEXT DEFAULT 'public', -- public | group | individual
   slug TEXT UNIQUE,
   schema_json TEXT NOT NULL,    -- ordered field list: [{key,label,type,required,admin_override,visible}]

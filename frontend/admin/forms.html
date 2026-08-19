@@ -56,6 +56,9 @@ let fieldDraft = [];
 let formsCache = [];
 let seasonsCache = [];
 
+// Only relevant for forms created before #9 removed the type picker below —
+// any of those three types can still exist on old rows; new forms are
+// always 'general' and fall back to that label (see load()).
 const SECTION_LABEL = { shul_application: 'Shul Application', store_application: 'Store Application', applicant_application: 'Applicant Application' };
 // Every custom form previews through the generic slug-driven renderer —
 // the fixed public pages (apply.html etc.) no longer read from any form
@@ -78,7 +81,7 @@ async function load() {
   qs('#forms-list').innerHTML = forms.length ? forms.map(f => `<div class="card" style="margin-bottom:12px">
       <div class="flex-between">
         <div><strong>${esc(f.name)}</strong> <span class="small-muted">/${esc(f.slug)}</span><br>
-          <span class="small-muted">${esc(f.type)} · ${esc(f.visibility)} · ${esc(seasonName(f.season_id))} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
+          <span class="small-muted">${esc(SECTION_LABEL[f.type] || 'General Form')} · ${esc(f.visibility)} · ${esc(seasonName(f.season_id))} · ${f.schema_json.length} field(s)${f.opens_at ? ` · opens ${fmtDate(f.opens_at)}` : ''}${f.closes_at ? ` · closes ${fmtDate(f.closes_at)}` : ''}</span></div>
         <div class="pill-row">
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
@@ -92,7 +95,7 @@ async function load() {
 window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { method: 'PUT', body: { is_active: activate === 'true' } }); load(); } catch (err) { toast(err.message, true); } };
 
 qs('#btn-new').addEventListener('click', () => {
-  fieldDraft = [{ key: 'first_name', label: 'First Name', type: 'text', required: true }];
+  fieldDraft = [{ key: '', label: '', type: 'text', required: false }];
   openModal('New Form', formBody(), `<button class="btn btn-primary btn-sm" onclick="createForm()">Create Form</button>`);
   renderFields();
 });
@@ -122,13 +125,8 @@ function toLocalInputValue(iso) { if (!iso) return ''; const d = new Date(iso); 
 function formBody(existing = null) {
   return `
     <label>Form Name *</label><input id="f-name" value="${existing ? esc(existing.name) : ''}">
-    <div class="grid-2">
-      <div><label>Type</label>${existing?.editing
-        ? `<input value="${esc(SECTION_LABEL[existing.type] || existing.type)}" disabled>`
-        : `<select id="f-type"><option value="shul_application">Shul Application</option><option value="store_application">Store Application</option><option value="applicant_application">Applicant Application</option></select>`}
-      </div>
-      <div><label>Visibility</label><select id="f-visibility"><option value="public" ${existing?.visibility==='public'?'selected':''}>Public (anyone with the link)</option><option value="group" ${existing?.visibility==='group'?'selected':''}>Group of Shuls</option><option value="individual" ${existing?.visibility==='individual'?'selected':''}>Individual Shul</option></select></div>
-    </div>
+    ${existing?.editing && SECTION_LABEL[existing.type] ? `<p class="small-muted">${esc(SECTION_LABEL[existing.type])} — built before general forms replaced this category; keeps behaving the same way.</p>` : ''}
+    <label>Visibility</label><select id="f-visibility"><option value="public" ${existing?.visibility==='public'?'selected':''}>Public (anyone with the link)</option><option value="group" ${existing?.visibility==='group'?'selected':''}>Group of Shuls</option><option value="individual" ${existing?.visibility==='individual'?'selected':''}>Individual Shul</option></select>
     <label>Season *</label><select id="f-season">${seasonsCache.map(s => `<option value="${s.id}" ${(existing ? existing.season_id === s.id : s.is_active) ? 'selected' : ''}>${esc(s.name)}${s.is_active?' (active)':''}</option>`).join('')}</select>
     <label>URL Slug *</label><input id="f-slug" placeholder="e.g. shul-registration-2026" value="${existing ? esc(existing.slug) : ''}">
     ${existing?.editing ? `
@@ -215,7 +213,7 @@ window.uploadFieldImage = async (i, input) => {
 };
 
 window.createForm = async () => {
-  const body = { name: qs('#f-name').value, type: qs('#f-type').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft, season_id: qs('#f-season').value };
+  const body = { name: qs('#f-name').value, visibility: qs('#f-visibility').value, slug: qs('#f-slug').value, schema: fieldDraft, season_id: qs('#f-season').value };
   try { await api('/forms', { method: 'POST', body }); toast('Form created'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 

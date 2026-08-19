@@ -124,7 +124,13 @@ router.post('/public/:slug/submit', (req, res) => {
     return res.status(201).json({ ok: true, id });
   }
 
-  res.status(400).json({ error: 'This form type is not publicly submittable here' });
+  // Every other form (the only kind an admin can still build — see POST /
+  // below; #9: custom forms are no longer categorized as one of the three
+  // fixed application types, which now live at permanent hardcoded URLs
+  // instead) is a general form: it just records the response, with no
+  // shul/store/applicant record created from it.
+  recordFormResponse(form.org_id, form, b, {});
+  res.status(201).json({ ok: true });
 });
 
 router.use(auth, requireAdmin);
@@ -146,15 +152,21 @@ router.get('/', (req, res) => {
   res.json({ forms: forms.map(f => ({ ...f, schema_json: JSON.parse(f.schema_json), target_json: JSON.parse(f.target_json || '[]') })) });
 });
 
+// #9: a form built here is never one of the three fixed application types
+// again (shul/store/applicant application now live at permanent hardcoded
+// URLs, not as rows in this table — see utils/builtinSchemas.js and the
+// Built-In Application Forms links on the admin Forms page) — every form
+// created through this route is just a general form, type is not even
+// accepted from the client.
 router.post('/', (req, res) => {
-  const { name, type, visibility = 'public', slug, schema, target = [], season_id } = req.body || {};
-  if (!name || !type || !slug) return res.status(400).json({ error: 'name, type, and slug are required' });
+  const { name, visibility = 'public', slug, schema, target = [], season_id } = req.body || {};
+  if (!name || !slug) return res.status(400).json({ error: 'name and slug are required' });
   if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
   if (!db.prepare('SELECT 1 FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id)) return res.status(400).json({ error: 'Season not found' });
   if (db.prepare('SELECT 1 FROM forms WHERE slug = ?').get(slug)) return res.status(409).json({ error: 'That slug is already in use' });
   const id = uuid();
   db.prepare(`INSERT INTO forms (id, org_id, name, type, visibility, slug, schema_json, target_json, season_id, is_active)
-    VALUES (?,?,?,?,?,?,?,?,?,1)`).run(id, req.user.org_id, name, type, visibility, slug, JSON.stringify(schema || []), JSON.stringify(target), season_id);
+    VALUES (?,?,?,'general',?,?,?,?,?,1)`).run(id, req.user.org_id, name, visibility, slug, JSON.stringify(schema || []), JSON.stringify(target), season_id);
   res.status(201).json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(id) });
 });
 
