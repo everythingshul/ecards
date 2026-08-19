@@ -19,8 +19,8 @@ renderShell('/shul-portal/dashboard', `
   <div id="reenroll-banner"></div>
   <div class="toolbar"><input id="f-search" placeholder="Search name…"></div>
   <div class="card" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>ID</th><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
-    <tbody id="tbody"><tr><td colspan="8" class="empty-state">Loading…</td></tr></tbody></table>
+    <table><thead><tr><th></th><th>ID</th><th>Name</th><th>Marital</th><th>Contact</th><th>Children</th><th>Home Yom Tov</th><th>Status</th><th>Card $</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="9" class="empty-state">Loading…</td></tr></tbody></table>
   </div>
 `);
 
@@ -42,6 +42,7 @@ function contactLine(a) {
 // used to disable "+ Add Applicant" instead of letting the click round-trip
 // to the server just to find out.
 let shulInfoIncomplete = false;
+let contractNotSigned = false;
 api(`/shuls/${Auth.user().shul_id}`).then(({ shul, missingInfo }) => {
   if (missingInfo && missingInfo.length) {
     shulInfoIncomplete = true;
@@ -53,38 +54,67 @@ api(`/shuls/${Auth.user().shul_id}`).then(({ shul, missingInfo }) => {
     const btn = qs('#btn-new');
     btn.disabled = true; btn.title = 'Complete your shul information first';
   }
-  if (!shul.slots_allocated) return;
+  // Mirrors the server-side gate on complete-reenrollment/mass-complete-
+  // reenrollment: re-enrolling a carried-over applicant is itself a
+  // commitment this season's contract covers, so it can't happen before the
+  // shul has signed it.
+  if (!['contract_signed', 'approved'].includes(shul.status)) {
+    contractNotSigned = true;
+    qs('#shul-info-banner').insertAdjacentHTML('beforeend', `<div class="card" style="margin-bottom:16px;border-color:var(--danger)">
+      <strong>Your contract for this season isn't signed yet.</strong> You can't re-enroll carried-over applicants until it's signed.
+    </div>`);
+  }
+  // Always shows how many have been submitted — slots-remaining only makes
+  // sense once the org has actually allocated a number to this shul, but
+  // "how many have I submitted so far" is useful either way.
   const used = shul.applicants.filter(a => !['rejected', 'incomplete'].includes(a.approval_status)).length;
   const approved = shul.applicants.filter(a => a.approval_status === 'approved').length;
   const pending = shul.applicants.filter(a => a.approval_status === 'pending').length;
-  const full = used >= shul.slots_allocated;
+  const full = shul.slots_allocated && used >= shul.slots_allocated;
   qs('#slots-banner').innerHTML = `<div class="card" style="margin-bottom:16px;${full ? 'border-color:var(--danger)' : ''}">
-    <strong>Slots:</strong> ${used} of ${shul.slots_allocated} used (${Math.max(0, shul.slots_allocated - used)} available)
+    <strong>Applicants Submitted:</strong> ${used}${shul.slots_allocated ? ` of ${shul.slots_allocated} slots (${Math.max(0, shul.slots_allocated - used)} available)` : ''}
     &mdash; ${approved} approved, ${pending} pending review
     ${full ? ' <strong style="color:var(--danger)">All allocated slots are used.</strong>' : ''}
   </div>`;
 }).catch(() => {});
+
+// Which carried-over applicants the shul has checked off to re-enroll —
+// lets them re-enroll a chosen few instead of only "everything that's
+// ready" (massReenroll below still does that for convenience). Cleared on
+// every load() since the incomplete list itself can change (a completed
+// one drops out, a new carry-forward can add one).
+let selectedReenroll = new Set();
 
 async function load() {
   const params = new URLSearchParams({ search: qs('#f-search').value || '' });
   try {
     const { applicants, total } = await api('/applicants?' + params);
     const needsReenrollment = applicants.filter(a => a.approval_status === 'incomplete');
+    selectedReenroll = new Set([...selectedReenroll].filter(id => needsReenrollment.some(a => a.id === id)));
     qs('#reenroll-banner').innerHTML = needsReenrollment.length
       ? `<div class="card" style="margin-bottom:16px;border-color:var(--danger)">
-          <strong>${needsReenrollment.length}</strong> carried-over applicant(s) need re-enrollment — click one below to review and complete their information for this season.
-          <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="massReenroll()">Re-enroll All Complete</button>
+          <strong>${needsReenrollment.length}</strong> carried-over applicant(s) need re-enrollment — check the ones you want below, or click one to review and complete it individually.
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-outline btn-sm" id="btn-reenroll-selected" onclick="massReenroll(true)" ${contractNotSigned ? 'disabled title="Sign your contract for this season first"' : ''}>Re-enroll Selected (${selectedReenroll.size})</button>
+            <button class="btn btn-outline btn-sm" onclick="massReenroll(false)" ${contractNotSigned ? 'disabled title="Sign your contract for this season first"' : ''}>Re-enroll All Complete</button>
+          </div>
           <span class="small-muted" style="display:block;margin-top:4px">Only re-enrolls the ones with nothing missing — anyone still needing info stays in the list below.</span>
         </div>`
       : '';
     qs('#tbody').innerHTML = applicants.length ? applicants.map(a => `<tr onclick="openApplicant('${a.id}')" style="cursor:pointer${a.approval_status==='incomplete'?';background:rgba(183,28,28,.06)':''}">
+        <td onclick="event.stopPropagation()">${a.approval_status==='incomplete' ? `<input type="checkbox" class="reenroll-check" data-id="${a.id}" ${selectedReenroll.has(a.id)?'checked':''} onchange="toggleReenrollSelect('${a.id}', this.checked)">` : ''}</td>
         <td><code>${esc(a.external_id||'')}</code></td>
         <td><strong>${esc(a.first_name)} ${esc(a.last_name)}</strong>${a.is_paused?' '+badge('paused','paused'):''}</td>
         <td>${esc(a.marital_status||'')}</td><td>${contactLine(a)}</td><td>${a.num_children??0}</td>
         <td>${a.home_for_yomtov?'Yes':'No'}</td><td>${badge(a.approval_status,a.approval_status)}</td><td>${a.card_amount!=null?fmtMoney(a.card_amount):''}</td>
-      </tr>`).join('') : '<tr><td colspan="8" class="empty-state">No applicants submitted yet.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="9" class="empty-state">No applicants submitted yet.</td></tr>';
   } catch (err) { toast(err.message, true); }
 }
+window.toggleReenrollSelect = (id, checked) => {
+  if (checked) selectedReenroll.add(id); else selectedReenroll.delete(id);
+  const btn = qs('#btn-reenroll-selected');
+  if (btn) btn.textContent = `Re-enroll Selected (${selectedReenroll.size})`;
+};
 qs('#f-search').addEventListener('input', () => load());
 qs('#btn-new').addEventListener('click', () => {
   const body = `<label>First Name *</label><input id="n-first_name"><label>Last Name *</label><input id="n-last_name">
@@ -147,9 +177,10 @@ window.submitReenrollment = async (id) => {
 // Server decides per applicant whether their carried-over data already
 // satisfies every required field — this just fires the request and reports
 // what happened; nobody's info is guessed at or partially filled in here.
-window.massReenroll = async () => {
+window.massReenroll = async (selectedOnly) => {
+  if (selectedOnly && !selectedReenroll.size) return toast('Check at least one applicant first', true);
   try {
-    const r = await api('/applicants/mass-complete-reenrollment', { method: 'POST' });
+    const r = await api('/applicants/mass-complete-reenrollment', { method: 'POST', body: selectedOnly ? { ids: [...selectedReenroll] } : {} });
     let msg = `Re-enrolled ${r.completed}`;
     const notes = [];
     if (r.skippedIncomplete) notes.push(`${r.skippedIncomplete} still missing information`);

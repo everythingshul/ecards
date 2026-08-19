@@ -352,6 +352,14 @@ router.post('/:id/complete-reenrollment', requirePermission('applicants', 'can_e
   if (req.user.role === 'shul' && shul) {
     const shulErrors = shulInfoErrors(shul);
     if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before re-enrolling applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+    // A carried-forward shul only signs a fresh contract once, per season,
+    // via the admin-triggered "send contract" step — re-enrolling an
+    // applicant for THIS season is exactly the kind of commitment that
+    // contract covers, so it can't happen before the shul has actually
+    // signed it for the season they're currently in.
+    if (!['contract_signed', 'approved'].includes(shul.status)) {
+      return res.status(400).json({ error: 'Please sign your contract for this season before re-enrolling applicants.', code: 'CONTRACT_NOT_SIGNED' });
+    }
   }
   if (shul?.slots_allocated) {
     const used = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE shul_id = ? AND approval_status NOT IN ('rejected','incomplete')`).get(applicant.shul_id).c;
@@ -398,9 +406,20 @@ router.post('/mass-complete-reenrollment', requirePermission('applicants', 'can_
   if (req.user.role === 'shul') {
     const shulErrors = shulInfoErrors(shul);
     if (shulErrors.length) return res.status(400).json({ error: `Please complete your shul's information before re-enrolling applicants: ${shulErrors.join('; ')}`, code: 'SHUL_INFO_INCOMPLETE' });
+    if (!['contract_signed', 'approved'].includes(shul.status)) {
+      return res.status(400).json({ error: 'Please sign your contract for this season before re-enrolling applicants.', code: 'CONTRACT_NOT_SIGNED' });
+    }
   }
 
-  const candidates = db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND approval_status = 'incomplete'`).all(shulId);
+  // Optional ids: scopes this to just the applicants the shul actually
+  // checked off (see shul-portal/dashboard.html's multi-select), instead of
+  // every carried-over 'incomplete' row at once. Omitted entirely keeps the
+  // original "re-enroll everything that's ready" behavior, which the
+  // admin-triggered path (no ids, req.body.shul_id) still relies on.
+  const { ids } = req.body || {};
+  const candidates = Array.isArray(ids) && ids.length
+    ? db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND approval_status = 'incomplete' AND id IN (${ids.map(() => '?').join(',')})`).all(shulId, ...ids)
+    : db.prepare(`SELECT * FROM applicants WHERE shul_id = ? AND approval_status = 'incomplete'`).all(shulId);
   let completed = 0, skippedIncomplete = 0, skippedSlotsFull = 0;
   const affectedIds = [], names = [];
   for (const applicant of candidates) {

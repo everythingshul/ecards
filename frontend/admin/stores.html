@@ -96,7 +96,9 @@ qs('#btn-mass-apply').addEventListener('click', async () => {
 
 async function openStore(id) {
   try {
-    const { store: s, billing, transactionTotals } = await api(`/stores/${id}`);
+    const [{ store: s, billing, transactionTotals }, { bills: submittedBills }] = await Promise.all([
+      api(`/stores/${id}`), api(`/stores/${id}/bill-submissions`),
+    ]);
     const body = `
       <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${billing.length})</button><button data-t="documents">Documents</button></div>
       <div id="stab-info">
@@ -142,6 +144,17 @@ async function openStore(id) {
               <button class="btn btn-sm btn-outline" onclick="markInvoiced('${b.id}')">Mark Invoiced</button>
             </div>
           </div>`).join('') : '<p class="small-muted">No billing periods yet.</p>'}</div>
+        <div class="divider"></div>
+        <h4>Bills This Store Submitted</h4>
+        <div>${submittedBills.length ? submittedBills.map(b => `<div class="card" style="margin-bottom:10px">
+            <div class="flex-between"><strong>${fmtMoney(b.amount)}</strong>${badge(b.status, b.status === 'paid' ? 'active' : (b.status === 'reviewed' ? 'pending' : 'submitted'))}</div>
+            <p class="small-muted">${b.period ? `Period: ${esc(b.period)} · ` : ''}${esc(b.description||'')}</p>
+            ${b.file_name ? `<p class="small-muted"><a href="/api/stores/bill-submissions/${b.id}/file" target="_blank">${esc(b.file_name)}</a></p>` : ''}
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-outline" onclick="markBillReviewed('${id}','${b.id}')">Mark Reviewed</button>
+              <button class="btn btn-sm btn-outline" onclick="markBillPaid('${id}','${b.id}')">Mark Paid</button>
+            </div>
+          </div>`).join('') : '<p class="small-muted">No bills submitted yet.</p>'}</div>
       </div>
       <div id="stab-documents" style="display:none">
         <div id="stab-documents-list"><p class="small-muted">Loading…</p></div>
@@ -176,6 +189,8 @@ window.addBilling = async (id) => {
 };
 window.markPaid = async (billingId, amount) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { amount_paid: amount, status: 'paid' } }); toast('Marked paid'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
 window.markInvoiced = async (billingId) => { try { await api(`/stores/billing/${billingId}`, { method: 'PUT', body: { status: 'invoiced' } }); toast('Marked invoiced'); closeModal(); load(); } catch (err) { toast(err.message, true); } };
+window.markBillReviewed = async (storeId, billId) => { try { await api(`/stores/bill-submissions/${billId}`, { method: 'PUT', body: { status: 'reviewed' } }); toast('Marked reviewed'); closeModal(); openStore(storeId); } catch (err) { toast(err.message, true); } };
+window.markBillPaid = async (storeId, billId) => { try { await api(`/stores/bill-submissions/${billId}`, { method: 'PUT', body: { status: 'paid' } }); toast('Marked paid'); closeModal(); openStore(storeId); } catch (err) { toast(err.message, true); } };
 
 function openStoreForm() {
   const body = `<label>Store Name *</label><input id="n-name">

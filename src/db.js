@@ -8,7 +8,7 @@ import { generateApplicantExternalId } from './utils/externalId.js';
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates', 'forms']) {
+for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates', 'forms', 'store-bills']) {
   const p = join(DATA_DIR, sub);
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }
@@ -396,6 +396,27 @@ CREATE TABLE IF NOT EXISTS store_billing (
   notes TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Bills a STORE submits TO the org (the opposite direction from
+-- store_billing above, which is what a store owes the org toward the
+-- participation program) — e.g. reimbursement for gift-card redemptions
+-- the store has already honored. A store portal login creates these; an
+-- admin reviews and marks them paid.
+CREATE TABLE IF NOT EXISTS store_bill_submissions (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  period TEXT,
+  amount REAL NOT NULL,
+  description TEXT,
+  file_path TEXT,
+  file_name TEXT,
+  status TEXT DEFAULT 'submitted', -- submitted | reviewed | paid
+  admin_notes TEXT,
+  submitted_at TEXT DEFAULT (datetime('now')),
+  reviewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_store_bill_submissions_store ON store_bill_submissions(store_id, submitted_at);
 
 -- ===================== Forms (form builder) =====================
 CREATE TABLE IF NOT EXISTS forms (

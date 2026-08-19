@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
+import multer from 'multer';
+import { join } from 'path';
+import { writeFileSync } from 'fs';
+import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
@@ -11,6 +14,8 @@ import { logAudit, logMassAudit } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 
 const router = Router();
+const billUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const BILLS_DIR = join(DATA_DIR, 'store-bills');
 
 // Public: store self-application (mirrors the shul public form) — spec #9 says
 // stores can be added by admin OR sign up themselves. Starts at setup_status
@@ -86,6 +91,11 @@ router.get('/:id', (req, res) => {
   const transactionTotals = db.prepare(`SELECT COUNT(*) count, COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END),0) total_purchases,
     COALESCE(SUM(CASE WHEN type='refund' THEN amount ELSE 0 END),0) total_refunds
     FROM card_transactions WHERE store_id = ?`).get(store.id);
+  // A store's own portal login sees its total purchases (their own sales
+  // figure) but not transaction count or refund totals — internal-only
+  // numbers a store shouldn't be able to reconstruct their transaction
+  // history's shape from.
+  if (req.user.role === 'store') { delete transactionTotals.count; delete transactionTotals.total_refunds; }
   res.json({ store: redact(store, req.permission.hidden_fields), billing, transactionTotals });
 });
 
@@ -301,6 +311,60 @@ router.put('/billing/:billingId', requireAdmin, (req, res) => {
     status=COALESCE(?,status), invoice_ref=COALESCE(?,invoice_ref), notes=COALESCE(?,notes) WHERE id=?`)
     .run(amount_owed, amount_paid, status, invoice_ref, notes, row.id);
   res.json({ billing: db.prepare('SELECT * FROM store_billing WHERE id = ?').get(row.id) });
+});
+
+// ===================== Bills a store submits TO the org =====================
+// The opposite direction from store_billing above — e.g. a store claiming
+// reimbursement for gift-card redemptions it's already honored. A store
+// portal login submits these; an admin reviews and marks them paid.
+router.get('/:id/bill-submissions', (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role === 'store' && store.id !== req.user.store_id) return res.status(403).json({ error: 'Not your store' });
+  res.json({ bills: db.prepare('SELECT * FROM store_bill_submissions WHERE store_id = ? ORDER BY submitted_at DESC').all(store.id) });
+});
+
+router.post('/:id/bill-submissions', billUpload.single('file'), (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role === 'store' && store.id !== req.user.store_id) return res.status(403).json({ error: 'Not your store' });
+  if (req.user.role !== 'store' && req.user.role !== 'super_admin' && req.user.role !== 'org_admin' && req.user.role !== 'staff') return res.status(403).json({ error: 'Not permitted' });
+  const { period, amount, description } = req.body || {};
+  const amountNum = +amount;
+  if (!amountNum || amountNum <= 0) return res.status(400).json({ error: 'A valid amount is required' });
+  const id = uuid();
+  let filePath = null, fileName = null;
+  if (req.file) {
+    fileName = req.file.originalname;
+    const safeName = `${id}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    writeFileSync(join(BILLS_DIR, safeName), req.file.buffer);
+    filePath = safeName;
+  }
+  db.prepare(`INSERT INTO store_bill_submissions (id, org_id, store_id, period, amount, description, file_path, file_name)
+    VALUES (?,?,?,?,?,?,?,?)`)
+    .run(id, req.user.org_id, store.id, period || '', amountNum, description || '', filePath, fileName);
+  res.status(201).json({ bill: db.prepare('SELECT * FROM store_bill_submissions WHERE id = ?').get(id) });
+});
+
+router.put('/bill-submissions/:billId', requireAdmin, (req, res) => {
+  const row = db.prepare(`SELECT b.* FROM store_bill_submissions b JOIN stores s ON s.id=b.store_id WHERE b.id=? AND s.org_id=?`).get(req.params.billId, req.user.org_id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const { status, admin_notes } = req.body || {};
+  db.prepare(`UPDATE store_bill_submissions SET status=COALESCE(?,status), admin_notes=COALESCE(?,admin_notes),
+    reviewed_at=CASE WHEN ? IS NOT NULL THEN datetime('now') ELSE reviewed_at END WHERE id=?`)
+    .run(status, admin_notes, status, row.id);
+  res.json({ bill: db.prepare('SELECT * FROM store_bill_submissions WHERE id = ?').get(row.id) });
+});
+
+// Authenticated download for a submitted bill's attachment (not a public
+// static mount — these are financial documents) — either the owning
+// store's own portal login, or an admin.
+router.get('/bill-submissions/:billId/file', (req, res) => {
+  const row = db.prepare(`SELECT b.*, s.org_id FROM store_bill_submissions b JOIN stores s ON s.id=b.store_id WHERE b.id=?`).get(req.params.billId);
+  if (!row || row.org_id !== req.user.org_id) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role === 'store' && row.store_id !== req.user.store_id) return res.status(403).json({ error: 'Not your bill' });
+  if (!row.file_path) return res.status(404).json({ error: 'No file attached' });
+  res.download(join(BILLS_DIR, row.file_path), row.file_name || 'bill');
 });
 
 export default router;

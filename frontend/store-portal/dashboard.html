@@ -20,7 +20,7 @@ renderShell('/store-portal/dashboard', `
 (async () => {
   const u = Auth.user();
   try {
-    const { store: s, transactionTotals } = await api(`/stores/${u.store_id}`);
+    const { store: s } = await api(`/stores/${u.store_id}`);
     if ((s.onboarding_step || 0) < 3) {
       qs('#onboarding-banner').innerHTML = `<div class="card" style="border-color:var(--warn);margin-bottom:16px">
         <div class="flex-between"><span>Your store setup isn't finished yet.</span><a class="btn btn-sm btn-primary" href="/store-portal/onboarding">Finish Setup</a></div></div>`;
@@ -28,9 +28,6 @@ renderShell('/store-portal/dashboard', `
     qs('#wrap').innerHTML = `
       <div class="stat-grid">
         <div class="stat-tile"><div class="num">${badge(s.setup_status, s.setup_status)}</div><div class="label">Setup Status</div></div>
-        <div class="stat-tile"><div class="num">${transactionTotals.count}</div><div class="label">Transactions</div></div>
-        <div class="stat-tile"><div class="num">${fmtMoney(transactionTotals.total_purchases)}</div><div class="label">Total Purchases</div></div>
-        <div class="stat-tile"><div class="num">${fmtMoney(transactionTotals.total_refunds)}</div><div class="label">Total Refunds</div></div>
       </div>
       <div class="divider"></div>
       <h3>Store Info</h3>
