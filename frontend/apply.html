@@ -34,6 +34,7 @@
     <div class="divider"></div>
     <label>Signer Full Name <span class="req">*</span></label>
     <input id="signer_name" placeholder="Type your full legal name" style="margin-bottom:16px">
+    <div id="consent-holder"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign & Submit Application</button>
     </div>
@@ -87,6 +88,7 @@ qs('#apply-form').addEventListener('submit', async (e) => {
     if (fields && fields.length) contractFields = fields;
     qs('#apply-form').style.display = 'none';
     qs('#contract-section').style.display = 'block';
+    qs('#consent-holder').innerHTML = esignConsentHtml('sign');
     contractPdfUrl = `/api/shuls/contract/${signToken}/pdf-preview`;
     qs('#print-before-btn').addEventListener('click', () => window.open(contractPdfUrl, '_blank'));
     await renderPdfSigningPages(contractPdfUrl, contractFields, 'pdf-pages');
@@ -99,11 +101,12 @@ qs('#apply-form').addEventListener('submit', async (e) => {
 qs('#sign-btn').addEventListener('click', async () => {
   const signerName = qs('#signer_name').value.trim();
   if (!signerName) return toast('Please type your full name', true);
+  if (!esignConsentChecked('sign')) return;
   const values = collectSignValues(contractFields);
   if (!values) return;
   const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   try {
-    await api(`/shuls/contract/${signToken}/sign`, { method: 'POST', body: { signer_name: signerName, values } });
+    await api(`/shuls/contract/${signToken}/sign`, { method: 'POST', body: { signer_name: signerName, values, consent: true } });
     qs('#contract-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
     qs('#done-message').textContent = 'Thank you! Your contract has been signed. An administrator will review your application and email you a link to set up your account once approved.';

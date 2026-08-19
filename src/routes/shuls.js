@@ -152,8 +152,9 @@ router.post('/contract/:token/sign', async (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE sign_token = ?').get(req.params.token);
   if (!contract) return res.status(404).json({ error: 'Not found' });
   if (contract.status === 'signed') return res.status(409).json({ error: 'This contract has already been signed' });
-  const { signer_name, signer_title } = req.body || {};
+  const { signer_name, signer_title, consent } = req.body || {};
   if (!signer_name) return res.status(400).json({ error: 'Signer name is required' });
+  if (!consent) return res.status(400).json({ error: 'You must consent to sign electronically before submitting.' });
   const fields = getSignatureFields(DEFAULT_ORG_ID, 'shul');
   const { values, missing } = resolveSignatureValues(fields, req.body);
   if (missing.length) return res.status(400).json({ error: `Please complete: ${missing.join(', ')}` });
@@ -161,8 +162,8 @@ router.post('/contract/:token/sign', async (req, res) => {
   const primary = fields.find(f => f.type === 'signature') || fields[0];
   const signedPath = await stampSignatureFields({ unsignedPath: contract.pdf_path, shulId: contract.shul_id, fields, values, signerName: signer_name, signedAt, ip: req.ip });
   const signatureData = primary ? values[primary.id] : null;
-  db.prepare(`UPDATE contracts SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=? WHERE id=?`)
-    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), contract.id);
+  db.prepare(`UPDATE contracts SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=?, esign_consent_at=? WHERE id=?`)
+    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), signedAt, contract.id);
   db.prepare(`UPDATE shuls SET status='contract_signed', updated_at=datetime('now') WHERE id=?`).run(contract.shul_id);
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(contract.shul_id);
   logAudit(shul.org_id, null, 'esign', 'contract', contract.id, null, { signer_name, signedAt }, req.ip);
@@ -743,7 +744,7 @@ router.post('/:id/contract/retract', requireAdmin, (req, res) => {
   if (!contract || contract.status !== 'signed') return res.status(400).json({ error: 'Only a signed contract can have its signature retracted' });
   const token = uuid();
   const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
-  db.prepare(`UPDATE contracts SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
+  db.prepare(`UPDATE contracts SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, esign_consent_at=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
     .run(token, expires, contract.id);
   logAudit(req.user.org_id, req.user.id, 'retract_signature', 'shul', shul.id, contract, null, req.ip);
   res.json({ ok: true, contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(contract.id) });

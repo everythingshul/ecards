@@ -98,6 +98,26 @@ function toast(msg, isError = false) {
   el._t = setTimeout(() => el.classList.remove('show'), 3500);
 }
 
+// ESIGN Act / NY ESRA-style affirmative consent disclosure, shown before
+// every e-signature submit button sitewide (sign-contract.html,
+// sign-document.html, apply.html, apply-store.html,
+// store-portal/onboarding.html) — one shared copy of the wording/markup so
+// it only needs updating in one place, plus a matching required checkbox the
+// signer must check before the sign endpoint (which independently rejects
+// an unset `consent` server-side) will accept the request.
+function esignConsentHtml(idPrefix) {
+  return `<div class="small-muted" style="margin:14px 0;padding:10px;border:1px solid #ccc;border-radius:4px">
+    <label class="checkbox-row" style="align-items:flex-start">
+      <input type="checkbox" id="${idPrefix}-consent">
+      <span>I consent to sign this document electronically and to conduct this transaction by electronic means. I understand my typed/drawn signature is legally binding, that I may request a paper copy of the signed document at any time by contacting the organization, and that I may withdraw this consent for future transactions by notifying the organization before signing.</span>
+    </label>
+  </div>`;
+}
+function esignConsentChecked(idPrefix) {
+  const box = qs(`#${idPrefix}-consent`);
+  if (box && !box.checked) { toast('Please check the box to consent to sign electronically', true); return false; }
+  return true;
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtMoney(n) { return '$' + (Number(n) || 0).toFixed(2); }
 function fmtDate(d) { if (!d) return ''; return new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }

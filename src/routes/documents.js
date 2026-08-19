@@ -197,7 +197,7 @@ router.post('/:id/retract', auth, requireAdmin, (req, res) => {
   if (document.status !== 'signed') return res.status(400).json({ error: 'Only a signed document can have its signature retracted' });
   const token = uuid();
   const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
-  db.prepare(`UPDATE documents SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
+  db.prepare(`UPDATE documents SET status='sent', signature_data=NULL, signer_name=NULL, signer_title=NULL, signed_at=NULL, ip_address=NULL, signed_pdf_path=NULL, esign_consent_at=NULL, sign_token=?, sign_token_expires=? WHERE id=?`)
     .run(token, expires, document.id);
   res.json({ ok: true, document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id) });
 });
@@ -235,8 +235,9 @@ router.post('/sign/:token/sign', async (req, res) => {
   if (!document) return res.status(404).json({ error: 'Not found' });
   if (document.status === 'signed') return res.status(409).json({ error: 'This document has already been signed' });
   if (document.status === 'void') return res.status(410).json({ error: 'This document has been voided' });
-  const { signer_name, signer_title } = req.body || {};
+  const { signer_name, signer_title, consent } = req.body || {};
   if (!signer_name) return res.status(400).json({ error: 'Signer name is required' });
+  if (!consent) return res.status(400).json({ error: 'You must consent to sign electronically before submitting.' });
   const fields = getSignatureFields(document.org_id, document.entity_type);
   const { values, missing } = resolveSignatureValues(fields, req.body);
   if (missing.length) return res.status(400).json({ error: `Please complete: ${missing.join(', ')}` });
@@ -248,8 +249,8 @@ router.post('/sign/:token/sign', async (req, res) => {
     fields, values, signerName: signer_name, signedAt, ip: req.ip,
   });
   const signatureData = primary ? values[primary.id] : null;
-  db.prepare(`UPDATE documents SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=? WHERE id=?`)
-    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), document.id);
+  db.prepare(`UPDATE documents SET status='signed', signature_data=?, signer_name=?, signer_title=?, signed_at=?, ip_address=?, signed_pdf_path=?, field_values=?, esign_consent_at=? WHERE id=?`)
+    .run(signatureData, signer_name, signer_title || '', signedAt, req.ip, signedPath, JSON.stringify(values), signedAt, document.id);
   res.json({ ok: true, message: 'Document signed. Thank you.' });
 });
 

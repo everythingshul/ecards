@@ -28,6 +28,7 @@
     <input id="signer_name" placeholder="Type your full legal name">
     <label>Title / Role <span class="small-muted">(e.g. Gabai, Board Member)</span></label>
     <input id="signer_title" style="margin-bottom:16px">
+    <div id="consent-holder"></div>
     <div style="margin-top:20px;text-align:right">
       <button class="btn btn-primary" id="sign-btn">Sign Contract</button>
     </div>
@@ -61,6 +62,7 @@ let pdfPreviewUrl = '';
     if (contractFields && contractFields.length) fields = contractFields;
     qs('#contract-section').style.display = 'block';
     qs('#shul-name').textContent = shul.name_en;
+    qs('#consent-holder').innerHTML = esignConsentHtml('sign');
     qs('#print-before-btn').addEventListener('click', () => window.open(pdfPreviewUrl, '_blank'));
     await renderPdfSigningPages(pdfPreviewUrl, fields, 'pdf-pages');
   } catch (err) {
@@ -71,11 +73,12 @@ let pdfPreviewUrl = '';
 qs('#sign-btn')?.addEventListener('click', async () => {
   const signerName = qs('#signer_name').value.trim();
   if (!signerName) return toast('Please type your full name', true);
+  if (!esignConsentChecked('sign')) return;
   const values = collectSignValues(fields);
   if (!values) return;
   const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   try {
-    await api(`/shuls/contract/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, values } });
+    await api(`/shuls/contract/${token}/sign`, { method: 'POST', body: { signer_name: signerName, signer_title: qs('#signer_title').value, values, consent: true } });
     qs('#contract-section').style.display = 'none';
     qs('#done-section').style.display = 'block';
     qs('#print-after-btn').addEventListener('click', () => window.open(pdfPreviewUrl, '_blank'));

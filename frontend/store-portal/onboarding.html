@@ -74,6 +74,7 @@ function step2Html() {
       <div class="divider"></div>
       <label>Signer Full Name <span class="req">*</span></label>
       <input id="signer_name" placeholder="Type your full legal name" style="margin-bottom:16px">
+      ${esignConsentHtml('sign')}
       <div style="margin-top:20px;text-align:right"><button class="btn btn-primary" id="sign-btn">Sign & Continue</button></div>`;
   }
   return `
@@ -118,11 +119,12 @@ function attachHandlers() {
   if (step === 2 && step2Signing) qs('#sign-btn').addEventListener('click', async () => {
     const signerName = qs('#signer_name').value.trim();
     if (!signerName) return toast('Please type your full name', true);
+    if (!esignConsentChecked('sign')) return;
     const values = collectSignValues(agreementFields);
     if (!values) return;
     const btn = qs('#sign-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
     try {
-      await api(`/documents/sign/${agreementToken}/sign`, { method: 'POST', body: { signer_name: signerName, values } });
+      await api(`/documents/sign/${agreementToken}/sign`, { method: 'POST', body: { signer_name: signerName, values, consent: true } });
       const { store: s } = await api(`/stores/${u.store_id}/onboarding`, { method: 'PUT', body: { step: 2, agree_terms: true } });
       store = s; step2Signing = false; step = 3; render();
     } catch (err) {

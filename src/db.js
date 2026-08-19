@@ -674,6 +674,15 @@ safeAlter(`ALTER TABLE seasons ADD COLUMN disccardpromos_api_key TEXT`);
 safeAlter(`ALTER TABLE documents ADD COLUMN recipient_name TEXT`);
 safeAlter(`ALTER TABLE documents ADD COLUMN recipient_email TEXT`);
 
+// ESIGN Act / NY ESRA-style affirmative consent record: every public sign
+// endpoint (shul contract, generic document, standalone e-signature) now
+// requires an explicit `consent: true` in the sign request and stamps the
+// timestamp here — separate from signed_at so there's a distinct record that
+// the signer affirmatively agreed to sign electronically, not just that a
+// signature value was submitted.
+safeAlter(`ALTER TABLE contracts ADD COLUMN esign_consent_at TEXT`);
+safeAlter(`ALTER TABLE documents ADD COLUMN esign_consent_at TEXT`);
+
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
 // re-running it on already-normalized numbers is a no-op — so it's safe to
