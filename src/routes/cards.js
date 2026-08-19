@@ -107,7 +107,7 @@ router.post('/assign', requireAdmin, async (req, res) => {
   const finalAmount = applicant.card_amount ?? 0;
   let result;
   try {
-    result = await giftcard.linkCardToCustomer(applicant.season_id, applicant.provider_account_id, card_number);
+    result = await giftcard.linkCardToCustomer(applicant.season_id, applicant.provider_account_id, card_number, applicant.external_id);
   } catch (e) {
     console.error('[cards] assign failed:', e.message);
     return res.status(502).json({ error: `disccardpromos rejected the card assignment: ${e.message}` });

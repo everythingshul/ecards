@@ -420,9 +420,19 @@ export async function getCustomerByExternalId(seasonId, externalId, { balances =
 // number the org already holds against a customer — there is no endpoint
 // that generates/provisions a fresh card number. cardNumber must be a real
 // number an admin has in hand (e.g. from a batch of physical cards).
-export async function linkCardToCustomer(seasonId, customerId, cardNumber) {
+// externalId: live-tested 2026-08-19 — same clobber as upsertAccountForApproval
+// (see its comment above): a PATCH that omits external_id clears it back to
+// null rather than leaving it alone, confirmed here too via a bare
+// {isActive:false}-only PATCH from lockApplicantCards. So every PATCH to a
+// customer, for any reason, must carry the applicant's external_id along or
+// risk silently breaking every future by-external-id lookup for them.
+// Passing it is optional only for backward compatibility with any caller
+// that genuinely doesn't have it in hand yet.
+export async function linkCardToCustomer(seasonId, customerId, cardNumber, externalId) {
   if (isMockMode(seasonId)) return { id: customerId, active_cards: [`****${String(cardNumber).slice(-4)}`] };
-  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`, { method: 'PATCH', body: JSON.stringify({ card_number: cardNumber }) });
+  const body = { card_number: cardNumber };
+  if (externalId) body.external_id = externalId;
+  return call(seasonId, `/org/customers/${normalizeCustomerId(customerId)}/`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 // Idempotent upsert used at applicant-approval time: an existing customer

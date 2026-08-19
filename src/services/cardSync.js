@@ -43,7 +43,12 @@ export async function lockApplicantCards(orgId, applicant) {
   db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE applicant_id = ? AND status IN ('assigned','activated')`).run(applicant.id);
   if (!applicant.provider_account_id) return { errors: [] };
   try {
-    await giftcard.updateCustomer(applicant.season_id, applicant.provider_account_id, { isActive: false });
+    // externalId included alongside isActive — live-tested 2026-08-19 that a
+    // bare {is_active:false}-only PATCH clears the customer's external_id
+    // back to null instead of leaving it alone (see upsertAccountForApproval
+    // in giftcard.js for the full story). Re-sending it here is what keeps
+    // by-external-id lookups working for this applicant after a reject.
+    await giftcard.updateCustomer(applicant.season_id, applicant.provider_account_id, { isActive: false, externalId: applicant.external_id });
     return { errors: [] };
   } catch (e) {
     console.error('[cardSync] failed to lock disccardpromos customer for applicant', applicant.id, ':', e.message);
