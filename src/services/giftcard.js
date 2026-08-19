@@ -347,13 +347,17 @@ export async function getCustomerById(seasonId, customerId) {
 
 // Live-tested 2026-08-19: disccardpromos silently drops external_id from
 // the CREATE payload (every other field — name, phone, email, address,
-// group — round-trips fine, only this one comes back null) but DOES accept
-// it via PATCH on the same customer right after. Their create serializer
-// evidently treats it as read-only while their update serializer doesn't —
-// an inconsistency on their end, not ours, but the practical fix is the
-// same regardless of why: follow every create with a PATCH that sets it,
-// so every caller of this function gets a customer whose external_id
-// actually stuck without needing to know about the quirk.
+// group — round-trips fine, only this one comes back null), so this always
+// follows a create with a PATCH that sets it. Whether that follow-up PATCH
+// reliably persists external_id on its own is still not fully confirmed —
+// every real-flow test so far has had a second, unrelated PATCH
+// (upsertAccountForApproval's old separate isActive-only call) run
+// immediately after it, and that second call is the prime suspect for why
+// external_id kept coming back null (see upsertAccountForApproval below,
+// which now folds isActive into this same call instead of a follow-up one).
+// If external_id still doesn't stick with no other PATCH ever following
+// this one, that's a genuine disccardpromos-side limitation to escalate to
+// their support, not something fixable from here.
 export async function createCustomer(seasonId, opts) {
   const { externalId } = opts;
   if (isMockMode(seasonId)) return { id: `mock_${externalId}`, external_id: externalId, group_name: opts.groupName, active_cards: [] };
@@ -435,7 +439,16 @@ export async function upsertAccountForApproval(seasonId, opts) {
   if (isMockMode(seasonId)) return { created: true, accountId: `mock_acct_${externalId}` };
   const existing = await findCustomerByExternalId(seasonId, externalId);
   if (existing) {
-    const updated = await updateCustomer(seasonId, existing.id, opts);
+    // isActive: true folded into this same PATCH (not a separate call
+    // afterward) — live-tested 2026-08-19 that a follow-up PATCH omitting
+    // external_id clears the field back to null instead of leaving it
+    // alone, which is exactly what was happening when approval used to call
+    // unlockApplicantCustomer() right after this: every approval silently
+    // wiped the external_id it had just set, which is why by-external-id
+    // lookups (duplicate-prevention above, and add-funds right after
+    // approval) kept reporting "Customer not found" for accounts that
+    // demonstrably existed. One combined PATCH avoids the clobber.
+    const updated = await updateCustomer(seasonId, existing.id, { ...opts, isActive: true });
     // Live-tested 2026-08-19: accountId gets stored into applicants.
     // provider_account_id (a TEXT column) via a plain positional bind — a
     // JS number bound directly into a TEXT-affinity column comes back out
@@ -446,6 +459,6 @@ export async function upsertAccountForApproval(seasonId, opts) {
     // place accountId is produced, fixes every caller at once.
     return { created: false, accountId: String(updated.id ?? existing.id) };
   }
-  const created = await createCustomer(seasonId, opts);
+  const created = await createCustomer(seasonId, { ...opts, isActive: true });
   return { created: true, accountId: String(created.id) };
 }

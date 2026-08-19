@@ -17,7 +17,7 @@ import { validateBySchema, validateRowsBySchema, shulInfoErrors } from '../utils
 import { APPLICANT_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 import { hardDeleteApplicant } from '../utils/entityDelete.js';
-import { lockApplicantCards, unlockApplicantCustomer } from '../services/cardSync.js';
+import { lockApplicantCards } from '../services/cardSync.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -587,7 +587,6 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
-        await unlockApplicantCustomer(applicant.season_id, result.accountId);
       } catch (e) {
         providerAccountError = e.message;
         console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
@@ -734,7 +733,6 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
-        await unlockApplicantCustomer(applicant.season_id, result.accountId);
         accountOk = true;
       } catch (e) {
         providerErrors++;

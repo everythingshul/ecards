@@ -27,11 +27,17 @@ export async function syncOneCard(orgId, card) {
 // so this deactivates the whole customer record rather than any specific
 // card, and every local card row for them is marked deactivated to match
 // (an applicant only ever has one disccardpromos customer regardless of how
-// many cards they hold). unlockApplicantCustomer (called on approval) is the
-// inverse. Best-effort: a provider failure is returned to the caller to
-// surface, but never blocks the status change that triggered it — the local
-// rows are still marked deactivated either way, since "no longer approved"
-// should never show as still-active in our own UI regardless of whether the
+// many cards they hold). Reactivation on (re-)approval is folded directly
+// into giftcard.js's upsertAccountForApproval (isActive: true alongside
+// every other field in the same call) rather than a separate PATCH here —
+// live-tested 2026-08-19 that a bare `{is_active: true}` PATCH issued right
+// after account creation/update was wiping the external_id that same
+// approval had just set, breaking duplicate-customer prevention and
+// add-funds (both look the customer up by external_id) on every approval.
+// Best-effort: a provider failure is returned to the caller to surface, but
+// never blocks the status change that triggered it — the local rows are
+// still marked deactivated either way, since "no longer approved" should
+// never show as still-active in our own UI regardless of whether the
 // provider call succeeded.
 export async function lockApplicantCards(orgId, applicant) {
   db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE applicant_id = ? AND status IN ('assigned','activated')`).run(applicant.id);
@@ -43,15 +49,6 @@ export async function lockApplicantCards(orgId, applicant) {
     console.error('[cardSync] failed to lock disccardpromos customer for applicant', applicant.id, ':', e.message);
     return { errors: [e.message] };
   }
-}
-
-// Reactivates the disccardpromos customer on (re-)approval, undoing
-// lockApplicantCards above for an applicant who was previously
-// rejected/pending and is now approved again.
-export async function unlockApplicantCustomer(seasonId, providerAccountId) {
-  if (!providerAccountId) return;
-  try { await giftcard.updateCustomer(seasonId, providerAccountId, { isActive: true }); }
-  catch (e) { console.error('[cardSync] failed to reactivate disccardpromos customer', providerAccountId, ':', e.message); }
 }
 
 // Sweeps every assigned/activated card in an org. Used by the automatic
