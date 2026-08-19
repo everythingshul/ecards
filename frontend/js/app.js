@@ -118,6 +118,7 @@ const NAV_ITEMS = [
   { href: '/admin/emails', label: 'Email Center', icon: '&#9670;', resource: 'emails' },
   { href: '/admin/sms', label: 'SMS Center', icon: '&#9670;', resource: 'sms' },
   { href: '/admin/updates', label: 'Updates', icon: '&#9670;', resource: 'updates' },
+  { href: '/admin/esignatures', label: 'E-Signatures', icon: '&#9670;', resource: 'documents' },
   { href: '/admin/users', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
   { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resource: 'settings' },
   { href: '/admin/audit', label: 'Recent Actions', icon: '&#9670;', resource: 'audit', roles: ['super_admin'] },

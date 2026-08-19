@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E-Signatures · Kipas Hair BP Platform</title>
+<link rel="stylesheet" href="/css/theme.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/portal-theme.css">
+</head>
+<body>
+<script src="/js/app.js"></script>
+<script>
+Auth.requireAdmin();
+renderShell('/admin/esignatures', `
+  <div class="flex-between"><h2>E-Signatures</h2><button class="btn btn-primary btn-sm" id="btn-new">New E-Signature Request</button></div>
+  <p class="small-muted">Send a document out for signature to anyone — a vendor, a board member, anyone — with no applicant/store/shul record and no portal account needed. Separate from shul contracts and the per-applicant/store documents on their profiles.</p>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table><thead><tr><th>Title</th><th>Recipient</th><th>Status</th><th>Created</th><th>Sent</th><th>Signed</th><th></th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="7" class="empty-state">Loading…</td></tr></tbody></table>
+  </div>
+`);
+
+async function load() {
+  try {
+    const { documents } = await api('/documents/standalone');
+    qs('#tbody').innerHTML = documents.length ? documents.map(rowHtml).join('') : '<tr><td colspan="7" class="empty-state">No e-signature requests yet.</td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+function rowHtml(d) {
+  const canAct = d.status !== 'signed' && d.status !== 'void';
+  return `<tr>
+    <td><strong>${esc(d.title || 'Agreement')}</strong></td>
+    <td>${esc(d.recipient_name || '')}<br><span class="small-muted">${esc(d.recipient_email || '')}</span></td>
+    <td>${badge(d.status, d.status)}</td>
+    <td>${fmtDateTime(d.created_at)}</td>
+    <td>${d.sent_at ? fmtDateTime(d.sent_at) : ''}</td>
+    <td>${d.signed_at ? fmtDateTime(d.signed_at) + ' by ' + esc(d.signer_name || '') : ''}</td>
+    <td style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-outline" onclick="viewDocumentPdf('${d.id}')">View PDF</button>
+      ${canAct ? `<button class="btn btn-sm btn-primary" onclick="sendStandaloneDoc('${d.id}')">${d.status === 'sent' ? 'Resend' : 'Send'}</button>` : ''}
+      ${canAct ? `<button class="btn btn-sm btn-outline" onclick="voidStandaloneDoc('${d.id}')">Void</button>` : ''}
+      ${d.status === 'signed' ? `<button class="btn btn-sm btn-outline" onclick="retractStandaloneDoc('${d.id}')">Retract Signature</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+window.sendStandaloneDoc = async (id) => {
+  try {
+    const r = await api(`/documents/${id}/send`, { method: 'POST', body: {} });
+    toast(r.emailError ? `Link created, but email failed: ${r.emailError}` : 'Signing link sent', !!r.emailError);
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+window.voidStandaloneDoc = async (id) => {
+  if (!confirm('Void this e-signature request?')) return;
+  try { await api(`/documents/${id}/void`, { method: 'POST' }); toast('Voided'); load(); } catch (err) { toast(err.message, true); }
+};
+window.retractStandaloneDoc = async (id) => {
+  if (!confirm('Retract this signature? The document will go back to unsigned and can be signed again.')) return;
+  try { await api(`/documents/${id}/retract`, { method: 'POST' }); toast('Signature retracted'); load(); } catch (err) { toast(err.message, true); }
+};
+
+qs('#btn-new').addEventListener('click', () => {
+  const body = `
+    <label>Recipient Name <span class="req">*</span></label><input id="es-name" placeholder="Full name">
+    <label>Recipient Email <span class="req">*</span></label><input id="es-email" type="email" placeholder="email@example.com">
+    <label>Document Title</label><input id="es-title" placeholder="e.g. Vendor Agreement">
+    <div class="divider"></div>
+    <label>Upload PDF <span class="small-muted">(or leave blank and type the document text below)</span></label>
+    <input id="es-file" type="file" accept="application/pdf">
+    <label>Document Text <span class="small-muted">(used only if no PDF is uploaded)</span></label>
+    <textarea id="es-body" rows="6" placeholder="The full text of the agreement..."></textarea>
+  `;
+  openModal('New E-Signature Request', body, `<button class="btn btn-primary btn-sm" onclick="createStandaloneDoc()">Create</button>`);
+});
+
+window.createStandaloneDoc = async () => {
+  const recipient_name = qs('#es-name').value.trim();
+  const recipient_email = qs('#es-email').value.trim();
+  const title = qs('#es-title').value.trim();
+  const bodyText = qs('#es-body').value.trim();
+  const file = qs('#es-file').files[0];
+  if (!recipient_name || !recipient_email) return toast('Recipient name and email are required', true);
+  if (!file && !bodyText) return toast('Upload a PDF or enter the document text', true);
+
+  const fd = new FormData();
+  fd.append('recipient_name', recipient_name);
+  fd.append('recipient_email', recipient_email);
+  fd.append('title', title);
+  if (bodyText) fd.append('body_text', bodyText);
+  if (file) fd.append('file', file);
+
+  try {
+    await api('/documents/standalone', { method: 'POST', isForm: true, body: fd });
+    toast('E-signature request created');
+    closeModal(); load();
+  } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+</body>
+</html>

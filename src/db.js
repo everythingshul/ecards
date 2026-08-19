@@ -665,6 +665,15 @@ safeAlter(`ALTER TABLE applicants ADD COLUMN carried_from_applicant_id TEXT REFE
 safeAlter(`ALTER TABLE seasons ADD COLUMN disccardpromos_api_base TEXT`);
 safeAlter(`ALTER TABLE seasons ADD COLUMN disccardpromos_api_key TEXT`);
 
+// Standalone e-signature requests: entity_type='standalone' rows in the same
+// `documents` table, for a recipient who has no applicant/store/shul record
+// at all (a vendor, board member, any outside party) — a totally separate
+// use case from the entity-bound documents above and from shul `contracts`,
+// which is why it gets its own recipient fields instead of resolving through
+// resolveEntity(). entity_id stays '' (NOT NULL) for these rows; unused.
+safeAlter(`ALTER TABLE documents ADD COLUMN recipient_name TEXT`);
+safeAlter(`ALTER TABLE documents ADD COLUMN recipient_email TEXT`);
+
 // One-time normalization of pre-existing phone numbers to the canonical
 // 123-456-7890 display format (see utils/phone.js). Cheap and idempotent —
 // re-running it on already-normalized numbers is a no-op — so it's safe to

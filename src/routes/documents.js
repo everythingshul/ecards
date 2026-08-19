@@ -1,10 +1,15 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
 import { db, uuid } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
-import { generateGenericDocumentPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
+import { generateGenericDocumentPdf, buildSimplePdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 
 export function resolveEntity(entityType, entityId, orgId) {
   if (entityType === 'applicant') {
@@ -113,13 +118,51 @@ router.post('/store-agreement', auth, async (req, res) => {
   res.status(201).json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(id), sign_token: token });
 });
 
+// ============================= STANDALONE (no entity, no account) ==============================
+// A document sent to an arbitrary named recipient — a vendor, a board
+// member, any outside party with no applicant/store/shul record and no
+// portal login — total separate use case from the entity-bound documents
+// above and from shul `contracts`. Source is either an admin-uploaded PDF
+// used as-is, or simple typed text rendered the same fallback way
+// generateGenericDocumentPdf uses when no template is on file.
+router.get('/standalone', auth, requireAdmin, (req, res) => {
+  const docs = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'standalone' ORDER BY created_at DESC`).all(req.user.org_id);
+  res.json({ documents: docs });
+});
+
+router.post('/standalone', auth, requireAdmin, upload.single('file'), async (req, res) => {
+  const { title, recipient_name, recipient_email, body_text } = req.body || {};
+  if (!recipient_name || !recipient_email) return res.status(400).json({ error: 'Recipient name and email are required' });
+  if (!req.file && !body_text) return res.status(400).json({ error: 'Upload a PDF or enter the document text' });
+
+  const id = uuid();
+  const path = join(DATA_DIR, 'contracts', `standalone-${id}-unsigned.pdf`);
+  if (req.file) {
+    if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'File must be a PDF' });
+    writeFileSync(path, req.file.buffer);
+  } else {
+    const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
+    const bytes = await buildSimplePdf({
+      heading: org.name, subheading: title || 'Agreement',
+      fieldLines: [`Recipient: ${recipient_name}`, `Email: ${recipient_email}`],
+      bodyText: body_text,
+    });
+    writeFileSync(path, bytes);
+  }
+
+  db.prepare(`INSERT INTO documents (id, org_id, entity_type, entity_id, title, pdf_path, status, recipient_name, recipient_email, created_by)
+    VALUES (?,?,'standalone','',?,?,'pending',?,?,?)`).run(id, req.user.org_id, title || 'Agreement', path, recipient_name, recipient_email, req.user.id);
+  res.status(201).json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(id) });
+});
+
 // Email the signing link. Generates first if this document hasn't been generated yet.
 router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });
-  const entity = resolveEntity(document.entity_type, document.entity_id, req.user.org_id);
-  if (!entity) return res.status(404).json({ error: 'Linked record no longer exists' });
-  const to = req.body?.email || entity.contactEmail;
+  const isStandalone = document.entity_type === 'standalone';
+  const entity = isStandalone ? null : resolveEntity(document.entity_type, document.entity_id, req.user.org_id);
+  if (!isStandalone && !entity) return res.status(404).json({ error: 'Linked record no longer exists' });
+  const to = req.body?.email || (isStandalone ? document.recipient_email : entity.contactEmail);
   if (!to) return res.status(400).json({ error: 'No email on file for this record' });
 
   const token = uuid();
@@ -129,7 +172,7 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
 
   const signUrl = `${process.env.APP_URL || ''}/sign-document?token=${token}`;
   const { subject, body, replyTo } = renderSystemTemplate(req.user.org_id, 'documentReady', {
-    docTitle: document.title || 'Document', entityName: entity.displayName, signUrl,
+    docTitle: document.title || 'Document', entityName: isStandalone ? document.recipient_name : entity.displayName, signUrl,
   });
   const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body, { replyTo });
   if (emailError) console.error('[mail] document send failed:', emailError);
@@ -174,9 +217,9 @@ router.get('/sign/:token', (req, res) => {
   if (document.status === 'signed') return res.json({ document, alreadySigned: true });
   if (document.status === 'void') return res.status(410).json({ error: 'This document has been voided.' });
   if (document.sign_token_expires && new Date(document.sign_token_expires) < new Date()) return res.status(410).json({ error: 'This signing link has expired. Contact us for a new one.' });
-  const entity = resolveEntity(document.entity_type, document.entity_id, document.org_id);
+  const entityName = document.entity_type === 'standalone' ? document.recipient_name : resolveEntity(document.entity_type, document.entity_id, document.org_id)?.displayName;
   const fields = getSignatureFields(document.org_id, document.entity_type);
-  res.json({ document, entityName: entity?.displayName || '', fields });
+  res.json({ document, entityName: entityName || '', fields });
 });
 
 router.get('/sign/:token/pdf-preview', (req, res) => {
@@ -201,7 +244,7 @@ router.post('/sign/:token/sign', async (req, res) => {
   const signedAt = new Date().toISOString();
   const primary = fields.find(f => f.type === 'signature') || fields[0];
   const signedPath = await stampSignatureFields({
-    unsignedPath: document.pdf_path, shulId: `${document.entity_type}-${document.entity_id}`,
+    unsignedPath: document.pdf_path, shulId: `${document.entity_type}-${document.entity_id || document.id}`,
     fields, values, signerName: signer_name, signedAt, ip: req.ip,
   });
   const signatureData = primary ? values[primary.id] : null;
