@@ -577,6 +577,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     // same "external side-effect can fail without failing the action" pattern
     // as the approval email right above.
     let providerAccountError = null;
+    let _debugProviderResult = null;
     if (applicant.shul_id && !applicant.provider_exempt) {
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
@@ -586,6 +587,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
           homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
           email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
         });
+        _debugProviderResult = result;
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
         await unlockApplicantCustomer(applicant.season_id, result.accountId);
       } catch (e) {
@@ -615,7 +617,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
         }
       }
     }
-    res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError });
+    res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), emailError, providerAccountError, providerFundsError, _debugProviderResult });
   } finally {
     approvalsInFlight.delete(applicant.external_id);
   }

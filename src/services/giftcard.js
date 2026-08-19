@@ -431,8 +431,12 @@ export async function upsertAccountForApproval(seasonId, opts) {
   const existing = await findCustomerByExternalId(seasonId, externalId);
   if (existing) {
     const updated = await updateCustomer(seasonId, existing.id, opts);
-    return { created: false, accountId: updated.id ?? existing.id };
+    return { created: false, accountId: updated.id ?? existing.id, _debugExistingId: existing.id, _debugExternalIdAfter: updated.external_id };
   }
   const created = await createCustomer(seasonId, opts);
-  return { created: true, accountId: created.id };
+  // _debug* fields are temporary — investigating why external_id sometimes
+  // doesn't stick when this runs via the real approve route despite working
+  // in isolated testing. Harmless to leave on the return value; callers
+  // that don't look for them are unaffected.
+  return { created: true, accountId: created.id, _debugExternalIdAfter: created.external_id, _debugPatchError: created._patchError };
 }
