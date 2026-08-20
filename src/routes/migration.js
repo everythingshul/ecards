@@ -10,7 +10,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { spawn } from 'child_process';
-import { existsSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, unlinkSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { db, DATA_DIR } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
@@ -38,11 +38,22 @@ const upload = multer({
 // checkpoint first folds any pending write-ahead-log content into the main
 // .sqlite file so the exported database is fully self-contained (no
 // dependency on -wal/-shm sidecar files carrying over correctly).
+//
+// Archives DATA_DIR's individual top-level entries (ecards.sqlite,
+// uploads/, contracts/, ...) rather than `.` itself — live-tested
+// 2026-08-20 against a real Render persistent-disk mount: archiving `.`
+// records a directory entry for the mount root, and on extract GNU tar's
+// final pass tries to restore that entry's own permissions/mtime to match
+// the archive, which fails with EPERM because the mount root's own
+// metadata isn't something this process is allowed to change (even though
+// everything under it is writable). Never archiving a `./` entry in the
+// first place sidesteps that restore attempt entirely on import.
 router.get('/export', (req, res) => {
   try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) { console.error('[migration] wal checkpoint failed:', e.message); }
   res.setHeader('Content-Type', 'application/gzip');
   res.setHeader('Content-Disposition', `attachment; filename="kipas-hair-bp-full-data-${Date.now()}.tar.gz"`);
-  const tar = spawn('tar', ['czf', '-', '--exclude=tmp', '-C', DATA_DIR, '.']);
+  const entries = readdirSync(DATA_DIR).filter((name) => name !== 'tmp');
+  const tar = spawn('tar', ['czf', '-', '-C', DATA_DIR, ...entries]);
   tar.stdout.pipe(res);
   tar.stderr.on('data', (d) => console.error('[migration export] tar stderr:', d.toString()));
   tar.on('error', (e) => { console.error('[migration export] tar failed to start:', e.message); if (!res.headersSent) res.status(500).json({ error: e.message }); });
@@ -74,7 +85,7 @@ router.post('/import', upload.single('archive'), async (req, res) => {
   }
   try {
     await new Promise((resolve, reject) => {
-      const tar = spawn('tar', ['xzf', req.file.path, '-C', DATA_DIR]);
+      const tar = spawn('tar', ['xzf', req.file.path, '-C', DATA_DIR, '--no-same-owner']);
       tar.stderr.on('data', (d) => console.error('[migration import] tar stderr:', d.toString()));
       tar.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`)));
       tar.on('error', reject);
