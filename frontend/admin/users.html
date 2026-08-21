@@ -112,10 +112,21 @@ async function openUser(id) {
   try {
     const { user: u, permissions } = await api(`/users/${id}`);
     const permMap = Object.fromEntries(permissions.map(p => [p.resource, p]));
-    // Matches RESOURCE_DEFAULT_OVERRIDES in middleware/permissions.js — audit
-    // (Recent Actions) is denied by default for everyone but super_admin
-    // until explicitly granted, unlike every other resource's view-by-default.
-    const defaultPermFor = (r) => r === 'audit' ? { can_view: 0, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] } : { can_view: 1, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] };
+    // Must mirror ROLE_DEFAULTS/RESOURCE_DEFAULT_OVERRIDES in
+    // middleware/permissions.js exactly — this is what the server actually
+    // falls back to for a resource with no explicit row, so the checkboxes
+    // have to show that TRUE current state, not a guess. Getting this wrong
+    // is dangerous, not just cosmetic: saveUser() below always writes a row
+    // for every resource from whatever's currently checked, on every save
+    // (even one that only touched the name field) — so if this showed
+    // unchecked Edit/Export for an org_admin (whose real default is full
+    // access to everything), simply opening their profile and hitting Save
+    // would silently downgrade them to view-only across the entire app.
+    const defaultPermFor = (r, role) => {
+      if (r === 'audit') return { can_view: 0, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] };
+      if (role === 'super_admin' || role === 'org_admin') return { can_view: 1, can_edit: 1, can_export: 1, scope: 'all', hidden_fields: [] };
+      return { can_view: 1, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] };
+    };
     const body = `
       <div class="grid-2">
         <div><label>First Name</label><input id="e-first_name" value="${esc(u.first_name||'')}"></div>
@@ -127,7 +138,7 @@ async function openUser(id) {
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
       <div class="divider"></div>
       <h4>Page & Field Permissions</h4>
-      ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPermFor(r))).join('')}
+      ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPermFor(r, u.role))).join('')}
     `;
     const canSetPassword = ['super_admin','org_admin'].includes(Auth.user()?.role) && ROLE_RANK[u.role] < ROLE_RANK[Auth.user()?.role];
     openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button>${canSetPassword ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${id}','${esc(u.first_name+' '+u.last_name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
