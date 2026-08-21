@@ -53,6 +53,7 @@
 let shulId = null, signToken = null, currentSchema = [];
 let contractFields = [{ id: 'signature', type: 'signature', label: 'Signature', required: true }];
 let contractPdfUrl = '';
+let contractAtSignup = true;
 
 // Fixed question set for Shul Registration (utils/builtinSchemas.js) — no
 // longer editable through Form Builder.
@@ -68,6 +69,15 @@ let contractPdfUrl = '';
   });
 })();
 
+// Whether a contract needs to be signed in this same sitting, or is instead
+// emailed separately later (Settings > Documents > Shul Contract) — decides
+// the submit button's label up front, before the org even knows anything
+// was submitted.
+api('/orgs/resolve').then(({ content }) => {
+  contractAtSignup = content?.shulContractAtSignup !== false;
+  if (!contractAtSignup) qs('#submit-btn').textContent = 'Submit';
+}).catch(() => {});
+
 qs('#apply-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = qs('#submit-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
@@ -76,21 +86,13 @@ qs('#apply-form').addEventListener('submit', async (e) => {
   try {
     const { shul, duplicate, message } = await api('/shuls/apply', { method: 'POST', body: data });
     shulId = shul.id;
-    if (duplicate) {
+    if (duplicate || !contractAtSignup) {
       qs('#apply-form').style.display = 'none';
       qs('#done-section').style.display = 'block';
       qs('#done-message').textContent = message;
       return;
     }
-    const { sign_token, emailed } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
-    if (emailed || !sign_token) {
-      // Org has "require signing during signup" turned off — the contract
-      // was emailed separately instead of being shown here.
-      qs('#apply-form').style.display = 'none';
-      qs('#done-section').style.display = 'block';
-      qs('#done-message').textContent = message || "Application received. We've emailed you your contract to review and sign.";
-      return;
-    }
+    const { sign_token } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
     signToken = sign_token;
     const { fields } = await api(`/shuls/contract/${signToken}`);
     if (fields && fields.length) contractFields = fields;
@@ -102,7 +104,7 @@ qs('#apply-form').addEventListener('submit', async (e) => {
     await renderPdfSigningPages(contractPdfUrl, contractFields, 'pdf-pages');
   } catch (err) {
     toast(err.message, true);
-    btn.disabled = false; btn.textContent = 'Continue to Contract';
+    btn.disabled = false; btn.textContent = contractAtSignup ? 'Continue to Contract' : 'Submit';
   }
 });
 

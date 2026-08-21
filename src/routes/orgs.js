@@ -17,7 +17,8 @@ router.get('/resolve', (req, res) => {
   const rows = db.prepare(`SELECT key, value FROM settings WHERE org_id = ? AND key IN
     ('homepage_popup_enabled','homepage_popup_message','header_nav_buttons','footer_nav_buttons','cta_buttons',
      'homepage_about_text','faq_items','homepage_hero_eyebrow','homepage_hero_heading','homepage_schedule_heading','homepage_about_heading','schedule_items',
-     'homepage_image_url','homepage_image_alt','homepage_image_button_enabled','homepage_image_button_text')`).all(DEFAULT_ORG_ID);
+     'homepage_image_url','homepage_image_alt','homepage_image_button_enabled','homepage_image_button_text',
+     'shul_contract_at_signup','store_contract_at_signup')`).all(DEFAULT_ORG_ID);
   const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
   const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
   res.json({
@@ -40,6 +41,8 @@ router.get('/resolve', (req, res) => {
         buttonText: s.homepage_image_button_text || 'View',
       } : null,
     },
+    shulContractAtSignup: s.shul_contract_at_signup !== '0',
+    storeContractAtSignup: s.store_contract_at_signup !== '0',
   });
 });
 

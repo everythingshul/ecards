@@ -69,7 +69,7 @@ function shulLoginUrl(user) {
 // Public shul onboarding form submission. No auth — this is the form referenced
 // in spec item #1. Creates the shul record, runs duplicate detection, and
 // generates (but does not yet send) the contract PDF.
-router.post('/apply', (req, res) => {
+router.post('/apply', async (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
   const b = req.body || {};
   // Fixed question set (see utils/builtinSchemas.js) — no longer driven by
@@ -96,7 +96,19 @@ router.post('/apply', (req, res) => {
   const flag = detectAndFlag(orgId, 'shul', shulRow);
   logAudit(orgId, null, 'create', 'shul', id, null, shulRow, req.ip);
   if (flag) return res.status(201).json({ shul: shulRow, duplicate: true, message: 'Your application was received, but a similar shul is already on file. Our team will follow up.' });
-  res.status(201).json({ shul: shulRow, duplicate: false, message: 'Application received. You will receive an email with your contract to sign shortly.' });
+
+  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_contract_at_signup'`).get(orgId)?.value !== '0';
+  if (!signAtSignup) {
+    // No contract at signup — just a plain "we received it" email, not the
+    // actual contract. The real contract gets sent later as a deliberate,
+    // separate step (Shul detail > Contract tab's "Generate & Email
+    // Contract"), not automatically here.
+    const tmpl = renderSystemTemplate(orgId, 'applicationReceived', { entityName: shulRow.name_en });
+    const { emailError } = await sendMailChecked(orgId, shulRow.gabai_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+    if (emailError) console.error('[mail] application-received email failed:', emailError);
+    return res.status(201).json({ shul: shulRow, duplicate: false, contractAtSignup: false, message: "Application received. We'll be in touch." });
+  }
+  res.status(201).json({ shul: shulRow, duplicate: false, contractAtSignup: true, message: 'Application received. You will receive an email with your contract to sign shortly.' });
 });
 
 // Public: minimal shul picker list for public applicant forms (name + id only).
@@ -108,13 +120,14 @@ router.get('/public/list', (req, res) => {
   res.json({ shuls: rows });
 });
 
-// Public: right after form submission, either lets the applicant sign in the
-// same sitting (spec #1: "fill out a form... and esign a contract" — the
-// default) or, when Settings > Documents > Shul Contract has "Require
-// signing during signup" turned off, generates the same contract but emails
-// the signing link instead — same status labels either way (contract_sent ->
-// contract_signed), just a different moment/channel for getting there.
-// Idempotent per shul.
+// Public: immediately generate the contract right after form submission so the
+// applicant can sign in the same sitting (spec #1: "fill out a form... and
+// esign a contract"), rather than waiting on an admin action. Only ever
+// called by apply.html when Settings > Documents > Shul Contract has
+// "Require signing during signup" turned on — when it's off, /apply sends a
+// plain "we received it" email instead and this route is never reached; the
+// actual contract gets sent later as its own deliberate step (Shul detail >
+// Contract tab). Idempotent per shul.
 router.post('/:id/generate-contract', async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.params.id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
@@ -129,15 +142,7 @@ router.post('/:id/generate-contract', async (req, res) => {
   db.prepare(`INSERT INTO contracts (id, shul_id, season_id, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,?,?,'sent',?,?,datetime('now'))`).run(uuid(), shul.id, shul.season_id, pdfPath, token, expires);
   db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
-
-  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_contract_at_signup'`).get(shul.org_id)?.value !== '0';
-  if (signAtSignup) return res.json({ sign_token: token, alreadySigned: false });
-
-  const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
-  const tmpl = renderSystemTemplate(shul.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
-  const { emailError } = await sendMailChecked(shul.org_id, shul.gabai_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
-  if (emailError) console.error('[mail] signup-time contract email failed:', emailError);
-  res.json({ sign_token: null, alreadySigned: false, emailed: true, emailError });
+  res.json({ sign_token: token, alreadySigned: false });
 });
 
 // Public: fetch a shul's contract by sign token (emailed link).

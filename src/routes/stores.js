@@ -24,7 +24,7 @@ const BILLS_DIR = join(DATA_DIR, 'store-bills');
 // 'pending'; admin reviews and invites to the portal same as an admin-added
 // store. Fixed question set (see utils/builtinSchemas.js) — no longer driven
 // by an editable Form Builder row.
-router.post('/apply', (req, res) => {
+router.post('/apply', async (req, res) => {
   const orgId = req.body.org_id || DEFAULT_ORG_ID;
   const b = req.body || {};
   const errors = validateBySchema(STORE_APPLICATION_SCHEMA, b, { isAdmin: false });
@@ -40,17 +40,32 @@ router.post('/apply', (req, res) => {
       samePerson ? b.owner_name || '' : b.manager_name || '', samePerson ? normalizePhone(b.owner_phone || '') : normalizePhone(b.manager_phone || ''), samePerson ? b.owner_email || '' : b.manager_email || '',
       b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email, samePerson ? 1 : 0,
       b.comments || '', b.has_provider_account ? 1 : 0);
-  res.status(201).json({ store: db.prepare('SELECT * FROM stores WHERE id = ?').get(id), message: 'Application received. We will reach out once your store is reviewed and approved.' });
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(id);
+
+  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'store_contract_at_signup'`).get(orgId)?.value !== '0';
+  if (!signAtSignup) {
+    // No agreement at signup — just a plain "we received it" email, not the
+    // actual agreement. The real one gets sent later as a deliberate,
+    // separate step (Store detail > Documents tab), not automatically here.
+    const tmpl = renderSystemTemplate(orgId, 'applicationReceived', { entityName: store.name });
+    const { emailError } = await sendMailChecked(orgId, store.owner_email || store.manager_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+    if (emailError) console.error('[mail] application-received email failed:', emailError);
+    return res.status(201).json({ store, contractAtSignup: false, message: "Application received. We'll be in touch." });
+  }
+  res.status(201).json({ store, contractAtSignup: true, message: 'Application received. We will reach out once your store is reviewed and approved.' });
 });
 
 // Public: immediately generate the store's participation agreement right
 // after application submission, so it can be signed in the same sitting —
 // same "fill out a form, then esign right here" flow as shuls (see
 // shuls.js POST /:id/generate-contract), just backed by the generic
-// documents system instead of a dedicated contracts table. Idempotent per
-// store. Signing itself goes through documents.js's public token endpoints
-// (GET/POST /documents/sign/:token...) since a store's agreement is just
-// another entity_type='store' document.
+// documents system instead of a dedicated contracts table. Only ever called
+// by apply-store.html when Settings > Documents > Store Agreement has
+// "Require signing during signup" turned on — when it's off, /apply sends a
+// plain "we received it" email instead and this route is never reached.
+// Idempotent per store. Signing itself goes through documents.js's public
+// token endpoints (GET/POST /documents/sign/:token...) since a store's
+// agreement is just another entity_type='store' document.
 router.post('/:id/generate-contract', async (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.params.id);
   if (!store) return res.status(404).json({ error: 'Not found' });
@@ -71,19 +86,7 @@ router.post('/:id/generate-contract', async (req, res) => {
   const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
   db.prepare(`INSERT INTO documents (id, org_id, entity_type, entity_id, title, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,'store',?,?,?,'sent',?,?,datetime('now'))`).run(id, store.org_id, store.id, 'Store Participation Agreement', pdfPath, token, expires);
-
-  // Same "require signing during signup vs. email it separately" toggle as
-  // shuls (Settings > Documents > Store Agreement) — same status labels
-  // either way, just a different moment/channel for getting the signature.
-  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'store_contract_at_signup'`).get(store.org_id)?.value !== '0';
-  if (signAtSignup) return res.json({ sign_token: token, alreadySigned: false });
-
-  const signUrl = `${process.env.APP_URL || ''}/sign-document?token=${token}`;
-  const tmpl = renderSystemTemplate(store.org_id, 'documentReady', { docTitle: 'Store Participation Agreement', entityName: store.name, signUrl });
-  const to = store.owner_email || store.manager_email;
-  const { emailError } = to ? await sendMailChecked(store.org_id, to, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }) : { emailError: 'No email on file' };
-  if (emailError) console.error('[mail] signup-time store agreement email failed:', emailError);
-  res.json({ sign_token: null, alreadySigned: false, emailed: true, emailError });
+  res.json({ sign_token: token, alreadySigned: false });
 });
 
 router.use(auth, requirePermission('stores'));
