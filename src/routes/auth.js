@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db, uuid } from '../db.js';
 import { auth, signToken } from '../middleware/auth.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
+import { computePermissionMap } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -19,12 +20,14 @@ router.post('/login', (req, res) => {
   db.prepare(`INSERT INTO audit_log (id, org_id, user_id, action, entity_type, entity_id, ip_address) VALUES (?,?,?,?,?,?,?)`)
     .run(uuid(), user.org_id, user.id, 'login', 'user', user.id, req.ip);
   const { password_hash, ...safe } = user;
-  res.json({ token: signToken(user), user: safe });
+  // Handed to the client so nav items it can't view are hidden outright
+  // (see app.js's renderShell) instead of shown and only 403ing on click.
+  res.json({ token: signToken(user), user: safe, permissions: computePermissionMap(user) });
 });
 
 router.get('/me', auth, (req, res) => {
   const { password_hash, ...safe } = req.user;
-  res.json({ user: safe });
+  res.json({ user: safe, permissions: computePermissionMap(req.user) });
 });
 
 // Accept an invite (set initial password) — token comes from the approval email.
@@ -38,7 +41,7 @@ router.post('/accept-invite', (req, res) => {
     .run(bcrypt.hashSync(password, 10), user.id);
   const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   const { password_hash, ...safe } = fresh;
-  res.json({ token: signToken(fresh), user: safe });
+  res.json({ token: signToken(fresh), user: safe, permissions: computePermissionMap(fresh) });
 });
 
 router.post('/forgot-password', async (req, res) => {

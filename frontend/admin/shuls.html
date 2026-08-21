@@ -290,6 +290,9 @@ async function openShul(id) {
         </div>
         <label>Zip</label><input id="e-gabai_zip" value="${esc(shul.gabai_zip||'')}" style="max-width:160px">
         <div class="divider"></div>
+        <label>Default Minimum Contribution ($) <span class="small-muted">(internal — never shown to this shul; used unless a specific applicant has its own override)</span></label>
+        <input id="e-min_contribution_default" type="number" step="0.01" min="0" value="${shul.min_contribution_default ?? ''}" placeholder="No minimum">
+        <div class="divider"></div>
         <label>Permanent Comments (internal — carries forward to future seasons)</label>
         <textarea id="e-permanent_comments" rows="3">${esc(shul.permanent_comments||'')}</textarea>
         ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from the Shuls > Duplicates review.</div>` : ''}
@@ -337,6 +340,8 @@ window.saveShul = async (id) => {
     'gabai_first_name','gabai_last_name','gabai_cell','gabai_email','gabai_address','gabai_city','gabai_state','gabai_zip','permanent_comments'];
   const body = Object.fromEntries(fields.map(f => [f, qs('#e-'+f).value]));
   body.slots_allocated = +qs('#e-slots_allocated').value;
+  const minContrib = qs('#e-min_contribution_default').value;
+  body.min_contribution_default = minContrib === '' ? null : +minContrib;
   try { await api(`/shuls/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.addShulNote = async (id) => {

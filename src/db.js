@@ -666,6 +666,18 @@ safeAlter(`ALTER TABLE applicants ADD COLUMN carried_from_applicant_id TEXT REFE
 // flagged-against reference/audit trail).
 safeAlter(`ALTER TABLE applicants ADD COLUMN merge_group_id TEXT`);
 
+// "Minimum shul contribution" feature: a season can require the shul to
+// report how much of their OWN money they already gave a family, and
+// confirm it, before that applicant can be approved/carded — see
+// routes/applicants.js's /:id/approve and /mass-approve. The minimum bar
+// itself (per-applicant override, falling back to the shul's default) is
+// admin-only and never sent to a shul-role request — see maskForShul.
+safeAlter(`ALTER TABLE seasons ADD COLUMN require_shul_contribution INTEGER DEFAULT 0`);
+safeAlter(`ALTER TABLE shuls ADD COLUMN min_contribution_default REAL`);
+safeAlter(`ALTER TABLE applicants ADD COLUMN min_contribution_override REAL`);
+safeAlter(`ALTER TABLE applicants ADD COLUMN shul_contribution_amount REAL`);
+safeAlter(`ALTER TABLE applicants ADD COLUMN shul_contribution_confirmed INTEGER DEFAULT 0`);
+
 // Per-season disccardpromos credentials (see services/giftcard.js) — for
 // now, each season can hold its own API base/key, entered on the season's
 // edit form. Empty on a season falls back to the org-wide

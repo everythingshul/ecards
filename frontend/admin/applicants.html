@@ -161,8 +161,9 @@ const MASS_ACTIONS = {
     },
     summarize: r => {
       let msg = `Approved ${r.approved}, skipped ${r.skipped}${r.capReached ? ' (season capacity reached)' : ' (paused)'}`;
+      if (r.contributionBlocked) msg += ` — ${r.contributionBlocked} skipped: shul contribution not confirmed / below minimum`;
       if (r.providerErrors) msg += ` — ${r.providerErrors} disccardpromos issue(s)${r.providerErrorsHint ? ': ' + r.providerErrorsHint : ''}`;
-      return { msg, isError: !!r.providerErrors };
+      return { msg, isError: !!r.providerErrors || !!r.contributionBlocked };
     },
   },
   reject: {
@@ -196,7 +197,7 @@ qs('#btn-mass-apply').addEventListener('click', async () => {
 
 async function openApplicant(id) {
   try {
-    const { applicant: a, notes, cards, flags, mergeGroup } = await api(`/applicants/${id}`);
+    const { applicant: a, notes, cards, flags, mergeGroup, requiresShulContribution } = await api(`/applicants/${id}`);
     const body = `
       <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button><button data-t="messages">Messages</button><button data-t="history">History</button></div>
       <div id="atab-info">
@@ -237,6 +238,13 @@ async function openApplicant(id) {
         <label>Card Amount ($)</label><input id="e-card" type="number" step="0.01" value="${a.card_amount ?? ''}">
         ${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="e-provider-exempt" ${a.provider_exempt?'checked':''}><label style="margin:0">Never send to disccardpromos (one-time backfill import)</label></div>` : ''}
         <label>Comments</label><textarea id="e-comments" rows="3">${esc(a.comments||'')}</textarea>
+        ${requiresShulContribution ? `<div class="divider"></div>
+        <label>Minimum Contribution Override ($, internal — hidden from shul; blank uses the shul's default)</label>
+        <input id="e-min_contribution_override" type="number" step="0.01" min="0" value="${a.min_contribution_override ?? ''}" placeholder="Use shul default">
+        <div class="grid-2" style="margin-top:10px">
+          <div><strong>Shul-Reported Contribution</strong><br>${a.shul_contribution_amount != null ? fmtMoney(a.shul_contribution_amount) : '<span class="small-muted">Not reported yet</span>'}</div>
+          <div><strong>Shul Confirmed</strong><br>${a.shul_contribution_confirmed ? 'Yes' : 'No'}</div>
+        </div>` : ''}
         <label>Permanent Comments (internal — carries forward to future seasons)</label>
         <textarea id="e-permanent_comments" rows="3">${esc(a.permanent_comments||'')}</textarea>
         ${flags.length ? `<div class="divider"></div><div style="color:var(--danger)"><strong>&#9888; Duplicate flag open.</strong> Resolve from Applicants > Duplicates.</div>` : ''}
@@ -289,6 +297,8 @@ window.saveApplicant = async (id) => {
   };
   const providerExemptEl = qs('#e-provider-exempt');
   if (providerExemptEl) body.provider_exempt = providerExemptEl.checked;
+  const minContribEl = qs('#e-min_contribution_override');
+  if (minContribEl) body.min_contribution_override = minContribEl.value === '' ? null : +minContribEl.value;
   // Skip shul_id only if the dropdown hasn't finished loading yet — normally
   // it's always pre-filled with the applicant's current shul, so this just
   // sends whatever's selected (unchanged or newly picked).

@@ -578,6 +578,9 @@ async function loadSeasons() {
         <div><label style="margin-top:0">Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input type="number" min="0" value="${s.max_accepted_applicants ?? ''}" placeholder="Unlimited" onchange="updateSeason('${s.id}',{max_accepted_applicants: this.value === '' ? null : +this.value})"></div>
         <div><label style="margin-top:0">Accepted So Far</label><div style="padding:9px 0">${s.accepted_count}${s.max_accepted_applicants != null ? ` of ${s.max_accepted_applicants} (${s.remaining} remaining)${s.is_full ? ' ' + badge('full','rejected') : ''}` : ' (no cap set)'}</div></div>
       </div>
+      <div class="checkbox-row" style="margin-top:10px"><input type="checkbox" id="s-contrib-${s.id}" ${s.require_shul_contribution?'checked':''} onchange="updateSeason('${s.id}',{require_shul_contribution:this.checked})">
+        <label for="s-contrib-${s.id}" style="margin:0">Require shuls to report &amp; confirm a minimum contribution before an applicant can be approved</label></div>
+      <p class="small-muted">When on, a shul must enter how much they personally gave a family and check a confirmation box before that applicant can be approved. The minimum amount required (set per shul, overridable per applicant) is never shown to the shul.</p>
       <div class="divider"></div>
       <button class="btn btn-sm btn-outline" onclick="openSeasonNotes('${s.id}','${esc(s.name).replace(/'/g,"\\'")}')">Notes</button>
       <button class="btn btn-sm btn-outline" onclick="openSeasonGiftCardApi('${s.id}','${esc(s.name).replace(/'/g,"\\'")}', ${JSON.stringify(s.disccardpromos_api_base||'')}, ${!!s.has_disccardpromos_api_key})">Gift Card API${s.disccardpromos_api_base && s.has_disccardpromos_api_key ? ' ' + badge('configured','active') : ''}</button>

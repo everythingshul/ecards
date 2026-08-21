@@ -23,7 +23,8 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email',
-  'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount','provider_exempt'];
+  'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount','provider_exempt',
+  'shul_contribution_amount','shul_contribution_confirmed'];
 
 // Which applicant fields Settings > Organization > Gift Card Loading lets an
 // admin choose to push to disccardpromos — external_id and the shul's group
@@ -70,6 +71,26 @@ function buildProviderOpts(orgId, applicant, groupName) {
 // so a secondary is any row where that id differs from its own.
 function isMergedSecondary(applicant) {
   return !!applicant.merge_group_id && applicant.merge_group_id !== applicant.id;
+}
+
+// Season setting "require_shul_contribution": before an applicant can be
+// approved/carded, the shul must have confirmed how much they personally
+// gave the family, and that amount must meet the effective minimum bar
+// (an admin-only per-applicant override, falling back to the shul's
+// admin-only default, falling back to no minimum at all). Returns an
+// admin-facing error string (safe to include the real minimum — only admins
+// ever see /approve responses) or null if the applicant clears the gate.
+function shulContributionError(applicant) {
+  if (!applicant.shul_contribution_confirmed) {
+    return 'The shul has not yet reported and confirmed how much they personally gave this family — cannot approve until they do.';
+  }
+  const shul = applicant.shul_id ? db.prepare('SELECT min_contribution_default FROM shuls WHERE id = ?').get(applicant.shul_id) : null;
+  const effectiveMin = applicant.min_contribution_override ?? shul?.min_contribution_default ?? 0;
+  const reported = applicant.shul_contribution_amount ?? 0;
+  if (effectiveMin > 0 && reported < effectiveMin) {
+    return `The shul-reported contribution ($${reported.toFixed(2)}) is below the required minimum of $${effectiveMin.toFixed(2)} for this applicant.`;
+  }
+  return null;
 }
 
 // ============================= PUBLIC ==============================
@@ -129,12 +150,27 @@ function maskForShul(records, role, orgId) {
   // Organization > Shul Portal) — defaults to visible, same as before the
   // toggle existed, unless explicitly turned off.
   const cardVisible = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_card_amount_visible'`).get(orgId)?.value !== '0';
+  // Cache season lookups across a whole list-page mask pass rather than
+  // re-querying per row.
+  const seasonReqCache = new Map();
+  const requiresContribution = (seasonId) => {
+    if (!seasonId) return false;
+    if (!seasonReqCache.has(seasonId)) {
+      seasonReqCache.set(seasonId, !!db.prepare('SELECT require_shul_contribution FROM seasons WHERE id = ?').get(seasonId)?.require_shul_contribution);
+    }
+    return seasonReqCache.get(seasonId);
+  };
   const mask = (r) => {
     const rec = { ...r, approval_status: r.approval_status === 'rejected' ? 'pending' : r.approval_status, duplicate_status: null, duplicate_of_applicant_id: null, is_paused: 0 };
     if (!cardVisible) delete rec.card_amount;
     // Internal-only, not a configurable hidden field — a shul should never
     // even know this column exists, same boundary as applicant_notes.
     delete rec.permanent_comments;
+    // The actual minimum bar is admin-only (per-applicant override) — a shul
+    // only ever learns whether it must report/confirm an amount at all,
+    // never the number it's being checked against.
+    delete rec.min_contribution_override;
+    rec.requiresShulContribution = requiresContribution(r.season_id);
     return rec;
   };
   return Array.isArray(records) ? records.map(mask) : mask(records);
@@ -223,7 +259,8 @@ router.get('/:id', (req, res) => {
     ? db.prepare(`SELECT a.id, a.first_name, a.last_name, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id
         WHERE a.merge_group_id = ? AND a.id != ?`).all(applicant.merge_group_id, applicant.id)
     : [];
-  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags, mergeGroup });
+  const requiresShulContribution = !!db.prepare('SELECT require_shul_contribution FROM seasons WHERE id = ?').get(applicant.season_id)?.require_shul_contribution;
+  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags, mergeGroup, requiresShulContribution });
 });
 
 // Who edited this record and when — a shul viewing their own applicant
@@ -372,10 +409,10 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), async (req, res)
   // admin-only (spec #5 for card_amount; shul_id because a shul reassigning
   // its own applicants to a different shul would be a data-integrity/scope
   // violation, not a legitimate self-service edit).
-  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount' && f !== 'provider_exempt') : [...EDITABLE_FIELDS, 'shul_id', 'permanent_comments'];
+  const fields = req.user.role === 'shul' ? EDITABLE_FIELDS.filter(f => f !== 'card_amount' && f !== 'provider_exempt') : [...EDITABLE_FIELDS, 'shul_id', 'permanent_comments', 'min_contribution_override'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
-    const vals = sets.map(f => (f === 'home_for_yomtov' || f === 'provider_exempt') ? (b[f] ? 1 : 0) : b[f]);
+    const vals = sets.map(f => (f === 'home_for_yomtov' || f === 'provider_exempt' || f === 'shul_contribution_confirmed') ? (b[f] ? 1 : 0) : b[f]);
     db.prepare(`UPDATE applicants SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...vals, applicant.id);
     logAudit(req.user.org_id, req.user.id, 'update', 'applicant', applicant.id,
       Object.fromEntries(sets.map(f => [f, applicant[f]])), Object.fromEntries(sets.map((f, i) => [f, vals[i]])), req.ip);
@@ -633,6 +670,10 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
       if (accepted >= season.max_accepted_applicants) return res.status(400).json({ error: `This season's cap of ${season.max_accepted_applicants} accepted applicant(s) has already been reached.` });
     }
+    if (season?.require_shul_contribution) {
+      const contribErr = shulContributionError(applicant);
+      if (contribErr) return res.status(400).json({ error: contribErr });
+    }
     const amount = req.body?.card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
     db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`)
       .run(req.user.id, amount, applicant.id);
@@ -775,7 +816,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
   const { ids, card_amount } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
-  let approved = 0, skipped = 0, capReached = false, providerErrors = 0;
+  let approved = 0, skipped = 0, capReached = false, providerErrors = 0, contributionBlocked = 0;
   const affectedIds = [], names = [];
   for (const id of ids) {
     const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
@@ -785,6 +826,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
       const accepted = db.prepare(`SELECT COUNT(*) c FROM applicants WHERE season_id = ? AND approval_status = 'approved'`).get(season.id).c;
       if (accepted >= season.max_accepted_applicants) { skipped++; capReached = true; continue; }
     }
+    if (season?.require_shul_contribution && shulContributionError(applicant)) { skipped++; contributionBlocked++; continue; }
     const amount = card_amount ?? applicant.card_amount ?? season?.default_card_amount ?? 0;
     db.prepare(`UPDATE applicants SET approval_status='approved', approved_by=?, approved_at=datetime('now'), card_amount=? WHERE id=?`).run(req.user.id, amount, id);
     affectedIds.push(id); names.push(`${applicant.first_name} ${applicant.last_name}`.trim());
@@ -819,8 +861,8 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
       }
     }
   }
-  logMassAudit(req.user.org_id, req.user.id, 'mass-approve', 'applicant', affectedIds, { skipped, capReached, providerErrors, names }, req.ip);
-  res.json({ approved, skipped, capReached, providerErrors, providerErrorsHint: providerErrors && !discountId ? 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading).' : undefined });
+  logMassAudit(req.user.org_id, req.user.id, 'mass-approve', 'applicant', affectedIds, { skipped, capReached, providerErrors, contributionBlocked, names }, req.ip);
+  res.json({ approved, skipped, capReached, providerErrors, contributionBlocked, providerErrorsHint: providerErrors && !discountId ? 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading).' : undefined });
 });
 
 router.post('/:id/notes', (req, res) => {

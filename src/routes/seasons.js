@@ -86,8 +86,10 @@ router.put('/:id', requireAdmin, (req, res) => {
   const apiKey = f.disccardpromos_api_key === undefined ? undefined : (f.disccardpromos_api_key || null);
   db.prepare(`UPDATE seasons SET name=COALESCE(?,name), start_date=COALESCE(?,start_date), end_date=COALESCE(?,end_date),
     default_card_amount=COALESCE(?,default_card_amount), max_accepted_applicants=CASE WHEN ? THEN ? ELSE max_accepted_applicants END, is_active=COALESCE(?,is_active),
+    require_shul_contribution=COALESCE(?,require_shul_contribution),
     disccardpromos_api_base=CASE WHEN ? THEN ? ELSE disccardpromos_api_base END, disccardpromos_api_key=CASE WHEN ? THEN ? ELSE disccardpromos_api_key END WHERE id=?`)
     .run(f.name, f.start_date, f.end_date, f.default_card_amount, maxCap !== undefined ? 1 : 0, maxCap, f.is_active === undefined ? undefined : (f.is_active ? 1 : 0),
+      f.require_shul_contribution === undefined ? undefined : (f.require_shul_contribution ? 1 : 0),
       apiBase !== undefined ? 1 : 0, apiBase, apiKey !== undefined ? 1 : 0, apiKey, season.id);
   res.json({ season: withCapacity(db.prepare('SELECT * FROM seasons WHERE id = ?').get(season.id)) });
 });

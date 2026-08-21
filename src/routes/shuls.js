@@ -262,7 +262,7 @@ router.get('/:id', (req, res) => {
   // Internal-only, not a configurable hidden field — a shul should never
   // even know this column exists, same boundary as shul_notes' contents
   // being an admin-facing thing (the shul just never has a UI for this one).
-  if (req.user.role === 'shul') delete shulOut.permanent_comments;
+  if (req.user.role === 'shul') { delete shulOut.permanent_comments; delete shulOut.min_contribution_default; }
   // What the live shul application form would still consider missing on
   // this exact row — same schema-driven check the public apply form and
   // admin approval already use (see #147: a shul carried into a new season
@@ -540,7 +540,7 @@ router.put('/:id', (req, res) => {
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
   if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
-  const fields = isSelf ? SHUL_SELF_EDITABLE_FIELDS : [...SHUL_SELF_EDITABLE_FIELDS, 'slots_allocated', 'permanent_comments'];
+  const fields = isSelf ? SHUL_SELF_EDITABLE_FIELDS : [...SHUL_SELF_EDITABLE_FIELDS, 'slots_allocated', 'permanent_comments', 'min_contribution_default'];
   const sets = fields.filter(f => b[f] !== undefined);
   if (sets.length) {
     db.prepare(`UPDATE shuls SET ${sets.map(f => `${f}=?`).join(',')}, updated_at=datetime('now') WHERE id=?`).run(...sets.map(f => b[f]), shul.id);

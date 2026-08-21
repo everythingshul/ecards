@@ -34,8 +34,8 @@ qs('#form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (qs('#password').value !== qs('#confirm').value) return toast('Passwords do not match', true);
   try {
-    const { token: authToken, user } = await api('/auth/accept-invite', { method: 'POST', body: { token, password: qs('#password').value } });
-    Auth.set(authToken, user);
+    const { token: authToken, user, permissions } = await api('/auth/accept-invite', { method: 'POST', body: { token, password: qs('#password').value } });
+    Auth.set(authToken, user, permissions);
     if (user.role === 'shul') location.href = '/shul-portal/dashboard';
     else if (user.role === 'store') location.href = await storeLandingUrl(user);
     else location.href = '/admin/dashboard';

@@ -14,6 +14,24 @@ const ROLE_DEFAULTS = {
 };
 const PORTAL_DENIED = { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' };
 
+// Every resource an internal-team nav item or page can be gated on — kept
+// in sync with frontend/js/app.js's NAV_ITEMS (their `resource` keys) and
+// frontend/admin/users.html's RESOURCES (the admin-editable subset). Used
+// by routes/auth.js to hand the client a full permission map at login/me,
+// so the nav can hide a blocked section outright instead of showing it and
+// only 403ing when clicked.
+export const PERMISSION_RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'tasks', 'forms', 'emails', 'sms', 'updates', 'documents', 'users', 'settings'];
+
+// One user's can_view/can_edit/can_export/scope for every resource above —
+// this IS the client's permission map (see auth.js). super_admin/org_admin
+// get full access on everything without needing individual rows; a portal
+// login (shul/store) only ever gets PORTAL_ALLOWED_RESOURCES below.
+export function computePermissionMap(user) {
+  const map = {};
+  for (const resource of PERMISSION_RESOURCES) map[resource] = getPermission(user, resource);
+  return map;
+}
+
 // ROLE_DEFAULTS above is a single flat object per role, not resource-aware —
 // on its own it would hand a shul/store portal login can_view:1 on EVERY
 // resource passed to requirePermission(), including ones that were never

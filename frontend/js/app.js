@@ -4,7 +4,24 @@ const API_BASE = '/api';
 const Auth = {
   token() { return localStorage.getItem('ec_token'); },
   user() { try { return JSON.parse(localStorage.getItem('ec_user') || 'null'); } catch { return null; } },
-  set(token, user) { localStorage.setItem('ec_token', token); localStorage.setItem('ec_user', JSON.stringify(user)); },
+  // permissions is the resource->{can_view,can_edit,can_export,scope} map
+  // computed server-side at login/me (see routes/auth.js) — cached onto the
+  // user object so Auth.can() below can check it synchronously, no per-page
+  // fetch needed. Optional so existing call sites that don't have it yet
+  // (or a stale cached user from before this existed) don't break.
+  set(token, user, permissions) { localStorage.setItem('ec_token', token); localStorage.setItem('ec_user', JSON.stringify(permissions ? { ...user, permissions } : user)); },
+  // Refreshes the cached user's permissions from the server in the
+  // background — picks up a permission change an admin just made without
+  // requiring the affected user to log out/in. Fire-and-forget; the CURRENT
+  // page's nav already rendered from whatever was cached, so this only
+  // affects the NEXT page load's nav.
+  refreshPermissions() {
+    if (!this.token()) return;
+    fetch(API_BASE + '/auth/me', { headers: { Authorization: `Bearer ${this.token()}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.user) this.set(this.token(), data.user, data.permissions); })
+      .catch(() => {});
+  },
   logout() { localStorage.removeItem('ec_token'); localStorage.removeItem('ec_user'); location.href = '/login'; },
   requireAuth() { if (!this.token()) location.href = '/login'; },
   // Bounces away immediately if the signed-in role isn't one of `roles` —
@@ -25,12 +42,22 @@ const Auth = {
     }
   },
   requireAdmin() { this.requireRole('staff', 'org_admin', 'super_admin'); },
+  // Real check now (was a permanent-true stub) — drives which nav items even
+  // render (see renderShell below), so a blocked section isn't just
+  // unusable, it's not shown to exist at all. Every real data endpoint
+  // still independently re-checks server-side (middleware/permissions.js's
+  // requirePermission), so this is a UI-affordance layer on top of that,
+  // not a replacement for it. No cached permissions yet (e.g. a stale
+  // logged-in session from before this existed, or the split-second before
+  // the first refreshPermissions() lands) fails OPEN — better than hiding
+  // every admin page for someone who was already using them.
   can(resource, action = 'can_view') {
     const u = this.user();
     if (!u) return false;
     if (u.role === 'super_admin') return true;
-    // Real enforcement happens server-side; this only toggles UI affordances.
-    return true;
+    if (!u.permissions) return true;
+    const perm = u.permissions[resource];
+    return perm ? !!perm[action] : true;
   },
 };
 
@@ -164,9 +191,10 @@ const STORE_NAV = [
 function renderShell(activeHref, contentHtml) {
   const user = Auth.user();
   const role = user?.role;
-  let items = NAV_ITEMS.filter(i => !i.roles || i.roles.includes(role));
+  let items = NAV_ITEMS.filter(i => (!i.roles || i.roles.includes(role)) && Auth.can(i.resource, 'can_view'));
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
+  else if (['staff', 'org_admin'].includes(role)) Auth.refreshPermissions(); // super_admin always has full access; skip the round-trip
   const navHtml = items.map(i => `<a href="${i.href}" class="${activeHref === i.href ? 'active' : ''}" title="${esc(i.label)}" data-href="${i.href}"><span class="nav-label">${esc(i.label)}</span></a>`).join('');
   document.body.innerHTML = `
     <div class="app-shell">
