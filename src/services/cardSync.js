@@ -56,10 +56,60 @@ export async function lockApplicantCards(orgId, applicant) {
   }
 }
 
-// Sweeps every assigned/activated card in an org. Used by the automatic
-// background interval (see index.js) and the "Sync All" button — this is
-// what makes card activity/store spend "live" without someone having to
-// click into each card individually. No-ops instantly per card in mock mode.
+// Reconciles a customer's actual active_cards (from disccardpromos' real,
+// confirmed Customer API) against our local cards table in both directions:
+//  - discovers cards activated directly on disccardpromos' own dashboard,
+//    which this app would otherwise never learn about since they never went
+//    through routes/cards.js's /assign.
+//  - marks locally assigned/activated cards as removed once their masked
+//    number is no longer in the customer's active_cards, so a card
+//    unassigned/removed on disccardpromos' side stops showing as live here.
+// Matches by masked number: disccardpromos has no stable per-card id at all
+// (confirmed — see giftcard.js's linkCardToCustomer), so masked number is
+// the only thing both sides agree on. Returns { discovered, removed } counts.
+export async function syncApplicantCards(orgId, applicant) {
+  if (!applicant.provider_account_id || applicant.provider_exempt) return { discovered: 0, removed: 0 };
+  let customer;
+  try {
+    customer = await giftcard.getCustomerByExternalId(applicant.season_id, applicant.external_id, { balances: true });
+  } catch (e) {
+    console.error('[cardSync] failed to fetch customer for card discovery, applicant', applicant.id, ':', e.message);
+    return { discovered: 0, removed: 0 };
+  }
+  if (!customer) return { discovered: 0, removed: 0 };
+  const remoteMasked = new Set(Array.isArray(customer.active_cards) ? customer.active_cards : []);
+  const localActive = db.prepare(`SELECT id, card_number_masked FROM cards WHERE applicant_id = ? AND status IN ('assigned','activated')`).all(applicant.id);
+  const known = new Set(localActive.map(c => c.card_number_masked));
+
+  // Package balance is the customer's aggregate — the best per-card figure
+  // available, since disccardpromos doesn't expose a per-card balance
+  // without a stable card id to ask about.
+  const balance = (customer.packages || []).reduce((sum, p) => sum + (Number(p.balance) || 0), 0);
+  let discovered = 0;
+  for (const masked of remoteMasked) {
+    if (known.has(masked)) continue;
+    db.prepare(`INSERT INTO cards (id, org_id, applicant_id, season_id, card_number_masked, provider_card_id, status, amount, assigned_at, activated_at)
+      VALUES (?,?,?,?,?,NULL,'activated',?,datetime('now'),datetime('now'))`)
+      .run(uuid(), orgId, applicant.id, applicant.season_id, masked, balance);
+    discovered++;
+  }
+
+  let removed = 0;
+  const deactivate = db.prepare(`UPDATE cards SET status='deactivated', deactivated_at=datetime('now') WHERE id = ?`);
+  for (const local of localActive) {
+    if (remoteMasked.has(local.card_number_masked)) continue;
+    deactivate.run(local.id);
+    removed++;
+  }
+  return { discovered, removed };
+}
+
+// Sweeps every assigned/activated card in an org, and discovers any card
+// activated straight on disccardpromos' own dashboard for every applicant
+// who already has a customer there. Used by the automatic background
+// interval (see index.js) and the "Sync All" button — this is what makes
+// card activity/store spend "live" without someone having to click into
+// each card individually. No-ops instantly per card in mock mode.
 export async function syncAllCards(orgId) {
   const cards = db.prepare(`SELECT * FROM cards WHERE org_id = ? AND status IN ('assigned','activated') AND provider_card_id IS NOT NULL`).all(orgId);
   let totalSynced = 0;
@@ -67,5 +117,13 @@ export async function syncAllCards(orgId) {
     try { totalSynced += await syncOneCard(orgId, card); }
     catch (e) { console.error('[cardSync] failed for card', card.id, e.message); }
   }
-  return { cardsChecked: cards.length, transactionsSynced: totalSynced };
+  const applicants = db.prepare(`SELECT * FROM applicants WHERE org_id = ? AND provider_account_id IS NOT NULL AND provider_exempt = 0`).all(orgId);
+  let cardsDiscovered = 0, cardsRemoved = 0;
+  for (const applicant of applicants) {
+    try {
+      const { discovered, removed } = await syncApplicantCards(orgId, applicant);
+      cardsDiscovered += discovered; cardsRemoved += removed;
+    } catch (e) { console.error('[cardSync] card discovery failed for applicant', applicant.id, e.message); }
+  }
+  return { cardsChecked: cards.length, transactionsSynced: totalSynced, cardsDiscovered, cardsRemoved };
 }

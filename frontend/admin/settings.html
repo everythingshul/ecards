@@ -55,6 +55,11 @@ renderShell('/admin/settings', `
       <div id="giftcard-status" style="margin:10px 0"></div>
       <label>Package (Discount) ID</label><input id="org-discount_id" placeholder="e.g. 4821">
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDiscountId()">Save</button>
+      <div class="divider"></div>
+      <h4 style="margin-bottom:4px">Applicant Info Pushed to disccardpromos</h4>
+      <p class="small-muted">Applicant ID is always sent — it's how a record gets matched to their disccardpromos customer at all. Choose which other fields go along with it, on approval and every save afterward.</p>
+      <div id="push-fields-list" style="margin:10px 0;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+      <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="savePushFields()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Application Restrictions</h3>
@@ -280,6 +285,26 @@ async function loadDiscountId() {
 }
 window.saveDiscountId = async () => {
   try { await api('/settings', { method: 'PUT', body: { disccardpromos_discount_id: qs('#org-discount_id').value.trim() } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+// Keep in sync with PROVIDER_PUSH_FIELDS in routes/applicants.js — the
+// server falls back to "everything" if this setting was never saved, so an
+// org that's never opened this panel sees no change in behavior.
+const PROVIDER_PUSH_FIELDS = [
+  ['first_name', 'First Name'], ['last_name', 'Last Name'], ['home_phone', 'Home Phone'],
+  ['husband_cell', 'Husband Cell'], ['wife_cell', 'Wife Cell'], ['email', 'Email'],
+  ['address', 'Address'], ['city', 'City'], ['state', 'State'], ['zip', 'Zip'],
+];
+async function loadPushFields() {
+  const { settings } = await api('/settings');
+  let selected;
+  try { selected = JSON.parse(settings.disccardpromos_push_fields); } catch { selected = null; }
+  if (!Array.isArray(selected)) selected = PROVIDER_PUSH_FIELDS.map(([key]) => key);
+  qs('#push-fields-list').innerHTML = PROVIDER_PUSH_FIELDS.map(([key, label]) =>
+    `<label class="checkbox-row"><input type="checkbox" class="push-field" value="${key}" ${selected.includes(key) ? 'checked' : ''}> ${esc(label)}</label>`).join('');
+}
+window.savePushFields = async () => {
+  const selected = qsa('.push-field:checked').map(c => c.value);
+  try { await api('/settings', { method: 'PUT', body: { disccardpromos_push_fields: JSON.stringify(selected) } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 async function loadPopup() {
   const { settings } = await api('/settings');
@@ -658,7 +683,7 @@ window.uploadFullImport = async (input) => {
   input.value = '';
 };
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

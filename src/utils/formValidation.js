@@ -16,7 +16,14 @@ export function validateBySchema(schema, values, { isAdmin = false } = {}) {
   const errors = [];
   for (const f of realFields(schema)) {
     const raw = values[f.key];
-    const empty = raw === undefined || raw === null || String(raw).trim() === '';
+    // A checkbox submits a real boolean (see app.js's fieldHtml + the
+    // FormData-then-.checked-overwrite pattern every apply page uses) — an
+    // unchecked box arrives as `false`, not blank/undefined. The generic
+    // blank-string check below treats `false` as "present" (String(false)
+    // isn't empty), so a required checkbox never actually blocked
+    // submission. Required only means something for a checkbox if it means
+    // "must be checked".
+    const empty = f.type === 'checkbox' ? raw !== true : (raw === undefined || raw === null || String(raw).trim() === '');
     const overridable = isAdmin && f.admin_override;
     // requiredUnless: { key, equals } lets one field's required-ness depend
     // on another field's value in the same submission — e.g. the store

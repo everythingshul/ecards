@@ -41,7 +41,7 @@ async function load() {
     const { users } = await api('/users');
     qs('#tbody').innerHTML = users.map(u => `<tr>
       <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${u.id}"></td>
-      <td>${esc(u.first_name)} ${esc(u.last_name)}</td><td>${esc(u.email)}</td><td style="text-transform:capitalize">${esc(u.role.replace('_',' '))}</td>
+      <td>${esc(u.first_name)} ${esc(u.last_name)}</td><td>${esc(u.email)}</td><td>${esc(roleLabel(u.role))}</td>
       <td>${u.is_paused ? badge('paused','paused') : (u.is_active ? badge('active','active') : badge('inactive','rejected'))}</td>
       <td><button class="btn btn-sm btn-outline" onclick="openUser('${u.id}')">Manage</button></td>
     </tr>`).join('');
@@ -113,7 +113,7 @@ async function openUser(id) {
       </div>
       <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="e-phone" value="${esc(u.phone||'')}">
       <label>Role</label>
-      <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Staff (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option><option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option></select>
+      <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Admin (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option><option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option></select>
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
       <div class="divider"></div>
       <h4>Page & Field Permissions</h4>
@@ -145,7 +145,7 @@ window.deleteUserPermanently = async (id) => {
 qs('#btn-new').addEventListener('click', () => {
   const body = `<label>Email *</label><input id="n-email" type="email"><label>First Name *</label><input id="n-first_name"><label>Last Name</label><input id="n-last_name">
     <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="n-phone">
-    <label>Role</label><select id="n-role"><option value="staff">Staff (limited)</option><option value="org_admin">Org Admin (full)</option></select>`;
+    <label>Role</label><select id="n-role"><option value="staff">Admin (limited)</option><option value="org_admin">Org Admin (full)</option></select>`;
   openModal('Invite User', body, `<button class="btn btn-primary btn-sm" onclick="createUser()">Send Invite</button>`);
 });
 window.createUser = async () => {

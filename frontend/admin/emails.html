@@ -26,8 +26,8 @@ renderShell('/admin/emails', `
       <button class="btn btn-outline btn-sm" id="btn-export">Export Excel</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto">
-      <table><thead><tr><th>To</th><th>Account</th><th>Subject</th><th>Status</th><th>Sent</th><th></th></tr></thead>
-      <tbody id="tbody-sent"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody></table>
+      <table><thead><tr><th>To</th><th>Account</th><th>Subject</th><th>Status</th><th>Sent By</th><th>Sent</th><th></th></tr></thead>
+      <tbody id="tbody-sent"><tr><td colspan="7" class="empty-state">Loading…</td></tr></tbody></table>
     </div>
     <div class="paginator" id="pager-sent"></div>
   </div>
@@ -57,7 +57,7 @@ async function loadSent() {
 function changePage(d) { state.page += d; loadSent(); }
 // Resolves recipient email -> linked account (shul/store/applicant/staff),
 // computed server-side per row since it's a live lookup, not a stored field.
-const ACCOUNT_TYPE_LABEL = { shul: 'Shul', store: 'Store', applicant: 'Applicant', user: 'Staff' };
+const ACCOUNT_TYPE_LABEL = { shul: 'Shul', store: 'Store', applicant: 'Applicant', user: 'Admin' };
 function accountCellHtml(account) {
   if (!account) return '<span class="small-muted">&mdash;</span>';
   return `${esc(ACCOUNT_TYPE_LABEL[account.type] || account.type)}: ${esc(account.label)}`;
@@ -70,6 +70,7 @@ function rowHtml(e) {
     <td>${accountCellHtml(e.account)}</td>
     <td>${esc(e.subject || '')}</td>
     <td>${badge(statusLabel, statusCls)}</td>
+    <td>${e.sent_by_name ? esc(e.sent_by_name) : '<span class="small-muted">System</span>'}</td>
     <td>${fmtDateTime(e.created_at)}</td>
     <td><button class="btn btn-sm btn-outline" onclick="viewEmail('${e.id}')">View</button></td>
   </tr>`;
@@ -88,6 +89,7 @@ window.viewEmail = async (id) => {
       <p><strong>Subject:</strong> ${esc(e.subject || '')}</p>
       <p><strong>Status:</strong> ${badge(e.status === 'dry_run' ? 'dry run' : e.status, e.status === 'sent' ? 'active' : (e.status === 'failed' ? 'rejected' : 'pending'))}</p>
       ${e.error_message ? `<p style="color:var(--danger)"><strong>Error:</strong> ${esc(e.error_message)}</p>` : ''}
+      <p><strong>Sent By:</strong> ${e.sent_by_name ? esc(e.sent_by_name) : 'System'}</p>
       <p><strong>Sent:</strong> ${fmtDateTime(e.created_at)}</p>
       <div class="divider"></div>
       <iframe style="width:100%;height:360px;border:1px solid var(--border);border-radius:8px;background:#fff" srcdoc="${esc(e.body_html || '')}"></iframe>

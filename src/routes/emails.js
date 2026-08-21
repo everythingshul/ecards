@@ -11,30 +11,40 @@ router.use(auth, requireAdmin); // internal team feature — staff/org_admin/sup
 // ============================= Sent email log =============================
 router.get('/', (req, res) => {
   const { search, status, page = 1, pageSize = 50 } = req.query;
-  let where = 'WHERE org_id = ?';
+  let where = 'WHERE e.org_id = ?';
   const params = [req.user.org_id];
-  if (status) { where += ' AND status = ?'; params.push(status); }
-  if (search) { where += ' AND (to_email LIKE ? OR subject LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-  const total = db.prepare(`SELECT COUNT(*) c FROM emails_sent ${where}`).get(...params).c;
+  if (status) { where += ' AND e.status = ?'; params.push(status); }
+  if (search) { where += ' AND (e.to_email LIKE ? OR e.subject LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  const total = db.prepare(`SELECT COUNT(*) c FROM emails_sent e ${where}`).get(...params).c;
   const offset = (Math.max(1, +page) - 1) * +pageSize;
-  const rows = db.prepare(`SELECT id, to_email, subject, status, error_message, related_entity_type, related_entity_id, sent_by, created_at
-    FROM emails_sent ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
+  // sent_by_name is who to display as having sent this — the acting admin
+  // for anything triggered from the admin side (quick-send, approvals,
+  // invites, contract/document sends, ...), null/blank for genuinely
+  // automatic system emails (password resets, task reminders) where no
+  // admin was involved.
+  const rows = db.prepare(`SELECT e.id, e.to_email, e.subject, e.status, e.error_message, e.related_entity_type, e.related_entity_id, e.sent_by, e.created_at,
+      TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
+    FROM emails_sent e LEFT JOIN users u ON u.id = e.sent_by
+    ${where}
+    ORDER BY e.created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
   const emails = rows.map(r => ({ ...r, account: findAccountByEmail(req.user.org_id, r.to_email) }));
   res.json({ emails, total });
 });
 
 router.get('/export', (req, res) => {
-  const rows = db.prepare(`SELECT to_email, subject, status, error_message, related_entity_type, related_entity_id, created_at
-    FROM emails_sent WHERE org_id = ? ORDER BY created_at DESC`).all(req.user.org_id);
+  const rows = db.prepare(`SELECT e.to_email, e.subject, e.status, e.error_message, e.related_entity_type, e.related_entity_id, e.created_at,
+      TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
+    FROM emails_sent e LEFT JOIN users u ON u.id = e.sent_by WHERE e.org_id = ? ORDER BY e.created_at DESC`).all(req.user.org_id);
   const withAccount = rows.map(r => {
     const account = findAccountByEmail(req.user.org_id, r.to_email);
     return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
   });
-  sendXlsx(res, `sent-emails-${Date.now()}.xlsx`, withAccount, ['to_email', 'account_type', 'account_name', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
+  sendXlsx(res, `sent-emails-${Date.now()}.xlsx`, withAccount, ['to_email', 'account_type', 'account_name', 'subject', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'sent_by_name', 'created_at']);
 });
 
 router.get('/:id', (req, res) => {
-  const email = db.prepare('SELECT * FROM emails_sent WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  const email = db.prepare(`SELECT e.*, TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
+    FROM emails_sent e LEFT JOIN users u ON u.id = e.sent_by WHERE e.id = ? AND e.org_id = ?`).get(req.params.id, req.user.org_id);
   if (!email) return res.status(404).json({ error: 'Not found' });
   res.json({ email: { ...email, account: findAccountByEmail(req.user.org_id, email.to_email) } });
 });

@@ -81,31 +81,37 @@ router.post('/inbox/sync', async (req, res) => {
 // to begin with (see services/sms.js's resolveSeasonId).
 router.get('/', (req, res) => {
   const { search, status, direction, season_id, page = 1, pageSize = 50 } = req.query;
-  let where = 'WHERE org_id = ?';
+  let where = 'WHERE m.org_id = ?';
   const params = [req.user.org_id];
-  if (status) { where += ' AND status = ?'; params.push(status); }
-  if (direction) { where += ' AND direction = ?'; params.push(direction); }
-  if (search) { where += ' AND (phone LIKE ? OR body LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-  if (season_id) { where += ' AND (season_id = ? OR season_id IS NULL)'; params.push(season_id); }
-  const total = db.prepare(`SELECT COUNT(*) c FROM sms_messages ${where}`).get(...params).c;
+  if (status) { where += ' AND m.status = ?'; params.push(status); }
+  if (direction) { where += ' AND m.direction = ?'; params.push(direction); }
+  if (search) { where += ' AND (m.phone LIKE ? OR m.body LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  if (season_id) { where += ' AND (m.season_id = ? OR m.season_id IS NULL)'; params.push(season_id); }
+  const total = db.prepare(`SELECT COUNT(*) c FROM sms_messages m ${where}`).get(...params).c;
   const offset = (Math.max(1, +page) - 1) * +pageSize;
-  const rows = db.prepare(`SELECT * FROM sms_messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
+  // sent_by_name: the acting admin for anything triggered from the admin
+  // side, blank for inbound messages or genuinely automatic sends.
+  const rows = db.prepare(`SELECT m.*, TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
+    FROM sms_messages m LEFT JOIN users u ON u.id = m.sent_by
+    ${where} ORDER BY m.created_at DESC LIMIT ? OFFSET ?`).all(...params, +pageSize, offset);
   const messages = rows.map(r => ({ ...r, account: findAccountByPhone(req.user.org_id, r.phone) }));
   res.json({ messages, total });
 });
 
 router.get('/export', (req, res) => {
   const { season_id } = req.query;
-  let where = 'WHERE org_id = ?';
+  let where = 'WHERE m.org_id = ?';
   const params = [req.user.org_id];
-  if (season_id) { where += ' AND (season_id = ? OR season_id IS NULL)'; params.push(season_id); }
-  const rows = db.prepare(`SELECT direction, phone, body, status, error_message, related_entity_type, related_entity_id, created_at
-    FROM sms_messages ${where} ORDER BY created_at DESC`).all(...params);
+  if (season_id) { where += ' AND (m.season_id = ? OR m.season_id IS NULL)'; params.push(season_id); }
+  const rows = db.prepare(`SELECT m.direction, m.phone, m.body, m.status, m.error_message, m.related_entity_type, m.related_entity_id, m.created_at,
+      TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
+    FROM sms_messages m LEFT JOIN users u ON u.id = m.sent_by
+    ${where} ORDER BY m.created_at DESC`).all(...params);
   const withAccount = rows.map(r => {
     const account = findAccountByPhone(req.user.org_id, r.phone);
     return { ...r, account_type: account?.type || '', account_name: account?.label || '' };
   });
-  sendXlsx(res, `sms-messages-${Date.now()}.xlsx`, withAccount, ['direction', 'phone', 'account_type', 'account_name', 'body', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'created_at']);
+  sendXlsx(res, `sms-messages-${Date.now()}.xlsx`, withAccount, ['direction', 'phone', 'account_type', 'account_name', 'body', 'status', 'error_message', 'related_entity_type', 'related_entity_id', 'sent_by_name', 'created_at']);
 });
 
 // ============================= Templates =============================

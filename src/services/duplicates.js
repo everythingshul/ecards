@@ -43,8 +43,14 @@ export function checkShulDuplicate(orgId, shul, excludeIds = []) {
 // alone — two applicants sharing a zip code isn't meaningful, but sharing
 // an actual street address is).
 const fullAddress = (a) => norm([a.address, a.city, a.state, a.zip].filter(Boolean).join('|'));
+// Scoped to the applicant's own season, unlike checkShulDuplicate above —
+// a shul only exists once and reuses the same row across seasons via
+// carry-forward, so matching it against its own past self would be a false
+// positive worth catching; an applicant legitimately reapplies fresh every
+// season (a new row each time), so matching last season's version of the
+// same person is expected, normal behavior, not a duplicate.
 export function checkApplicantDuplicate(orgId, applicant) {
-  const candidates = db.prepare(`SELECT * FROM applicants WHERE org_id = ? AND id != ?`).all(orgId, applicant.id);
+  const candidates = db.prepare(`SELECT * FROM applicants WHERE org_id = ? AND season_id = ? AND id != ?`).all(orgId, applicant.season_id, applicant.id);
   const applicantAddress = fullAddress(applicant);
   for (const c of candidates) {
     let reason = null;

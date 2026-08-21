@@ -41,7 +41,7 @@ export const STORE_APPLICATION_SCHEMA = [
   { key: 'manager_email', label: 'Manager Email', type: 'email', required: true, requiredUnless: { key: 'same_person', equals: true } },
   { key: 'owner_name', label: 'Owner Name', type: 'text', required: true }, { key: 'owner_phone', label: 'Owner Phone', type: 'tel', required: true },
   { key: 'owner_email', label: 'Owner Email', type: 'email', required: true },
-  { key: 'has_provider_account', label: 'We already have a disccardpromos.com (or equivalent) merchant account', type: 'checkbox', required: false },
+  { key: 'has_provider_account', label: 'We already have a disccardpromos.com account', type: 'checkbox', required: false },
   { key: 'comments', label: 'Comments', type: 'textarea', required: false },
 ];
 export const APPLICANT_APPLICATION_SCHEMA = [

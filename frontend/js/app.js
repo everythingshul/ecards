@@ -98,6 +98,12 @@ function toast(msg, isError = false) {
   el._t = setTimeout(() => el.classList.remove('show'), 3500);
 }
 
+// Display label for a role — "staff" shows as "Admin" everywhere in the UI
+// (the org's preferred term for that tier); the underlying value and every
+// permission check stay exactly "staff" — nothing about what a staff
+// account can or can't do changes, only what it's called.
+function roleLabel(role) { return { staff: 'Admin', org_admin: 'Org Admin', super_admin: 'Super Admin', shul: 'Shul', store: 'Store' }[role] || role; }
+
 // ESIGN Act / NY ESRA-style affirmative consent disclosure, shown before
 // every e-signature submit button sitewide (sign-contract.html,
 // sign-document.html, apply.html, apply-store.html,
@@ -1017,7 +1023,7 @@ function fieldHtml(f, shulOptions = []) {
   if (f.key === 'shul_id') return `${label}<select name="shul_id" id="shul_id" ${req}><option value="">Select your shul…</option>${shulOptions.map(s => `<option value="${s.id}">${esc(s.name_en)}</option>`).join('')}</select>`;
   if (f.type === 'select') return `${label}<select name="${esc(f.key)}" id="${esc(f.key)}" ${req}><option value=""></option>${(f.options||[]).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select>`;
   if (f.type === 'textarea') return `${label}<textarea name="${esc(f.key)}" id="${esc(f.key)}" ${req}></textarea>`;
-  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" name="${esc(f.key)}" id="${esc(f.key)}"><label style="margin:0" for="${esc(f.key)}">${esc(f.label||f.key)}</label></div>`;
+  if (f.type === 'checkbox') return `<div class="checkbox-row" style="margin-top:14px"><input type="checkbox" name="${esc(f.key)}" id="${esc(f.key)}" ${req}><label style="margin:0" for="${esc(f.key)}">${esc(f.label||f.key)}${f.required ? ' <span class="req">*</span>' : ''}</label></div>`;
   if (f.type === 'number') {
     const min = f.min !== undefined && f.min !== null && f.min !== '' ? ` min="${esc(f.min)}"` : '';
     const max = f.max !== undefined && f.max !== null && f.max !== '' ? ` max="${esc(f.max)}"` : '';

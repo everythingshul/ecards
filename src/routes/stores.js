@@ -242,7 +242,7 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
 });
 
 // Shared by the single and mass invite routes below.
-async function inviteStoreToPortal(orgId, store, emailOverride) {
+async function inviteStoreToPortal(orgId, store, emailOverride, sentBy = null) {
   const email = emailOverride || store.owner_email || store.manager_email;
   if (!email) return { error: 'No email on file for this store' };
   let user = db.prepare('SELECT * FROM users WHERE store_id = ?').get(store.id);
@@ -260,7 +260,7 @@ async function inviteStoreToPortal(orgId, store, emailOverride) {
   db.prepare(`UPDATE stores SET portal_user_id = (SELECT id FROM users WHERE store_id = ?) WHERE id = ?`).run(store.id, store.id);
   const portalUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
   const tmpl = renderSystemTemplate(orgId, 'storeSetup', { storeName: store.name, portalUrl });
-  const { emailError } = await sendMailChecked(orgId, email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const { emailError } = await sendMailChecked(orgId, email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy });
   if (emailError) console.error('[mail] store invite email failed:', emailError);
   return { emailError };
 }
@@ -269,7 +269,7 @@ async function inviteStoreToPortal(orgId, store, emailOverride) {
 router.post('/:id/invite', requireAdmin, async (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
-  const result = await inviteStoreToPortal(req.user.org_id, store, req.body?.email);
+  const result = await inviteStoreToPortal(req.user.org_id, store, req.body?.email, req.user.id);
   if (result.error) return res.status(400).json({ error: result.error });
   res.json({ ok: true, emailError: result.emailError });
 });
@@ -281,7 +281,7 @@ router.post('/mass-invite', requireAdmin, async (req, res) => {
   for (const id of ids) {
     const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
     if (!store) { skipped++; continue; }
-    const result = await inviteStoreToPortal(req.user.org_id, store, null);
+    const result = await inviteStoreToPortal(req.user.org_id, store, null, req.user.id);
     if (result.error) { skipped++; continue; }
     if (result.emailError) emailErrors++;
     invited++;

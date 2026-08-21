@@ -174,7 +174,7 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   const { subject, body, replyTo } = renderSystemTemplate(req.user.org_id, 'documentReady', {
     docTitle: document.title || 'Document', entityName: isStandalone ? document.recipient_name : entity.displayName, signUrl,
   });
-  const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body, { replyTo });
+  const { emailError } = await sendMailChecked(req.user.org_id, to, subject, body, { replyTo, sentBy: req.user.id });
   if (emailError) console.error('[mail] document send failed:', emailError);
 
   res.json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id), emailError });

@@ -25,6 +25,45 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const EDITABLE_FIELDS = ['first_name','last_name','marital_status','home_phone','husband_cell','wife_cell','email',
   'address','city','state','zip','preferred_contact_method','preferred_number','num_children','home_for_yomtov','comments','card_amount','provider_exempt'];
 
+// Which applicant fields Settings > Organization > Gift Card Loading lets an
+// admin choose to push to disccardpromos — external_id and the shul's group
+// name are always included regardless (they're how a customer gets matched
+// and organized at all, not "applicant info" in the sense being toggled).
+// Default (no setting saved yet) is everything, matching the original
+// always-push-it-all behavior so existing orgs see no change until someone
+// deliberately narrows it.
+export const PROVIDER_PUSH_FIELDS = ['first_name', 'last_name', 'home_phone', 'husband_cell', 'wife_cell', 'email', 'address', 'city', 'state', 'zip'];
+
+function getProviderPushFields(orgId) {
+  const row = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_push_fields'`).get(orgId);
+  if (!row) return PROVIDER_PUSH_FIELDS;
+  try {
+    const saved = JSON.parse(row.value);
+    return Array.isArray(saved) ? saved.filter(f => PROVIDER_PUSH_FIELDS.includes(f)) : PROVIDER_PUSH_FIELDS;
+  } catch { return PROVIDER_PUSH_FIELDS; }
+}
+
+// Builds the opts object giftcard.js's create/updateCustomer expect, limited
+// to whichever fields are configured to push. husband_cell/wife_cell map to
+// disccardpromos' cell/phone2 slots respectively — sending both, not just
+// whichever one happens to be set, was itself a bug (only one ever reached
+// disccardpromos before).
+function buildProviderOpts(orgId, applicant, groupName) {
+  const allowed = getProviderPushFields(orgId);
+  const opts = { externalId: applicant.external_id, groupName };
+  if (allowed.includes('first_name')) opts.firstName = applicant.first_name;
+  if (allowed.includes('last_name')) opts.lastName = applicant.last_name;
+  if (allowed.includes('home_phone')) opts.homePhone = applicant.home_phone;
+  if (allowed.includes('husband_cell')) opts.cell = applicant.husband_cell;
+  if (allowed.includes('wife_cell')) opts.phone2 = applicant.wife_cell;
+  if (allowed.includes('email')) opts.email = applicant.email;
+  if (allowed.includes('address')) opts.address = applicant.address;
+  if (allowed.includes('city')) opts.city = applicant.city;
+  if (allowed.includes('state')) opts.state = applicant.state;
+  if (allowed.includes('zip')) opts.zip = applicant.zip;
+  return opts;
+}
+
 // ============================= PUBLIC ==============================
 // Ezras Habayis applicants self-apply directly (no shul in between), so
 // this mirrors the shul/store public /apply forms: no auth, and the shul_id
@@ -285,7 +324,7 @@ router.post('/', requirePermission('applicants', 'can_edit'), (req, res) => {
   res.status(201).json({ applicant: maskForShul(applicant, req.user.role), duplicate: req.user.role === 'shul' ? false : !!flag });
 });
 
-router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
+router.put('/:id', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'shul' && applicant.shul_id !== req.user.shul_id) return res.status(403).json({ error: 'Not your applicant' });
@@ -318,7 +357,21 @@ router.put('/:id', requirePermission('applicants', 'can_edit'), (req, res) => {
     logAudit(req.user.org_id, req.user.id, 'update', 'applicant', applicant.id,
       Object.fromEntries(sets.map(f => [f, applicant[f]])), Object.fromEntries(sets.map((f, i) => [f, vals[i]])), req.ip);
   }
-  res.json({ applicant: maskForShul(db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), req.user.role, req.user.org_id) });
+  const updated = db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id);
+  // Push the current info to disccardpromos on every save, not just at
+  // approval — only meaningful once a customer already exists there
+  // (provider_account_id is set the first time they're approved); nothing
+  // to push to before that. Best-effort, same as every other provider
+  // write: a disccardpromos hiccup never blocks the save that triggered it.
+  if (sets.length && updated.provider_account_id && !updated.provider_exempt) {
+    try {
+      const shul = updated.shul_id ? db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(updated.shul_id) : null;
+      await giftcard.updateCustomer(updated.season_id, updated.provider_account_id, buildProviderOpts(req.user.org_id, updated, shul?.name_en || 'Unknown'));
+    } catch (e) {
+      console.error('[giftcard] failed to push applicant update to disccardpromos:', e.message);
+    }
+  }
+  res.json({ applicant: maskForShul(updated, req.user.role, req.user.org_id) });
 });
 
 // Turns a carried-forward applicant (approval_status='incomplete' — see
@@ -565,7 +618,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     let emailError = null;
     if (applicant.email) {
       const tmpl = renderSystemTemplate(req.user.org_id, 'applicantApproved', { name: `${applicant.first_name} ${applicant.last_name}` });
-      ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
+      ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id }));
       if (emailError) console.error('[mail] applicant approval email failed:', emailError);
     }
     // Writes/links the disccardpromos account for this applicant — idempotent
@@ -580,12 +633,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     if (applicant.shul_id && !applicant.provider_exempt) {
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-        const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
-          externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
-          groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
-          homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
-          email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
-        });
+        const result = await giftcard.upsertAccountForApproval(applicant.season_id, buildProviderOpts(req.user.org_id, applicant, shul?.name_en || 'Unknown'));
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
       } catch (e) {
         providerAccountError = e.message;
@@ -708,12 +756,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
       let accountOk = false;
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-        const result = await giftcard.upsertAccountForApproval(applicant.season_id, {
-          externalId: applicant.external_id, firstName: applicant.first_name, lastName: applicant.last_name,
-          groupName: shul?.name_en || 'Unknown', seasonName: season?.name || '',
-          homePhone: applicant.home_phone, cell: applicant.husband_cell || applicant.wife_cell,
-          email: applicant.email, address: applicant.address, city: applicant.city, state: applicant.state, zip: applicant.zip,
-        });
+        const result = await giftcard.upsertAccountForApproval(applicant.season_id, buildProviderOpts(req.user.org_id, applicant, shul?.name_en || 'Unknown'));
         if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
         accountOk = true;
       } catch (e) {

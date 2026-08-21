@@ -378,7 +378,7 @@ async function carryForwardShul(orgId, userId, source, targetSeason, { slotsAllo
 
     const loginUrl = shulLoginUrl(user);
     const tmpl = renderSystemTemplate(orgId, 'accountApproved', { shulName: target.name_en, loginUrl, slots: slotsAllocated });
-    ({ emailError } = await sendMailChecked(orgId, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }));
+    ({ emailError } = await sendMailChecked(orgId, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: userId }));
     if (emailError) console.error('[mail] carry-forward invite email failed:', emailError);
 
     // A carried-forward shul is pre-approved and ready to go, same as one
@@ -388,7 +388,7 @@ async function carryForwardShul(orgId, userId, source, targetSeason, { slotsAllo
     // point) instead of letting this flip it to 'contract_sent', which
     // would drop it out of every "status='approved'" list — including the
     // public shul picker applicants use to submit against it.
-    const contractResult = await sendContractForShul(orgId, target, portalEmail || target.gabai_email, { setStatus: false });
+    const contractResult = await sendContractForShul(orgId, target, portalEmail || target.gabai_email, { setStatus: false, sentBy: userId });
     contractEmailError = contractResult.error || contractResult.emailError || null;
   }
 
@@ -542,7 +542,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     .run(slots, user.id, shul.id);
   const loginUrl = shulLoginUrl(user);
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots });
-  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id });
   if (emailError) console.error('[mail] shul approval email failed:', emailError);
   logAudit(req.user.org_id, req.user.id, 'approve', 'shul', shul.id, shul, { slots_allocated: slots }, req.ip);
   res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id), emailError });
@@ -564,7 +564,7 @@ router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
   db.prepare('UPDATE users SET invite_token = ?, invite_expires = ? WHERE id = ?').run(token, expires, user.id);
   const loginUrl = `${process.env.APP_URL || ''}/accept-invite?token=${token}`;
   const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: shul.slots_allocated });
-  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id });
   if (emailError) console.error('[mail] shul welcome resend failed:', emailError);
   res.json({ ok: true, emailError });
 });
@@ -610,7 +610,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
     const loginUrl = shulLoginUrl(user);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     const tmpl = renderSystemTemplate(req.user.org_id, 'accountApproved', { shulName: shul.name_en, loginUrl, slots: slots_allocated });
-    const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+    const { emailError } = await sendMailChecked(req.user.org_id, user.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id });
     if (emailError) { emailErrors++; console.error('[mail] mass-approve shul email failed:', emailError); }
     affectedIds.push(shul.id); names.push(shul.name_en);
     approved++;
@@ -690,7 +690,7 @@ router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
 // submitted -> contract_sent -> approved lifecycle), but carry-forward
 // creates its shul row pre-approved on purpose and calls this with
 // setStatus:false so sending the contract doesn't quietly undo that.
-async function sendContractForShul(orgId, shul, toEmail, { setStatus = true } = {}) {
+async function sendContractForShul(orgId, shul, toEmail, { setStatus = true, sentBy = null } = {}) {
   // The shul detail view always shows the *latest* contract row for this
   // shul (ORDER BY created_at DESC LIMIT 1) — creating a new one here
   // unconditionally would shadow an already-executed, legally-signed
@@ -717,7 +717,7 @@ async function sendContractForShul(orgId, shul, toEmail, { setStatus = true } = 
   if (setStatus) db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
   const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
   const tmpl = renderSystemTemplate(orgId, 'contractReady', { shulName: shul.name_en, signUrl });
-  const { emailError } = await sendMailChecked(orgId, toEmail, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  const { emailError } = await sendMailChecked(orgId, toEmail, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy });
   if (emailError) console.error('[mail] contract email failed:', emailError);
   return { contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError };
 }
@@ -726,7 +726,7 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const to = req.body.email || shul.gabai_email;
-  const result = await sendContractForShul(req.user.org_id, shul, to);
+  const result = await sendContractForShul(req.user.org_id, shul, to, { sentBy: req.user.id });
   if (result.error) return res.status(409).json({ error: result.error });
   logAudit(req.user.org_id, req.user.id, 'send_contract', 'shul', shul.id, null, { to }, req.ip);
   res.json({ ok: true, contract: result.contract, emailError: result.emailError });
@@ -961,7 +961,7 @@ router.post('/import', requireAdmin, upload.single('file'), async (req, res) => 
         db.prepare(`UPDATE shuls SET status='contract_sent' WHERE id=?`).run(shul.id);
         const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
         const tmpl = renderSystemTemplate(req.user.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
-        const { emailError } = await sendMailChecked(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+        const { emailError } = await sendMailChecked(req.user.org_id, shul.gabai_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id });
         if (emailError) { console.error('[mail] mass-upload contract email failed for', shul.gabai_email, emailError); errors.push({ row: i + 2, error: `Shul created but contract email failed: ${emailError}` }); }
       }
     } catch (e) {

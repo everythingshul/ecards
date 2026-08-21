@@ -62,7 +62,7 @@ async function load() {
     qs('#tbody').innerHTML = tasks.length ? tasks.map(t => `<tr>
         <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${t.id}"></td>
         <td><input type="checkbox" ${t.status==='done'?'checked':''} onchange="toggleDone('${t.id}', this.checked)"></td>
-        <td><strong style="${t.status==='done'?'text-decoration:line-through;color:var(--text-muted)':''}">${esc(t.title)}</strong>${t.description ? `<br><span class="small-muted">${esc(t.description)}</span>` : ''}</td>
+        <td><strong style="${t.status==='done'?'text-decoration:line-through;color:var(--text-muted)':''}">${esc(t.title)}</strong>${t.description ? `<br><span class="small-muted">${esc(t.description)}</span>` : ''}${t.creator_first_name ? `<br><span class="small-muted">Created by ${esc(t.creator_first_name)} ${esc(t.creator_last_name||'')}</span>` : ''}</td>
         <td>${t.entity_label ? `<span class="small-muted">${esc(t.entity_type)}: ${esc(t.entity_label)}</span>` : ''}</td>
         <td>${t.assignee_first_name ? esc(t.assignee_first_name) + ' ' + esc(t.assignee_last_name||'') : '<span class="small-muted">Unassigned</span>'}</td>
         <td>${fmtDueBadge(t.due_date, t.status)}</td>
@@ -88,7 +88,7 @@ qs('#f-status').addEventListener('change', load);
 qs('#f-overdue').addEventListener('change', load);
 
 function assigneeOptions(selectedId) {
-  return `<option value="">Unassigned</option>` + usersCache.map(u => `<option value="${u.id}" ${u.id===selectedId?'selected':''}>${esc(u.first_name)} ${esc(u.last_name||'')} (${esc(u.role.replace('_',' '))})</option>`).join('');
+  return `<option value="">Unassigned</option>` + usersCache.map(u => `<option value="${u.id}" ${u.id===selectedId?'selected':''}>${esc(u.first_name)} ${esc(u.last_name||'')} (${esc(roleLabel(u.role))})</option>`).join('');
 }
 
 function taskFormBody(t = {}) {
