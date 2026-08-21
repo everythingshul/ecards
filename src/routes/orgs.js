@@ -40,9 +40,9 @@ router.get('/resolve', (req, res) => {
         buttonEnabled: s.homepage_image_button_enabled === '1',
         buttonText: s.homepage_image_button_text || 'View',
       } : null,
+      shulContractAtSignup: s.shul_contract_at_signup !== '0',
+      storeContractAtSignup: s.store_contract_at_signup !== '0',
     },
-    shulContractAtSignup: s.shul_contract_at_signup !== '0',
-    storeContractAtSignup: s.store_contract_at_signup !== '0',
   });
 });
 
