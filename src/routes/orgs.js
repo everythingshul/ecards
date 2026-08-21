@@ -1,9 +1,14 @@
 import { Router } from 'express';
-import { db, DEFAULT_ORG_ID } from '../db.js';
+import multer from 'multer';
+import { join } from 'path';
+import { writeFileSync } from 'fs';
+import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const HOMEPAGE_DIR = join(DATA_DIR, 'homepage');
 
 // Public: org branding for the public pages (apply form, store signup, etc).
 // Single-org platform, so this always resolves to the one organization.
@@ -11,7 +16,8 @@ router.get('/resolve', (req, res) => {
   const org = db.prepare('SELECT id, name, logo_url, primary_color, accent_color, support_email, support_phone, address FROM organizations WHERE id = ?').get(DEFAULT_ORG_ID);
   const rows = db.prepare(`SELECT key, value FROM settings WHERE org_id = ? AND key IN
     ('homepage_popup_enabled','homepage_popup_message','header_nav_buttons','footer_nav_buttons','cta_buttons',
-     'homepage_about_text','faq_items','homepage_hero_eyebrow','homepage_hero_heading','homepage_schedule_heading','homepage_about_heading','schedule_items')`).all(DEFAULT_ORG_ID);
+     'homepage_about_text','faq_items','homepage_hero_eyebrow','homepage_hero_heading','homepage_schedule_heading','homepage_about_heading','schedule_items',
+     'homepage_image_url','homepage_image_alt','homepage_image_button_enabled','homepage_image_button_text')`).all(DEFAULT_ORG_ID);
   const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
   const parseList = (v) => { try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p : []; } catch { return []; } };
   res.json({
@@ -28,11 +34,27 @@ router.get('/resolve', (req, res) => {
       scheduleHeading: s.homepage_schedule_heading || '',
       aboutHeading: s.homepage_about_heading || '',
       scheduleItems: parseList(s.schedule_items),
+      image: s.homepage_image_url ? {
+        url: s.homepage_image_url, alt: s.homepage_image_alt || '',
+        buttonEnabled: s.homepage_image_button_enabled === '1',
+        buttonText: s.homepage_image_button_text || 'View',
+      } : null,
     },
   });
 });
 
 router.use(auth, requireAdmin);
+
+// Uploads the homepage's linkable image (Settings > Site Content) — returns
+// the URL to save via PUT /settings' generic key/value store, same
+// upload-then-store-URL pattern as forms.js's /upload-image.
+router.post('/homepage-image', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+  if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ error: 'File must be an image' });
+  const safeName = `${uuid()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  writeFileSync(join(HOMEPAGE_DIR, safeName), req.file.buffer);
+  res.json({ url: `/uploads/homepage/${safeName}` });
+});
 
 // The single organization's branding/settings — editable from Admin > Settings.
 router.get('/me', (req, res) => {

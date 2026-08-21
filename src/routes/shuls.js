@@ -13,7 +13,7 @@ import { normalizePhone } from '../utils/phone.js';
 import { getActiveSeasonId } from '../utils/formSchedule.js';
 import { validateBySchema, shulInfoErrors } from '../utils/formValidation.js';
 import { SHUL_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
-import { logAudit, logMassAudit } from '../services/audit.js';
+import { logAudit, logMassAudit, getEntityHistory } from '../services/audit.js';
 import { hardDeleteShul } from '../utils/entityDelete.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
 
@@ -108,9 +108,13 @@ router.get('/public/list', (req, res) => {
   res.json({ shuls: rows });
 });
 
-// Public: immediately generate the contract right after form submission so the
-// applicant can sign in the same sitting (spec #1: "fill out a form... and
-// esign a contract"), rather than waiting on an admin action. Idempotent per shul.
+// Public: right after form submission, either lets the applicant sign in the
+// same sitting (spec #1: "fill out a form... and esign a contract" — the
+// default) or, when Settings > Documents > Shul Contract has "Require
+// signing during signup" turned off, generates the same contract but emails
+// the signing link instead — same status labels either way (contract_sent ->
+// contract_signed), just a different moment/channel for getting there.
+// Idempotent per shul.
 router.post('/:id/generate-contract', async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ?').get(req.params.id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
@@ -125,7 +129,15 @@ router.post('/:id/generate-contract', async (req, res) => {
   db.prepare(`INSERT INTO contracts (id, shul_id, season_id, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,?,?,'sent',?,?,datetime('now'))`).run(uuid(), shul.id, shul.season_id, pdfPath, token, expires);
   db.prepare(`UPDATE shuls SET status='contract_sent', updated_at=datetime('now') WHERE id=?`).run(shul.id);
-  res.json({ sign_token: token, alreadySigned: false });
+
+  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_contract_at_signup'`).get(shul.org_id)?.value !== '0';
+  if (signAtSignup) return res.json({ sign_token: token, alreadySigned: false });
+
+  const signUrl = `${process.env.APP_URL || ''}/sign-contract?token=${token}`;
+  const tmpl = renderSystemTemplate(shul.org_id, 'contractReady', { shulName: shul.name_en, signUrl });
+  const { emailError } = await sendMailChecked(shul.org_id, shul.gabai_email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+  if (emailError) console.error('[mail] signup-time contract email failed:', emailError);
+  res.json({ sign_token: null, alreadySigned: false, emailed: true, emailError });
 });
 
 // Public: fetch a shul's contract by sign token (emailed link).
@@ -253,6 +265,13 @@ router.get('/:id', (req, res) => {
   // applicants, e.g. a field that wasn't required last season but is now).
   const missingInfo = shulInfoErrors(shul);
   res.json({ shul: shulOut, notes, contract, applicants, flags, missingInfo });
+});
+
+// Who edited this record and when — not shown to the shul viewing their own record.
+router.get('/:id/history', requireAdmin, (req, res) => {
+  const shul = db.prepare('SELECT id FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!shul) return res.status(404).json({ error: 'Not found' });
+  res.json({ history: getEntityHistory(req.user.org_id, 'shul', shul.id) });
 });
 
 // Admin-only quick-contact: send a one-off SMS/email straight from a shul's

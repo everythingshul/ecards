@@ -100,6 +100,9 @@ renderShell('/admin/settings', `
     <p class="small-muted">Each of these can either use your own uploaded PDF as-is, or a simple generated document built from the text below. Whichever is used, the signer's signature is stamped onto the bottom of the last page automatically when they sign.</p>
     <div class="card">
       <h3>Shul Contract</h3>
+      <div class="checkbox-row"><input type="checkbox" id="shul-contract-at-signup"><label style="margin:0">Require signing during signup</label></div>
+      <p class="small-muted">When on (default), a shul signs the contract right after filling out their application, in the same sitting. When off, the contract is emailed to them separately instead — same statuses either way (contract sent / signed).</p>
+      <button class="btn btn-sm btn-primary" style="margin-bottom:16px" onclick="saveContractAtSignup('shul')">Save</button>
       <p class="small-muted" id="pdf-status">Checking…</p>
       <input type="file" id="contract-pdf-file" accept="application/pdf">
       <div style="margin-top:12px;display:flex;gap:8px">
@@ -132,6 +135,9 @@ renderShell('/admin/settings', `
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Store Agreement</h3>
+      <div class="checkbox-row"><input type="checkbox" id="store-contract-at-signup"><label style="margin:0">Require signing during signup</label></div>
+      <p class="small-muted">When on (default), a store signs the agreement right after applying, in the same sitting. When off, it's emailed to them separately instead — same statuses either way.</p>
+      <button class="btn btn-sm btn-primary" style="margin-bottom:16px" onclick="saveContractAtSignup('store')">Save</button>
       <p class="small-muted" id="doc-pdf-status-store">Checking…</p>
       <input type="file" id="doc-pdf-file-store" accept="application/pdf">
       <div style="margin-top:12px;display:flex;gap:8px">
@@ -165,6 +171,22 @@ renderShell('/admin/settings', `
       <div id="hero-buttons-list"></div>
       <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="addContentButton('hero')">+ Add Button</button>
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveHeroSection()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Linked Image</h3>
+      <p class="small-muted">An image shown on the public homepage, with an optional button linking to it at full size. Leave no image uploaded to not show this section at all.</p>
+      <div id="homepage-image-preview" style="margin-bottom:10px"></div>
+      <input type="file" id="homepage-image-file" accept="image/*">
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="uploadHomepageImage()">Upload Image</button>
+        <button class="btn btn-sm btn-outline" id="btn-remove-homepage-image" style="display:none" onclick="removeHomepageImage()">Remove</button>
+      </div>
+      <label style="margin-top:14px">Alt Text <span class="small-muted">(for screen readers)</span></label>
+      <input id="homepage-image-alt" placeholder="e.g. Our volunteers at the annual dinner">
+      <div class="checkbox-row" style="margin-top:14px"><input type="checkbox" id="homepage-image-button-enabled"><label style="margin:0">Show a button to view the image</label></div>
+      <label>Button Text</label>
+      <input id="homepage-image-button-text" placeholder="e.g. View Photo">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveHomepageImageSettings()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Schedule Section</h3>
@@ -460,6 +482,40 @@ window.saveAboutText = async () => {
   } catch (err) { toast(err.message, true); }
 };
 
+let homepageImageUrl = '';
+function renderHomepageImagePreview(url) {
+  homepageImageUrl = url || '';
+  qs('#homepage-image-preview').innerHTML = homepageImageUrl
+    ? `<img src="${esc(homepageImageUrl)}" style="max-width:240px;max-height:160px;border-radius:8px;border:1px solid var(--border)">`
+    : '<p class="small-muted">No image uploaded yet.</p>';
+  qs('#btn-remove-homepage-image').style.display = homepageImageUrl ? 'inline-flex' : 'none';
+}
+window.uploadHomepageImage = async () => {
+  const file = qs('#homepage-image-file').files[0];
+  if (!file) return toast('Choose an image file first', true);
+  const fd = new FormData(); fd.append('image', file);
+  try {
+    const { url } = await api('/orgs/homepage-image', { method: 'POST', isForm: true, body: fd });
+    renderHomepageImagePreview(url);
+    await api('/settings', { method: 'PUT', body: { homepage_image_url: url } });
+    toast('Image uploaded'); qs('#homepage-image-file').value = '';
+  } catch (err) { toast(err.message, true); }
+};
+window.removeHomepageImage = async () => {
+  if (!confirm('Remove this image? The linked-image section will stop showing on the homepage.')) return;
+  try { await api('/settings', { method: 'PUT', body: { homepage_image_url: '' } }); renderHomepageImagePreview(''); toast('Removed'); } catch (err) { toast(err.message, true); }
+};
+window.saveHomepageImageSettings = async () => {
+  try {
+    await api('/settings', { method: 'PUT', body: {
+      homepage_image_alt: qs('#homepage-image-alt').value,
+      homepage_image_button_enabled: qs('#homepage-image-button-enabled').checked ? '1' : '0',
+      homepage_image_button_text: qs('#homepage-image-button-text').value || 'View',
+    } });
+    toast('Saved');
+  } catch (err) { toast(err.message, true); }
+};
+
 async function loadContactSubmissions() {
   try {
     const { submissions } = await api('/contact');
@@ -487,6 +543,10 @@ async function loadContent() {
   qs('#content-schedule-heading').value = settings.homepage_schedule_heading || 'When applications are open';
   qs('#content-about-heading').value = settings.homepage_about_heading || 'About';
   qs('#content-about').value = settings.homepage_about_text || DEFAULT_ABOUT_TEXT;
+  qs('#homepage-image-alt').value = settings.homepage_image_alt || '';
+  qs('#homepage-image-button-enabled').checked = settings.homepage_image_button_enabled === '1';
+  qs('#homepage-image-button-text').value = settings.homepage_image_button_text || 'View';
+  renderHomepageImagePreview(settings.homepage_image_url || '');
   renderContentButtons('header');
   renderContentButtons('footer');
   renderContentButtons('hero');
@@ -567,6 +627,16 @@ window.openNewSeason = () => {
 window.createSeason = async () => {
   const cap = qs('#s-cap').value;
   try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value, max_accepted_applicants: cap === '' ? null : +cap } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
+};
+
+async function loadContractAtSignup() {
+  const { settings } = await api('/settings');
+  qs('#shul-contract-at-signup').checked = settings.shul_contract_at_signup !== '0';
+  qs('#store-contract-at-signup').checked = settings.store_contract_at_signup !== '0';
+}
+window.saveContractAtSignup = async (entityType) => {
+  const checked = qs(`#${entityType}-contract-at-signup`).checked;
+  try { await api('/settings', { method: 'PUT', body: { [`${entityType}_contract_at_signup`]: checked ? '1' : '0' } }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
 async function loadContractText() {
@@ -683,7 +753,7 @@ window.uploadFullImport = async (input) => {
   input.value = '';
 };
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus(); loadContractAtSignup();
 loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>

@@ -102,6 +102,13 @@
     </div>
   </section>
 
+  <section class="band band-light" id="homepage-image-section" style="display:none">
+    <div class="band-inner" style="text-align:center">
+      <img id="homepage-image" src="" alt="" style="max-width:100%;border-radius:12px;box-shadow:var(--shadow)">
+      <div style="margin-top:18px"><a id="homepage-image-btn" class="btn btn-primary" href="" target="_blank" rel="noopener" style="display:none"></a></div>
+    </div>
+  </section>
+
   <footer class="home-footer">
     <div class="foot-links" id="footer-buttons"></div>
     <a class="powered-by" href="https://everythingshul.com" target="_blank" rel="noopener">Powered By <img src="/img/everythingshul-logo.png" alt="everythingshul"></a>
@@ -188,6 +195,18 @@
       qs('#footer-buttons').innerHTML = footerBtns.map(b => `<a href="${esc(b.url)}">${esc(b.label)}</a>`).join('');
       const ctaBtns = content?.ctaButtons?.length ? content.ctaButtons : DEFAULT_CTA_BUTTONS;
       qs('#cta-buttons').innerHTML = ctaBtns.map((b, i) => `<a href="${esc(b.url)}" class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'}">${esc(b.label)}</a>`).join('');
+
+      if (content?.image?.url) {
+        qs('#homepage-image-section').style.display = '';
+        qs('#homepage-image').src = content.image.url;
+        qs('#homepage-image').alt = content.image.alt || '';
+        const btn = qs('#homepage-image-btn');
+        if (content.image.buttonEnabled) {
+          btn.style.display = 'inline-flex';
+          btn.href = content.image.url;
+          btn.textContent = content.image.buttonText || 'View';
+        }
+      }
 
       if (popup?.enabled && popup.message) {
         const el = document.createElement('div');

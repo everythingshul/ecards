@@ -98,6 +98,32 @@ export function getRecentActions(orgId, hours = 48) {
   }));
 }
 
+// Every audit_log row for ONE specific record (an applicant/shul/store/...),
+// newest first, with the acting user's name attached — this is what a
+// regular admin sees on that record's own "History" tab. Deliberately a
+// much narrower read than getRecentActions: that one is a firehose across
+// every entity in the org and stays super_admin-only; this is scoped to a
+// single record the admin is already allowed to view, so any admin can see
+// who touched it. `null` user_id (public form submissions, system actions)
+// shows as "System".
+export function getEntityHistory(orgId, entityType, entityId, limit = 100) {
+  const rows = db.prepare(`SELECT a.id, a.action, a.before_json, a.after_json, a.created_at, u.first_name, u.last_name
+    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.org_id = ? AND a.entity_type = ? AND a.entity_id = ?
+    ORDER BY a.created_at DESC LIMIT ?`).all(orgId, entityType, entityId, limit);
+  return rows.map(r => {
+    const after = r.after_json ? JSON.parse(r.after_json) : null;
+    // For 'update' rows, before/after are captured as exactly the changed
+    // fields (see every route's logAudit('update', ...) call) — so after's
+    // keys ARE the changed-field list, no diffing needed.
+    const changedFields = r.action === 'update' && after ? Object.keys(after) : [];
+    return {
+      id: r.id, action: r.action, created_at: r.created_at, changedFields,
+      userName: r.first_name ? `${r.first_name} ${r.last_name || ''}`.trim() : null,
+    };
+  });
+}
+
 // Restores `targetState` onto entityId in its table:
 //  - targetState is an object and the row exists  -> UPDATE just those columns
 //  - targetState is an object and the row is gone  -> re-INSERT it (full or partial row)

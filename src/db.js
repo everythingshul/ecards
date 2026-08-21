@@ -8,7 +8,7 @@ import { generateApplicantExternalId } from './utils/externalId.js';
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates', 'forms', 'store-bills']) {
+for (const sub of ['contracts', 'uploads', 'signatures', 'logos', 'updates', 'forms', 'store-bills', 'homepage']) {
   const p = join(DATA_DIR, sub);
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }

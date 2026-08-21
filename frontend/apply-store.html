@@ -87,9 +87,17 @@ qs('#apply-form').addEventListener('submit', async (e) => {
   const data = Object.fromEntries(new FormData(e.target).entries());
   qsa('input[type=checkbox]', e.target).forEach(c => data[c.name] = c.checked);
   try {
-    const { store } = await api('/stores/apply', { method: 'POST', body: data });
+    const { store, message } = await api('/stores/apply', { method: 'POST', body: data });
     storeId = store.id;
-    const { sign_token } = await api(`/stores/${storeId}/generate-contract`, { method: 'POST' });
+    const { sign_token, emailed } = await api(`/stores/${storeId}/generate-contract`, { method: 'POST' });
+    if (emailed || !sign_token) {
+      // Org has "require signing during signup" turned off — the agreement
+      // was emailed separately instead of being shown here.
+      qs('#apply-form').style.display = 'none';
+      qs('#done-section').style.display = 'block';
+      qs('#done-message').textContent = message || "Application received. We've emailed you your agreement to review and sign.";
+      return;
+    }
     signToken = sign_token;
     const { fields } = await api(`/documents/sign/${signToken}`);
     if (fields && fields.length) contractFields = fields;

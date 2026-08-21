@@ -786,6 +786,28 @@ function varsHintHtml(entityType, vars) {
   return ENTITY_TEMPLATE_VARS[entityType].map(([key, label]) => `<code title="${esc(label)}">{{${key}}}</code>${vars[key] ? ` → ${esc(vars[key])}` : ''}`).join('&nbsp;&nbsp;');
 }
 
+// Shared "who edited this record" tab for applicant/shul/store detail modals.
+// entityType is 'applicant', 'shul', or 'store' — the route prefix is just
+// that plus 's'. Backed by audit_log via GET /:type/:id/history (admin-only,
+// same gate as the entity detail fetch itself).
+async function loadHistoryTab(entityType, entityId, containerId) {
+  const container = qs('#' + containerId);
+  container.innerHTML = '<p class="small-muted">Loading…</p>';
+  try {
+    const { history } = await api(`/${entityType}s/${entityId}/history`);
+    container.innerHTML = history.length ? history.map(h => {
+      const who = h.userName ? esc(h.userName) : '<span class="small-muted">System</span>';
+      const what = h.action === 'update' && h.changedFields.length
+        ? `Updated ${h.changedFields.map(esc).join(', ')}`
+        : h.action.charAt(0).toUpperCase() + h.action.slice(1).replace(/_/g, ' ');
+      return `<div class="card" style="padding:10px 14px;margin-bottom:8px">
+        <div class="flex-between"><span>${what}</span><span class="small-muted">${fmtDateTime(h.created_at)}</span></div>
+        <p class="small-muted" style="margin:4px 0 0">by ${who}</p>
+      </div>`;
+    }).join('') : '<p class="small-muted">No history yet.</p>';
+  } catch (err) { container.innerHTML = `<p class="small-muted">${esc(err.message)}</p>`; }
+}
+
 // Shared SMS+Email history/quick-send tab for applicant & shul detail modals.
 // entityType is 'applicant' or 'shul' — the route prefix is just that plus 's'.
 // `entity` is the full record already fetched by the caller (openApplicant's

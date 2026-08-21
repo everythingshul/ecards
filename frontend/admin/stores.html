@@ -100,7 +100,7 @@ async function openStore(id) {
       api(`/stores/${id}`), api(`/stores/${id}/bill-submissions`),
     ]);
     const body = `
-      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${submittedBills.length})</button><button data-t="documents">Documents</button></div>
+      <div class="tabs" id="stabs"><button class="active" data-t="info">Info</button><button data-t="billing">Billing (${submittedBills.length})</button><button data-t="documents">Documents</button><button data-t="history">History</button></div>
       <div id="stab-info">
         <div class="grid-2">
           <div><label>Store Name</label><input id="e-name" value="${esc(s.name)}"></div>
@@ -145,14 +145,18 @@ async function openStore(id) {
       </div>
       <div id="stab-documents" style="display:none">
         <div id="stab-documents-list"><p class="small-muted">Loading…</p></div>
+      </div>
+      <div id="stab-history" style="display:none">
+        <div id="stab-history-list"><p class="small-muted">Loading…</p></div>
       </div>`;
     const footer = `<button class="btn btn-outline btn-sm" onclick="showOtherSeasons('Store', '/stores/${id}/season-history', 'openStore')">View Other Seasons</button><button class="btn btn-outline btn-sm" onclick="inviteStore('${id}')">Invite to Portal</button>${s.portal_user_id && ['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${s.portal_user_id}','${esc(s.name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}${['super_admin','org_admin'].includes(Auth.user()?.role) ? `<button class="btn btn-outline btn-sm" style="color:#b71c1c;border-color:#b71c1c" onclick="deleteStore('${id}')">Delete Permanently</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveStore('${id}')">Save</button>`;
     openModal(s.name, body, footer);
     qsa('#stabs button').forEach(b => b.addEventListener('click', () => {
       qsa('#stabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-      ['info','billing','documents'].forEach(t => qs('#stab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
+      ['info','billing','documents','history'].forEach(t => qs('#stab-'+t).style.display = t === b.dataset.t ? 'block' : 'none');
     }));
     loadDocumentsTab('store', id, 'stab-documents-list', s.owner_email || s.manager_email || '');
+    loadHistoryTab('store', id, 'stab-history-list');
   } catch (err) { toast(err.message, true); }
 }
 

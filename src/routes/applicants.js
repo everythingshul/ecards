@@ -15,7 +15,7 @@ import { getOrCreateEzrasHabayisShul } from '../utils/ezrasHabayis.js';
 import { getActiveSeasonId } from '../utils/formSchedule.js';
 import { validateBySchema, validateRowsBySchema, shulInfoErrors } from '../utils/formValidation.js';
 import { APPLICANT_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
-import { logAudit, logMassAudit } from '../services/audit.js';
+import { logAudit, logMassAudit, getEntityHistory } from '../services/audit.js';
 import { hardDeleteApplicant } from '../utils/entityDelete.js';
 import { lockApplicantCards } from '../services/cardSync.js';
 
@@ -209,6 +209,14 @@ router.get('/:id', (req, res) => {
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
   const flags = req.user.role === 'shul' ? [] : db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
   res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags });
+});
+
+// Who edited this record and when — a shul viewing their own applicant
+// never sees this (same admin-only gate as notes/flags above).
+router.get('/:id/history', requireAdmin, (req, res) => {
+  const applicant = db.prepare('SELECT id FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!applicant) return res.status(404).json({ error: 'Not found' });
+  res.json({ history: getEntityHistory(req.user.org_id, 'applicant', applicant.id) });
 });
 
 // Admin-only quick-contact: send a one-off SMS/email straight from an

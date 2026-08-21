@@ -10,7 +10,7 @@ import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { validateBySchema } from '../utils/formValidation.js';
 import { STORE_APPLICATION_SCHEMA } from '../utils/builtinSchemas.js';
-import { logAudit, logMassAudit } from '../services/audit.js';
+import { logAudit, logMassAudit, getEntityHistory } from '../services/audit.js';
 import { deletePolymorphicRefs } from '../utils/entityDelete.js';
 import { generateGenericDocumentPdf } from '../services/pdf.js';
 import { resolveEntity } from './documents.js';
@@ -71,7 +71,19 @@ router.post('/:id/generate-contract', async (req, res) => {
   const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
   db.prepare(`INSERT INTO documents (id, org_id, entity_type, entity_id, title, pdf_path, status, sign_token, sign_token_expires, sent_at)
     VALUES (?,?,'store',?,?,?,'sent',?,?,datetime('now'))`).run(id, store.org_id, store.id, 'Store Participation Agreement', pdfPath, token, expires);
-  res.json({ sign_token: token, alreadySigned: false });
+
+  // Same "require signing during signup vs. email it separately" toggle as
+  // shuls (Settings > Documents > Store Agreement) — same status labels
+  // either way, just a different moment/channel for getting the signature.
+  const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'store_contract_at_signup'`).get(store.org_id)?.value !== '0';
+  if (signAtSignup) return res.json({ sign_token: token, alreadySigned: false });
+
+  const signUrl = `${process.env.APP_URL || ''}/sign-document?token=${token}`;
+  const tmpl = renderSystemTemplate(store.org_id, 'documentReady', { docTitle: 'Store Participation Agreement', entityName: store.name, signUrl });
+  const to = store.owner_email || store.manager_email;
+  const { emailError } = to ? await sendMailChecked(store.org_id, to, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo }) : { emailError: 'No email on file' };
+  if (emailError) console.error('[mail] signup-time store agreement email failed:', emailError);
+  res.json({ sign_token: null, alreadySigned: false, emailed: true, emailError });
 });
 
 router.use(auth, requirePermission('stores'));
@@ -129,6 +141,13 @@ router.get('/:id', (req, res) => {
   // history's shape from.
   if (req.user.role === 'store') { delete transactionTotals.count; delete transactionTotals.total_refunds; }
   res.json({ store: redact(store, req.permission.hidden_fields), transactionTotals });
+});
+
+// Who edited this record and when — not shown to the store viewing their own record.
+router.get('/:id/history', requireAdmin, (req, res) => {
+  const store = db.prepare('SELECT id FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
+  if (!store) return res.status(404).json({ error: 'Not found' });
+  res.json({ history: getEntityHistory(req.user.org_id, 'store', store.id) });
 });
 
 // Stores are one persistent record reused every season (unlike shuls and

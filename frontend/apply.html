@@ -82,7 +82,15 @@ qs('#apply-form').addEventListener('submit', async (e) => {
       qs('#done-message').textContent = message;
       return;
     }
-    const { sign_token } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
+    const { sign_token, emailed } = await api(`/shuls/${shulId}/generate-contract`, { method: 'POST' });
+    if (emailed || !sign_token) {
+      // Org has "require signing during signup" turned off — the contract
+      // was emailed separately instead of being shown here.
+      qs('#apply-form').style.display = 'none';
+      qs('#done-section').style.display = 'block';
+      qs('#done-message').textContent = message || "Application received. We've emailed you your contract to review and sign.";
+      return;
+    }
     signToken = sign_token;
     const { fields } = await api(`/shuls/contract/${signToken}`);
     if (fields && fields.length) contractFields = fields;
