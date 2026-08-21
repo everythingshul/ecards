@@ -3,7 +3,8 @@ import multer from 'multer';
 import { join } from 'path';
 import { writeFileSync } from 'fs';
 import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
@@ -46,12 +47,12 @@ router.get('/resolve', (req, res) => {
   });
 });
 
-router.use(auth, requireAdmin);
+router.use(auth, requirePermission('settings'));
 
 // Uploads the homepage's linkable image (Settings > Site Content) — returns
 // the URL to save via PUT /settings' generic key/value store, same
 // upload-then-store-URL pattern as forms.js's /upload-image.
-router.post('/homepage-image', upload.single('image'), (req, res) => {
+router.post('/homepage-image', requirePermission('settings', 'can_edit'), upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
   if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ error: 'File must be an image' });
   const safeName = `${uuid()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
@@ -64,7 +65,7 @@ router.get('/me', (req, res) => {
   res.json({ organization: db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id) });
 });
 
-router.put('/me', (req, res) => {
+router.put('/me', requirePermission('settings', 'can_edit'), (req, res) => {
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
   if (!org) return res.status(404).json({ error: 'Not found' });
   const f = req.body || {};

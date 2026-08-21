@@ -3,7 +3,8 @@ import multer from 'multer';
 import { unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin, requireRole } from '../middleware/auth.js';
+import { auth, requireRole } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields, generatePreviewPdfBytes, getDataFields, getDataFieldDefs } from '../services/pdf.js';
 import { isMockMode } from '../services/giftcard.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
@@ -19,7 +20,7 @@ router.get('/', (req, res) => {
   res.json({ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) });
 });
 
-router.put('/', requireAdmin, (req, res) => {
+router.put('/', requirePermission('settings', 'can_edit'), (req, res) => {
   const upsert = db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
     ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`);
   for (const [key, value] of Object.entries(req.body || {})) upsert.run(req.user.org_id, key, String(value ?? ''));
@@ -45,14 +46,14 @@ router.get('/contract-pdf', (req, res) => {
   res.json({ hasCustomTemplate: hasCustomTemplate() });
 });
 
-router.post('/contract-pdf', requireAdmin, upload.single('file'), (req, res) => {
+router.post('/contract-pdf', requirePermission('settings', 'can_edit'), upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'File must be a PDF' });
   writeFileSync(CUSTOM_TEMPLATE_PATH, req.file.buffer);
   res.json({ ok: true, hasCustomTemplate: true });
 });
 
-router.delete('/contract-pdf', requireAdmin, (req, res) => {
+router.delete('/contract-pdf', requirePermission('settings', 'can_edit'), (req, res) => {
   try { unlinkSync(CUSTOM_TEMPLATE_PATH); } catch { /* already gone */ }
   res.json({ ok: true, hasCustomTemplate: false });
 });
@@ -64,7 +65,7 @@ router.get('/document-pdf/:entityType', (req, res) => {
   res.json({ hasCustomTemplate: hasCustomDocTemplate(req.params.entityType) });
 });
 
-router.post('/document-pdf/:entityType', requireAdmin, upload.single('file'), (req, res) => {
+router.post('/document-pdf/:entityType', requirePermission('settings', 'can_edit'), upload.single('file'), (req, res) => {
   const entityType = req.params.entityType;
   if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -73,7 +74,7 @@ router.post('/document-pdf/:entityType', requireAdmin, upload.single('file'), (r
   res.json({ ok: true, hasCustomTemplate: true });
 });
 
-router.delete('/document-pdf/:entityType', requireAdmin, (req, res) => {
+router.delete('/document-pdf/:entityType', requirePermission('settings', 'can_edit'), (req, res) => {
   const entityType = req.params.entityType;
   if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
   try { unlinkSync(docTemplatePath(entityType)); } catch { /* already gone */ }
@@ -131,7 +132,7 @@ router.get('/signature-box/:kind/preview-pdf', async (req, res) => {
 // Body is the full fields array (replaces whatever was saved before) — the
 // admin editor always sends its whole current set, since fields can be
 // added/removed/reordered in the same edit session.
-router.put('/signature-box/:kind', requireAdmin, (req, res) => {
+router.put('/signature-box/:kind', requirePermission('settings', 'can_edit'), (req, res) => {
   const kind = req.params.kind;
   if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
   const fields = req.body?.fields;
@@ -161,7 +162,7 @@ router.get('/contract-fields/:kind', async (req, res) => {
   res.json({ fields, pageSize, availableFields: getDataFieldDefs(kind), hasTemplate: !!SIG_TEMPLATE_PATH[kind]?.() });
 });
 
-router.put('/contract-fields/:kind', requireAdmin, (req, res) => {
+router.put('/contract-fields/:kind', requirePermission('settings', 'can_edit'), (req, res) => {
   const kind = req.params.kind;
   if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
   const fields = req.body?.fields;
@@ -182,7 +183,7 @@ router.put('/contract-fields/:kind', requireAdmin, (req, res) => {
 // password reset), each with either the built-in default or this org's
 // saved override. Only ever returns/accepts the {{var}} placeholder text —
 // the actual substitution happens at send time in renderSystemTemplate().
-router.get('/email-templates', requireAdmin, (req, res) => {
+router.get('/email-templates', requirePermission('settings'), (req, res) => {
   const overrides = Object.fromEntries(db.prepare('SELECT key, subject, body, reply_to FROM system_email_templates WHERE org_id = ?').all(req.user.org_id).map(r => [r.key, r]));
   const defaultReplyTo = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'email_reply_to'`).get(req.user.org_id)?.value || '';
   const templates = Object.entries(SYSTEM_EMAIL_TEMPLATES).map(([key, def]) => ({
@@ -194,7 +195,7 @@ router.get('/email-templates', requireAdmin, (req, res) => {
   res.json({ templates });
 });
 
-router.put('/email-templates/:key', requireAdmin, (req, res) => {
+router.put('/email-templates/:key', requirePermission('settings', 'can_edit'), (req, res) => {
   const { key } = req.params;
   if (!SYSTEM_EMAIL_TEMPLATES[key]) return res.status(404).json({ error: 'Unknown template key' });
   const { subject, body, reply_to } = req.body || {};
@@ -212,7 +213,7 @@ router.put('/email-templates/:key', requireAdmin, (req, res) => {
 });
 
 // Revert to the built-in default (just deletes the override row).
-router.delete('/email-templates/:key', requireAdmin, (req, res) => {
+router.delete('/email-templates/:key', requirePermission('settings', 'can_edit'), (req, res) => {
   db.prepare('DELETE FROM system_email_templates WHERE org_id = ? AND key = ?').run(req.user.org_id, req.params.key);
   res.json({ ok: true });
 });

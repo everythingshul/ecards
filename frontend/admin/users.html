@@ -12,7 +12,14 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
-const RESOURCES = ['dashboard','shuls','applicants','cards','stores','forms','users','settings'];
+// Kept in sync with PERMISSION_RESOURCES (src/middleware/permissions.js) —
+// every resource that can be gated at all gets a row here.
+const RESOURCES = ['dashboard','shuls','applicants','cards','stores','seasons','forms','tasks','emails','sms','updates','documents','users','settings','audit'];
+const RESOURCE_LABELS = {
+  dashboard: 'Dashboard', shuls: 'Shuls', applicants: 'Applicants', cards: 'Cards & Transactions', stores: 'Stores',
+  seasons: 'Seasons', forms: 'Form Builder', tasks: 'Tasks', emails: 'Email Center', sms: 'SMS Center',
+  updates: 'Updates', documents: 'E-Signatures', users: 'Users & Permissions', settings: 'Settings', audit: 'Recent Actions',
+};
 const HIDABLE_FIELDS = {
   shuls: ['name_en','name_he','address','ruv_first_name','ruv_last_name','ruv_phone','gabai_first_name','gabai_last_name','gabai_cell','gabai_email'],
   applicants: ['first_name','last_name','home_phone','husband_cell','wife_cell','email','address','card_amount','comments'],
@@ -88,7 +95,7 @@ qs('#btn-mass-apply').addEventListener('click', async () => {
 function permRow(resource, p) {
   const fields = HIDABLE_FIELDS[resource];
   return `<div class="card" style="margin-bottom:10px" data-resource="${resource}">
-    <div class="flex-between"><strong style="text-transform:capitalize">${resource}</strong>
+    <div class="flex-between"><strong>${esc(RESOURCE_LABELS[resource] || resource)}</strong>
       <div class="pill-row">
         <label class="checkbox-row"><input type="checkbox" class="p-view" ${p.can_view?'checked':''}>View</label>
         <label class="checkbox-row"><input type="checkbox" class="p-edit" ${p.can_edit?'checked':''}>Edit</label>
@@ -105,7 +112,10 @@ async function openUser(id) {
   try {
     const { user: u, permissions } = await api(`/users/${id}`);
     const permMap = Object.fromEntries(permissions.map(p => [p.resource, p]));
-    const defaultPerm = { can_view: 1, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] };
+    // Matches RESOURCE_DEFAULT_OVERRIDES in middleware/permissions.js — audit
+    // (Recent Actions) is denied by default for everyone but super_admin
+    // until explicitly granted, unlike every other resource's view-by-default.
+    const defaultPermFor = (r) => r === 'audit' ? { can_view: 0, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] } : { can_view: 1, can_edit: 0, can_export: 0, scope: 'all', hidden_fields: [] };
     const body = `
       <div class="grid-2">
         <div><label>First Name</label><input id="e-first_name" value="${esc(u.first_name||'')}"></div>
@@ -117,7 +127,7 @@ async function openUser(id) {
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
       <div class="divider"></div>
       <h4>Page & Field Permissions</h4>
-      ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPerm)).join('')}
+      ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPermFor(r))).join('')}
     `;
     const canSetPassword = ['super_admin','org_admin'].includes(Auth.user()?.role) && ROLE_RANK[u.role] < ROLE_RANK[Auth.user()?.role];
     openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button>${canSetPassword ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${id}','${esc(u.first_name+' '+u.last_name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);

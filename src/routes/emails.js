@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { sendMailChecked } from '../services/mail.js';
 import { sendXlsx } from '../services/xlsx.js';
 import { findAccountByEmail } from '../utils/contactLookup.js';
 
 const router = Router();
-router.use(auth, requireAdmin); // internal team feature — staff/org_admin/super_admin only
+router.use(auth, requirePermission('emails')); // internal team feature — staff/org_admin/super_admin only
 
 // ============================= Sent email log =============================
 router.get('/', (req, res) => {
@@ -31,7 +32,7 @@ router.get('/', (req, res) => {
   res.json({ emails, total });
 });
 
-router.get('/export', (req, res) => {
+router.get('/export', requirePermission('emails', 'can_export'), (req, res) => {
   const rows = db.prepare(`SELECT e.to_email, e.subject, e.status, e.error_message, e.related_entity_type, e.related_entity_id, e.created_at,
       TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS sent_by_name
     FROM emails_sent e LEFT JOIN users u ON u.id = e.sent_by WHERE e.org_id = ? ORDER BY e.created_at DESC`).all(req.user.org_id);
@@ -55,7 +56,7 @@ router.get('/templates/all', (req, res) => {
   res.json({ templates });
 });
 
-router.post('/templates', (req, res) => {
+router.post('/templates', requirePermission('emails', 'can_edit'), (req, res) => {
   const { name, category, subject, body_html } = req.body || {};
   if (!name || !subject || !body_html) return res.status(400).json({ error: 'name, subject, and body_html are required' });
   const id = uuid();
@@ -64,7 +65,7 @@ router.post('/templates', (req, res) => {
   res.status(201).json({ template: db.prepare('SELECT * FROM email_templates WHERE id = ?').get(id) });
 });
 
-router.put('/templates/:id', (req, res) => {
+router.put('/templates/:id', requirePermission('emails', 'can_edit'), (req, res) => {
   const tmpl = db.prepare('SELECT * FROM email_templates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!tmpl) return res.status(404).json({ error: 'Not found' });
   const { name, category, subject, body_html } = req.body || {};
@@ -73,7 +74,7 @@ router.put('/templates/:id', (req, res) => {
   res.json({ template: db.prepare('SELECT * FROM email_templates WHERE id = ?').get(tmpl.id) });
 });
 
-router.delete('/templates/:id', (req, res) => {
+router.delete('/templates/:id', requirePermission('emails', 'can_edit'), (req, res) => {
   const tmpl = db.prepare('SELECT * FROM email_templates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!tmpl) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM email_templates WHERE id = ?').run(tmpl.id);
@@ -84,7 +85,7 @@ router.delete('/templates/:id', (req, res) => {
 // The "Email Builder" send action — an arbitrary one-off (or templated)
 // email to any recipient, distinct from the system's automatic emails.
 // {{variable}} placeholders in the template are substituted from `variables`.
-router.post('/send', async (req, res) => {
+router.post('/send', requirePermission('emails', 'can_edit'), async (req, res) => {
   const { to, subject, body_html, variables } = req.body || {};
   if (!to || !subject || !body_html) return res.status(400).json({ error: 'to, subject, and body_html are required' });
   const substitute = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, key) => (variables && variables[key] != null ? variables[key] : m));

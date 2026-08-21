@@ -187,6 +187,21 @@ export const SYSTEM_EMAIL_TEMPLATES = {
     subject: 'Reset your password',
     body: `<p>Click below to reset your password. This link expires in 24 hours.</p><p><a href="{{resetUrl}}">{{resetUrl}}</a></p>`,
   },
+  // Internal notice, not sent to the shul/store itself — see
+  // notifyNewSignup() below. Only ever fires when Settings > Organization's
+  // "Notify on New Signups" email is set.
+  newShulSignup: {
+    label: 'Internal Notice: New Shul Signup', vars: ['shulName', 'contactName', 'contactEmail', 'contactPhone'],
+    subject: 'New shul application: {{shulName}}',
+    body: `<p>A new shul application was just submitted.</p>
+      <p><strong>Shul:</strong> {{shulName}}<br><strong>Contact:</strong> {{contactName}}<br><strong>Email:</strong> {{contactEmail}}<br><strong>Phone:</strong> {{contactPhone}}</p>`,
+  },
+  newStoreSignup: {
+    label: 'Internal Notice: New Store Signup', vars: ['storeName', 'contactName', 'contactEmail', 'contactPhone'],
+    subject: 'New store application: {{storeName}}',
+    body: `<p>A new store application was just submitted.</p>
+      <p><strong>Store:</strong> {{storeName}}<br><strong>Contact:</strong> {{contactName}}<br><strong>Email:</strong> {{contactEmail}}<br><strong>Phone:</strong> {{contactPhone}}</p>`,
+  },
 };
 
 function substitute(text, vars) {
@@ -206,4 +221,25 @@ export function renderSystemTemplate(orgId, key, vars) {
   // falls back to the org-wide default itself when this comes back null, so
   // there's no need to resolve that fallback here too.
   return { subject: substitute(source.subject, vars), body: substitute(source.body, vars), replyTo: override?.reply_to || null };
+}
+
+// Optional internal alert (Settings > Organization > "Notify on New Shul/
+// Store Signups") — when one or more comma-separated addresses are set for
+// settingKey, every brand-new shul/store public application sends each of
+// them a heads-up using the newShulSignup/newStoreSignup templates above.
+// Shuls and stores use separate setting keys (see the two call sites in
+// routes/shuls.js and routes/stores.js) so either can be configured, or
+// left off, independently. No-op if the setting is blank (the default),
+// and — like every other automatic email in this file — best-effort: a
+// failure on one (or all) recipients never blocks or undoes the signup
+// that triggered it, just logs.
+export async function notifyNewSignup(orgId, settingKey, templateKey, vars) {
+  const raw = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = ?`).get(orgId || DEFAULT_ORG_ID, settingKey)?.value;
+  const recipients = (raw || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!recipients.length) return;
+  const tmpl = renderSystemTemplate(orgId, templateKey, vars);
+  for (const to of recipients) {
+    const { emailError } = await sendMailChecked(orgId, to, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo });
+    if (emailError) console.error(`[mail] new-signup notification (${templateKey}) to ${to} failed:`, emailError);
+  }
 }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { sendSmsChecked, logInboundSms, isSmsMockMode, syncInboundSms, getOwnSmsNumber } from '../services/sms.js';
 import { sendXlsx } from '../services/xlsx.js';
 import { findAccountByPhone } from '../utils/contactLookup.js';
@@ -38,7 +39,7 @@ router.post('/webhook/inbound', (req, res) => {
   res.json({ ok: true });
 });
 
-router.use(auth, requireAdmin); // internal team feature — staff/org_admin/super_admin only
+router.use(auth, requirePermission('sms')); // internal team feature — staff/org_admin/super_admin only
 
 router.get('/config', (req, res) => res.json({ mockMode: isSmsMockMode() }));
 
@@ -98,7 +99,7 @@ router.get('/', (req, res) => {
   res.json({ messages, total });
 });
 
-router.get('/export', (req, res) => {
+router.get('/export', requirePermission('sms', 'can_export'), (req, res) => {
   const { season_id } = req.query;
   let where = 'WHERE m.org_id = ?';
   const params = [req.user.org_id];
@@ -120,7 +121,7 @@ router.get('/templates/all', (req, res) => {
   res.json({ templates });
 });
 
-router.post('/templates', (req, res) => {
+router.post('/templates', requirePermission('sms', 'can_edit'), (req, res) => {
   const { name, category, body: msgBody } = req.body || {};
   if (!name || !msgBody) return res.status(400).json({ error: 'name and body are required' });
   const id = uuid();
@@ -129,7 +130,7 @@ router.post('/templates', (req, res) => {
   res.status(201).json({ template: db.prepare('SELECT * FROM sms_templates WHERE id = ?').get(id) });
 });
 
-router.put('/templates/:id', (req, res) => {
+router.put('/templates/:id', requirePermission('sms', 'can_edit'), (req, res) => {
   const tmpl = db.prepare('SELECT * FROM sms_templates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!tmpl) return res.status(404).json({ error: 'Not found' });
   const { name, category, body: msgBody } = req.body || {};
@@ -138,7 +139,7 @@ router.put('/templates/:id', (req, res) => {
   res.json({ template: db.prepare('SELECT * FROM sms_templates WHERE id = ?').get(tmpl.id) });
 });
 
-router.delete('/templates/:id', (req, res) => {
+router.delete('/templates/:id', requirePermission('sms', 'can_edit'), (req, res) => {
   const tmpl = db.prepare('SELECT * FROM sms_templates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!tmpl) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM sms_templates WHERE id = ?').run(tmpl.id);
@@ -174,7 +175,7 @@ router.get('/groups/:group', (req, res) => {
 // that group. {{variable}} placeholders in body are substituted from
 // `variables` for single sends (groups don't get per-recipient variables —
 // send the same message to everyone).
-router.post('/send', async (req, res) => {
+router.post('/send', requirePermission('sms', 'can_edit'), async (req, res) => {
   const { to, group, body, variables, season_id } = req.body || {};
   if (!body) return res.status(400).json({ error: 'body is required' });
   const substitute = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, key) => (variables && variables[key] != null ? variables[key] : m));

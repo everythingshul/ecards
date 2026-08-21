@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { sendXlsx } from '../services/xlsx.js';
 
 const router = Router();
-router.use(auth, requireAdmin); // internal team feature — staff/org_admin/super_admin only
+router.use(auth, requirePermission('tasks')); // internal team feature — staff/org_admin/super_admin only
 
 router.get('/', (req, res) => {
   const { assigned_to, status, overdue, entity_type, entity_id, page = 1, pageSize = 50 } = req.query;
@@ -31,7 +32,7 @@ router.get('/', (req, res) => {
 });
 
 // Full-detail CSV export. Must be registered before /:id.
-router.get('/export', (req, res) => {
+router.get('/export', requirePermission('tasks', 'can_export'), (req, res) => {
   const { assigned_to, status, overdue } = req.query;
   let where = 'WHERE t.org_id = ?';
   const params = [req.user.org_id];
@@ -50,7 +51,7 @@ router.get('/:id', (req, res) => {
   res.json({ task: { ...task, entity_label: entityLabel(task.entity_type, task.entity_id) } });
 });
 
-router.post('/', (req, res) => {
+router.post('/', requirePermission('tasks', 'can_edit'), (req, res) => {
   const { title, description, assigned_to, due_date, priority, entity_type, entity_id } = req.body || {};
   if (!title) return res.status(400).json({ error: 'Title is required' });
   if (assigned_to) {
@@ -64,7 +65,7 @@ router.post('/', (req, res) => {
   res.status(201).json({ task: db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) });
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requirePermission('tasks', 'can_edit'), (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!task) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
@@ -84,7 +85,7 @@ router.put('/:id', (req, res) => {
   res.json({ task: db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) });
 });
 
-router.post('/:id/status', (req, res) => {
+router.post('/:id/status', requirePermission('tasks', 'can_edit'), (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!task) return res.status(404).json({ error: 'Not found' });
   const { status } = req.body || {};
@@ -94,7 +95,7 @@ router.post('/:id/status', (req, res) => {
   res.json({ task: db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) });
 });
 
-router.post('/mass-status', (req, res) => {
+router.post('/mass-status', requirePermission('tasks', 'can_edit'), (req, res) => {
   const { ids, status } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (!['open', 'in_progress', 'done'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -109,7 +110,7 @@ router.post('/mass-status', (req, res) => {
   res.json({ updated, skipped });
 });
 
-router.post('/mass-reassign', (req, res) => {
+router.post('/mass-reassign', requirePermission('tasks', 'can_edit'), (req, res) => {
   const { ids, assigned_to } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (assigned_to) {
@@ -126,7 +127,7 @@ router.post('/mass-reassign', (req, res) => {
   res.json({ updated, skipped });
 });
 
-router.post('/mass-delete', (req, res) => {
+router.post('/mass-delete', requirePermission('tasks', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0;
@@ -139,7 +140,7 @@ router.post('/mass-delete', (req, res) => {
   res.json({ deleted, skipped });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requirePermission('tasks', 'can_edit'), (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!task) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);

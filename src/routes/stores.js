@@ -5,7 +5,7 @@ import { writeFileSync } from 'fs';
 import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
-import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate, notifyNewSignup } from '../services/mail.js';
 import { sendXlsx } from '../services/xlsx.js';
 import { normalizePhone } from '../utils/phone.js';
 import { validateBySchema } from '../utils/formValidation.js';
@@ -41,6 +41,10 @@ router.post('/apply', async (req, res) => {
       b.owner_name || '', normalizePhone(b.owner_phone || ''), b.owner_email, samePerson ? 1 : 0,
       b.comments || '', b.has_provider_account ? 1 : 0);
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(id);
+  await notifyNewSignup(orgId, 'notify_new_store_signup_email', 'newStoreSignup', {
+    storeName: store.name, contactName: store.owner_name || store.manager_name || '',
+    contactEmail: store.owner_email || store.manager_email || '', contactPhone: store.owner_phone || store.manager_phone || '',
+  });
 
   const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'store_contract_at_signup'`).get(orgId)?.value !== '0';
   if (!signAtSignup) {

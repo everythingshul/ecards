@@ -3,7 +3,8 @@ import multer from 'multer';
 import { join } from 'path';
 import { writeFileSync } from 'fs';
 import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { detectAndFlag } from '../services/duplicates.js';
 import { normalizePhone } from '../utils/phone.js';
 import { generateApplicantExternalId } from '../utils/externalId.js';
@@ -133,13 +134,13 @@ router.post('/public/:slug/submit', (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-router.use(auth, requireAdmin);
+router.use(auth, requirePermission('forms'));
 
 // Uploads an image for an 'image' block in a form's schema (see
 // frontend/admin/forms.html's field editor) — returns the URL to store on
 // that field. Same memory-storage-then-write-to-disk pattern as
 // routes/updates.js's inline-image attachments.
-router.post('/upload-image', upload.single('image'), (req, res) => {
+router.post('/upload-image', requirePermission('forms', 'can_edit'), upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
   if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ error: 'File must be an image' });
   const safeName = `${uuid()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
@@ -158,7 +159,7 @@ router.get('/', (req, res) => {
 // Built-In Application Forms links on the admin Forms page) — every form
 // created through this route is just a general form, type is not even
 // accepted from the client.
-router.post('/', (req, res) => {
+router.post('/', requirePermission('forms', 'can_edit'), (req, res) => {
   const { name, visibility = 'public', slug, schema, target = [], season_id } = req.body || {};
   if (!name || !slug) return res.status(400).json({ error: 'name and slug are required' });
   if (!season_id) return res.status(400).json({ error: 'Every form must be linked to a season' });
@@ -170,7 +171,7 @@ router.post('/', (req, res) => {
   res.status(201).json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(id) });
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requirePermission('forms', 'can_edit'), (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
   const { name, visibility, schema, target, is_active, opens_at, closes_at, season_id, slug } = req.body || {};
@@ -195,7 +196,7 @@ router.put('/:id', (req, res) => {
   res.json({ form: db.prepare('SELECT * FROM forms WHERE id = ?').get(form.id) });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requirePermission('forms', 'can_edit'), (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
   db.prepare('UPDATE forms SET is_active = 0 WHERE id = ?').run(form.id);
@@ -214,7 +215,7 @@ router.get('/:id/responses', (req, res) => {
   res.json({ responses: rows.map(r => ({ ...r, data: JSON.parse(r.data_json || '{}') })) });
 });
 
-router.get('/:id/responses/export', (req, res) => {
+router.get('/:id/responses/export', requirePermission('forms', 'can_export'), (req, res) => {
   const form = db.prepare('SELECT * FROM forms WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!form) return res.status(404).json({ error: 'Not found' });
   const rows = db.prepare('SELECT * FROM form_responses WHERE form_id = ? ORDER BY created_at DESC').all(form.id);

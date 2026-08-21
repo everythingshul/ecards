@@ -59,6 +59,13 @@ const Auth = {
     const perm = u.permissions[resource];
     return perm ? !!perm[action] : true;
   },
+  // True if the user can(action) on ANY of the given resources — for a nav
+  // item/page whose content spans more than one gated resource (e.g. the
+  // Settings page's Seasons tab is its own 'seasons' resource, but the page
+  // itself should still show up in nav for someone who only has 'settings').
+  canAny(resources, action = 'can_view') {
+    return resources.some(r => this.can(r, action));
+  },
 };
 
 async function api(path, { method = 'GET', body, isForm = false } = {}) {
@@ -173,8 +180,16 @@ const NAV_ITEMS = [
   { href: '/admin/updates', label: 'Updates', icon: '&#9670;', resource: 'updates' },
   { href: '/admin/esignatures', label: 'E-Signatures', icon: '&#9670;', resource: 'documents' },
   { href: '/admin/users', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
-  { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resource: 'settings' },
-  { href: '/admin/audit', label: 'Recent Actions', icon: '&#9670;', resource: 'audit', roles: ['super_admin'] },
+  // Seasons live inside the Settings page as their own tab (see settings.html)
+  // but are gated by their own 'seasons' resource, so the nav item itself
+  // needs to show up for someone with EITHER permission — the page then
+  // hides whichever tab(s) the signed-in user doesn't actually have.
+  { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resources: ['settings', 'seasons'] },
+  // 'audit' has no ROLE_DEFAULTS entry of its own (see RESOURCE_DEFAULT_OVERRIDES
+  // in middleware/permissions.js) — it's denied by default for everyone but
+  // super_admin until an admin explicitly grants it to a specific user via
+  // Users & Permissions, so no hardcoded role check is needed here anymore.
+  { href: '/admin/audit', label: 'Recent Actions', icon: '&#9670;', resource: 'audit' },
 ];
 const SHUL_NAV = [
   { href: '/shul-portal/dashboard', label: 'My Applicants' },
@@ -191,7 +206,7 @@ const STORE_NAV = [
 function renderShell(activeHref, contentHtml) {
   const user = Auth.user();
   const role = user?.role;
-  let items = NAV_ITEMS.filter(i => (!i.roles || i.roles.includes(role)) && Auth.can(i.resource, 'can_view'));
+  let items = NAV_ITEMS.filter(i => (!i.roles || i.roles.includes(role)) && Auth.canAny(i.resources || [i.resource], 'can_view'));
   if (role === 'shul') items = SHUL_NAV;
   else if (role === 'store') items = STORE_NAV;
   else if (['staff', 'org_admin'].includes(role)) Auth.refreshPermissions(); // super_admin always has full access; skip the round-trip

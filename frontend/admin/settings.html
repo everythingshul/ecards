@@ -13,18 +13,23 @@
 <script>
 Auth.requireAdmin();
 const isSuperAdmin = Auth.user()?.role === 'super_admin';
+// Seasons is its own gated resource, separate from the rest of this page
+// (Organization/Documents/Auto Emails/Site Content/Backups, all under
+// 'settings') — a user might have one without the other, so each tab only
+// shows up if the signed-in user can actually view it.
+const canSettings = Auth.can('settings');
+const canSeasons = Auth.can('seasons');
+const firstTab = canSettings ? 'org' : (canSeasons ? 'seasons' : null);
 renderShell('/admin/settings', `
   <h2>Settings</h2>
-  <div class="tabs">
-    <button class="active" data-t="org">Organization</button>
-    <button data-t="seasons">Seasons</button>
-    <button data-t="documents">Documents</button>
-    <button data-t="emails">Auto Emails</button>
-    <button data-t="content">Site Content</button>
-    ${isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
-  </div>
+  ${firstTab ? `<div class="tabs">
+    ${canSettings ? `<button class="${firstTab==='org'?'active':''}" data-t="org">Organization</button>` : ''}
+    ${canSeasons ? `<button class="${firstTab==='seasons'?'active':''}" data-t="seasons">Seasons</button>` : ''}
+    ${canSettings ? `<button data-t="documents">Documents</button><button data-t="emails">Auto Emails</button><button data-t="content">Site Content</button>` : ''}
+    ${canSettings && isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
+  </div>` : '<div class="card"><p class="small-muted">You do not have access to any settings sections.</p></div>'}
 
-  <div id="panel-org">
+  <div id="panel-org" style="display:${firstTab==='org'?'block':'none'}">
     <div class="card">
       <h3>Organization Info & Branding</h3>
       <label>Organization Name</label><input id="org-name">
@@ -42,6 +47,13 @@ renderShell('/admin/settings', `
       <p class="small-muted">Where replies to automatic system emails go by default. Leave blank to use the sending address itself. Individual email templates (Auto Emails tab) can override this per-template.</p>
       <label>Default Reply-To</label><input id="org-reply_to" placeholder="e.g. office@yourorg.org">
       <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveDefaultReplyTo()">Save</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Notify on New Signups</h3>
+      <p class="small-muted">Optional — when set, an internal email is sent every time a shul or store submits a new public application (separate from anything sent to the applicant themselves). Shuls and stores are configured separately, and each can list multiple addresses, comma-separated. Leave a field blank to turn that one off.</p>
+      <label>Notify on New Shul Signups</label><input id="org-notify_new_shul_signup_email" placeholder="e.g. office@yourorg.org, gabai-team@yourorg.org">
+      <label style="margin-top:10px">Notify on New Store Signups</label><input id="org-notify_new_store_signup_email" placeholder="e.g. office@yourorg.org, stores-team@yourorg.org">
+      <button class="btn btn-sm btn-primary" style="margin-top:14px" onclick="saveNewSignupNotifyEmails()">Save</button>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Our SMS Number</h3>
@@ -89,7 +101,7 @@ renderShell('/admin/settings', `
     </div>
   </div>
 
-  <div id="panel-seasons" style="display:none">
+  <div id="panel-seasons" style="display:${firstTab==='seasons'?'block':'none'}">
     <div class="card">
       <div class="flex-between"><h3 style="margin:0">Seasons</h3><button class="btn btn-sm btn-primary" onclick="openNewSeason()">+ New Season</button></div>
       <div id="seasons-list" style="margin-top:14px">Loading…</div>
@@ -287,6 +299,20 @@ async function loadDefaultReplyTo() {
 }
 window.saveDefaultReplyTo = async () => {
   try { await api('/settings', { method: 'PUT', body: { email_reply_to: qs('#org-reply_to').value } }); toast('Saved'); } catch (err) { toast(err.message, true); }
+};
+async function loadNewSignupNotifyEmails() {
+  const { settings } = await api('/settings');
+  qs('#org-notify_new_shul_signup_email').value = settings.notify_new_shul_signup_email || '';
+  qs('#org-notify_new_store_signup_email').value = settings.notify_new_store_signup_email || '';
+}
+window.saveNewSignupNotifyEmails = async () => {
+  try {
+    await api('/settings', { method: 'PUT', body: {
+      notify_new_shul_signup_email: qs('#org-notify_new_shul_signup_email').value,
+      notify_new_store_signup_email: qs('#org-notify_new_store_signup_email').value,
+    } });
+    toast('Saved');
+  } catch (err) { toast(err.message, true); }
 };
 async function loadSmsOwnNumber() {
   const { settings } = await api('/settings');
@@ -756,8 +782,14 @@ window.uploadFullImport = async (input) => {
   input.value = '';
 };
 
-loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadSeasons(); loadContractText(); loadContractPdfStatus(); loadContractAtSignup();
-loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
+// Only load a tab's data if the signed-in user can actually see that tab —
+// the rest of these all hit /orgs/me or /settings, which now 403 for a
+// seasons-only user who lacks the 'settings' permission (see canSettings above).
+if (canSettings) {
+  loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadNewSignupNotifyEmails(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadContractText(); loadContractPdfStatus(); loadContractAtSignup();
+  loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
+}
+if (canSeasons) loadSeasons();
 </script>
 </body>
 </html>

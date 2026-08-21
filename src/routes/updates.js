@@ -3,7 +3,8 @@ import multer from 'multer';
 import { join } from 'path';
 import { writeFileSync } from 'fs';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { sendMailChecked } from '../services/mail.js';
 import { getActiveSeasonId } from '../utils/formSchedule.js';
 
@@ -54,7 +55,7 @@ function resolveRecipients(orgId, { recipients = [], groups = [] }, seasonId) {
 }
 
 // ============================= Admin: compose/send =============================
-router.get('/', requireAdmin, (req, res) => {
+router.get('/', requirePermission('updates'), (req, res) => {
   const rows = db.prepare('SELECT * FROM updates WHERE org_id = ? ORDER BY created_at DESC').all(req.user.org_id);
   const withCounts = rows.map(u => {
     const c = db.prepare('SELECT COUNT(*) total, SUM(CASE WHEN read_at IS NOT NULL THEN 1 ELSE 0 END) read FROM update_recipients WHERE update_id = ?').get(u.id);
@@ -63,14 +64,14 @@ router.get('/', requireAdmin, (req, res) => {
   res.json({ updates: withCounts });
 });
 
-router.get('/:id', requireAdmin, (req, res) => {
+router.get('/:id', requirePermission('updates'), (req, res) => {
   const update = db.prepare('SELECT * FROM updates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!update) return res.status(404).json({ error: 'Not found' });
   const recipients = db.prepare('SELECT * FROM update_recipients WHERE update_id = ? ORDER BY created_at').all(update.id);
   res.json({ update: { ...update, attachments: JSON.parse(update.attachments_json || '[]') }, recipients });
 });
 
-router.post('/', requireAdmin, upload.array('files', 10), async (req, res) => {
+router.post('/', requirePermission('updates', 'can_edit'), upload.array('files', 10), async (req, res) => {
   const { title, body } = req.body || {};
   if (!title || !body) return res.status(400).json({ error: 'Title and body are required' });
   let recipientSpec;

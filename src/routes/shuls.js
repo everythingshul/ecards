@@ -5,7 +5,7 @@ import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
 import { generateContractPdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
-import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
+import { sendMailChecked, renderSystemTemplate, notifyNewSignup } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
 import { parseSpreadsheet, buildXlsxTemplate, SHUL_IMPORT_COLUMNS } from '../services/importer.js';
 import { sendXlsx } from '../services/xlsx.js';
@@ -95,6 +95,10 @@ router.post('/apply', async (req, res) => {
   const shulRow = db.prepare('SELECT * FROM shuls WHERE id = ?').get(id);
   const flag = detectAndFlag(orgId, 'shul', shulRow);
   logAudit(orgId, null, 'create', 'shul', id, null, shulRow, req.ip);
+  await notifyNewSignup(orgId, 'notify_new_shul_signup_email', 'newShulSignup', {
+    shulName: shulRow.name_en, contactName: `${shulRow.gabai_first_name} ${shulRow.gabai_last_name}`,
+    contactEmail: shulRow.gabai_email || '', contactPhone: shulRow.gabai_cell || '',
+  });
   if (flag) return res.status(201).json({ shul: shulRow, duplicate: true, message: 'Your application was received, but a similar shul is already on file. Our team will follow up.' });
 
   const signAtSignup = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'shul_contract_at_signup'`).get(orgId)?.value !== '0';

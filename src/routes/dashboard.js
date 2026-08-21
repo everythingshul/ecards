@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
-import { getPermission } from '../middleware/permissions.js';
+import { auth } from '../middleware/auth.js';
+import { getPermission, requirePermission } from '../middleware/permissions.js';
 import { getActiveSeasonId } from '../utils/formSchedule.js';
 
 const router = Router();
@@ -9,7 +9,7 @@ const router = Router();
 // total applicants, total card dollars loaded, top stores by spend), not
 // scoped to a single shul/store, so a portal login must never reach this at
 // all (no portal page calls it — each has its own scoped dashboard).
-router.use(auth, requireAdmin);
+router.use(auth, requirePermission('dashboard'));
 
 // Lightweight pending-counts for the nav notification dots — called on
 // every admin page load (see renderShell() in app.js), so this stays a

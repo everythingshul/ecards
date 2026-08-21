@@ -2,13 +2,16 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
-import { assign, unassign } from '../middleware/permissions.js';
+import { assign, unassign, PERMISSION_RESOURCES } from '../middleware/permissions.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { normalizePhone } from '../utils/phone.js';
 import { logAudit, logMassAudit } from '../services/audit.js';
 
 const router = Router();
-const RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'forms', 'users', 'settings'];
+// Single source of truth (permissions.js) — a resource missing here would
+// silently drop any permission the Users & Permissions UI tried to save for
+// it, so this must never drift into its own separate list again.
+const RESOURCES = PERMISSION_RESOURCES;
 
 // A person/account is exactly one of: an internal team member (staff/
 // org_admin/super_admin) or a portal login (shul/store) — never both, and

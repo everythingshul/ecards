@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.post('/pageview', (req, res) => {
   res.json({ ok: true });
 });
 
-router.use(auth, requireAdmin);
+router.use(auth, requirePermission('dashboard'));
 
 // Per-page totals + unique visitors, a daily total-views trend (zero-filled
 // across the whole window, same pattern as dashboard.js's /daily), and top

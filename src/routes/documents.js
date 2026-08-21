@@ -3,7 +3,8 @@ import multer from 'multer';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { generateGenericDocumentPdf, buildSimplePdf, stampSignatureFields, getSignatureFields, resolveSignatureValues } from '../services/pdf.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 
@@ -50,7 +51,7 @@ export function resolveEntity(entityType, entityId, orgId) {
 }
 
 // ============================= ADMIN ==============================
-router.get('/', auth, requireAdmin, (req, res) => {
+router.get('/', auth, requirePermission('documents'), (req, res) => {
   const { entity_type, entity_id } = req.query;
   if (!entity_type || !entity_id) return res.status(400).json({ error: 'entity_type and entity_id are required' });
   const docs = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = ? AND entity_id = ? ORDER BY created_at DESC`)
@@ -59,7 +60,7 @@ router.get('/', auth, requireAdmin, (req, res) => {
 });
 
 // Generate (or regenerate, if not yet sent) the unsigned PDF for an entity.
-router.post('/generate', auth, requireAdmin, async (req, res) => {
+router.post('/generate', auth, requirePermission('documents', 'can_edit'), async (req, res) => {
   const { entity_type, entity_id, title } = req.body || {};
   if (!['applicant', 'store'].includes(entity_type)) return res.status(400).json({ error: 'entity_type must be applicant or store' });
   const entity = resolveEntity(entity_type, entity_id, req.user.org_id);
@@ -125,12 +126,12 @@ router.post('/store-agreement', auth, async (req, res) => {
 // above and from shul `contracts`. Source is either an admin-uploaded PDF
 // used as-is, or simple typed text rendered the same fallback way
 // generateGenericDocumentPdf uses when no template is on file.
-router.get('/standalone', auth, requireAdmin, (req, res) => {
+router.get('/standalone', auth, requirePermission('documents'), (req, res) => {
   const docs = db.prepare(`SELECT * FROM documents WHERE org_id = ? AND entity_type = 'standalone' ORDER BY created_at DESC`).all(req.user.org_id);
   res.json({ documents: docs });
 });
 
-router.post('/standalone', auth, requireAdmin, upload.single('file'), async (req, res) => {
+router.post('/standalone', auth, requirePermission('documents', 'can_edit'), upload.single('file'), async (req, res) => {
   const { title, recipient_name, recipient_email, body_text } = req.body || {};
   if (!recipient_name || !recipient_email) return res.status(400).json({ error: 'Recipient name and email are required' });
   if (!req.file && !body_text) return res.status(400).json({ error: 'Upload a PDF or enter the document text' });
@@ -156,7 +157,7 @@ router.post('/standalone', auth, requireAdmin, upload.single('file'), async (req
 });
 
 // Email the signing link. Generates first if this document hasn't been generated yet.
-router.post('/:id/send', auth, requireAdmin, async (req, res) => {
+router.post('/:id/send', auth, requirePermission('documents', 'can_edit'), async (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });
   const isStandalone = document.entity_type === 'standalone';
@@ -180,7 +181,7 @@ router.post('/:id/send', auth, requireAdmin, async (req, res) => {
   res.json({ document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id), emailError });
 });
 
-router.post('/:id/void', auth, requireAdmin, (req, res) => {
+router.post('/:id/void', auth, requirePermission('documents', 'can_edit'), (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE documents SET status='void' WHERE id=?`).run(document.id);
@@ -191,7 +192,7 @@ router.post('/:id/void', auth, requireAdmin, (req, res) => {
 // rejection (that's what void is for). Clears the signature and the signed
 // PDF, puts the document back to 'sent' with a fresh signing link so it can
 // be signed again; does not email anyone automatically.
-router.post('/:id/retract', auth, requireAdmin, (req, res) => {
+router.post('/:id/retract', auth, requirePermission('documents', 'can_edit'), (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });
   if (document.status !== 'signed') return res.status(400).json({ error: 'Only a signed document can have its signature retracted' });
@@ -202,7 +203,7 @@ router.post('/:id/retract', auth, requireAdmin, (req, res) => {
   res.json({ ok: true, document: db.prepare('SELECT * FROM documents WHERE id = ?').get(document.id) });
 });
 
-router.get('/:id/pdf', auth, requireAdmin, (req, res) => {
+router.get('/:id/pdf', auth, requirePermission('documents'), (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!document) return res.status(404).json({ error: 'Not found' });
   const path = document.signed_pdf_path || document.pdf_path;

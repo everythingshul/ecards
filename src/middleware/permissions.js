@@ -16,11 +16,27 @@ const PORTAL_DENIED = { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: 
 
 // Every resource an internal-team nav item or page can be gated on — kept
 // in sync with frontend/js/app.js's NAV_ITEMS (their `resource` keys) and
-// frontend/admin/users.html's RESOURCES (the admin-editable subset). Used
+// frontend/admin/users.html's RESOURCES (which just re-exports this list, so
+// every entry here automatically gets a row in Users & Permissions). Used
 // by routes/auth.js to hand the client a full permission map at login/me,
 // so the nav can hide a blocked section outright instead of showing it and
-// only 403ing when clicked.
-export const PERMISSION_RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'tasks', 'forms', 'emails', 'sms', 'updates', 'documents', 'users', 'settings'];
+// only 403ing when clicked, AND by every route file below as the actual
+// server-side gate — a resource missing from this list, or a route that
+// only checks requireAdmin instead of requirePermission(), is a section no
+// per-user permission can ever actually restrict, no matter what the UI shows.
+export const PERMISSION_RESOURCES = ['dashboard', 'shuls', 'applicants', 'cards', 'stores', 'seasons', 'forms', 'tasks', 'emails', 'sms', 'updates', 'documents', 'users', 'settings', 'audit'];
+
+// Per-resource overrides to ROLE_DEFAULTS, applied only when the user has no
+// explicit permissions row for that resource. Recent Actions is a full
+// cross-entity activity feed with undo power — materially more sensitive
+// than the "everything" ROLE_DEFAULTS.org_admin normally gets by default —
+// so unlike every other resource, it stays denied for org_admin/staff until
+// a specific user is explicitly granted it via Users & Permissions. This
+// preserves the original hardcoded "super_admin only" behavior as the
+// default while still making it a real, grantable permission.
+const RESOURCE_DEFAULT_OVERRIDES = {
+  audit: { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'all' },
+};
 
 // One user's can_view/can_edit/can_export/scope for every resource above —
 // this IS the client's permission map (see auth.js). super_admin/org_admin
@@ -55,7 +71,7 @@ export function getPermission(user, resource) {
     return ROLE_DEFAULTS[user.role];
   }
   const row = db.prepare('SELECT * FROM permissions WHERE user_id = ? AND resource = ?').get(user.id, resource);
-  if (!row) return ROLE_DEFAULTS[user.role] || { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' };
+  if (!row) return RESOURCE_DEFAULT_OVERRIDES[resource] || ROLE_DEFAULTS[user.role] || { can_view: 0, can_edit: 0, can_export: 0, hidden_fields: [], scope: 'assigned' };
   return { ...row, hidden_fields: JSON.parse(row.hidden_fields || '[]') };
 }
 
