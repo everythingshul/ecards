@@ -83,6 +83,14 @@ router.put('/:id', (req, res) => {
   if (!user) return res.status(404).json({ error: 'Not found' });
   if (!canManageTarget(req.user, user.role)) return res.status(403).json({ error: 'A super admin account can only be managed by another super admin' });
   const { first_name, last_name, phone, role, is_active, permissions, assignments } = req.body || {};
+  // Self-service on name/phone/active is fine, but a user granting themselves
+  // more access — either directly via their own permissions rows, or in one
+  // shot by reassigning their own role — is a privilege-escalation path this
+  // endpoint must never allow, no matter how senior the caller already is.
+  if (user.id === req.user.id) {
+    if (Array.isArray(permissions)) return res.status(403).json({ error: 'You cannot change your own permissions. Ask another admin to do it.' });
+    if (role !== undefined && role !== user.role) return res.status(403).json({ error: 'You cannot change your own role. Ask another admin to do it.' });
+  }
   if (role !== undefined && role !== user.role) {
     if (PORTAL_ROLES.includes(user.role) || PORTAL_ROLES.includes(role)) {
       return res.status(400).json({ error: 'A shul/store portal account cannot be changed to or from an internal team role. Manage the shul/store record itself instead.' });

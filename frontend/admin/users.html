@@ -113,6 +113,7 @@ function permRow(resource, p) {
 async function openUser(id) {
   try {
     const { user: u, permissions } = await api(`/users/${id}`);
+    const isSelf = id === Auth.user()?.id;
     const permMap = Object.fromEntries(permissions.map(p => [p.resource, p]));
     // Must mirror ROLE_DEFAULTS/RESOURCE_DEFAULT_OVERRIDES in
     // middleware/permissions.js exactly — this is what the server actually
@@ -136,11 +137,14 @@ async function openUser(id) {
       </div>
       <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="e-phone" value="${esc(u.phone||'')}">
       <label>Role</label>
-      <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Admin (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option>${Auth.user()?.role === 'super_admin' ? `<option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option>` : ''}</select>
+      <select id="e-role" ${isSelf ? 'disabled' : ''}><option value="staff" ${u.role==='staff'?'selected':''}>Admin (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option>${Auth.user()?.role === 'super_admin' ? `<option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option>` : ''}</select>
+      ${isSelf ? '<p class="small-muted">You cannot change your own role.</p>' : ''}
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
       <div class="divider"></div>
       <h4>Page & Field Permissions</h4>
-      ${RESOURCES.map(r => permRow(r, permMap[r] || defaultPermFor(r, u.role))).join('')}
+      ${isSelf
+        ? '<p class="small-muted">You cannot manage your own permissions — ask another admin to make changes here.</p>'
+        : RESOURCES.map(r => permRow(r, permMap[r] || defaultPermFor(r, u.role))).join('')}
     `;
     const canSetPassword = ['super_admin','org_admin'].includes(Auth.user()?.role) && ROLE_RANK[u.role] < ROLE_RANK[Auth.user()?.role];
     openModal(`${u.first_name} ${u.last_name}`, body, `<button class="btn btn-danger btn-sm" onclick="deleteUserPermanently('${id}')">Delete Permanently</button><button class="btn btn-outline btn-sm" onclick="deactivateUser('${id}')">Deactivate</button>${canSetPassword ? `<button class="btn btn-outline btn-sm" onclick="openSetPasswordModal('${id}','${esc(u.first_name+' '+u.last_name).replace(/'/g,"\\'")}')">Set Password</button>` : ''}<button class="btn btn-primary btn-sm" onclick="saveUser('${id}')">Save</button>`);
@@ -148,15 +152,22 @@ async function openUser(id) {
 }
 
 window.saveUser = async (id) => {
-  const permissions = qsa('[data-resource]').map(el => ({
-    resource: el.dataset.resource,
-    can_view: el.querySelector('.p-view').checked,
-    can_edit: el.querySelector('.p-edit').checked,
-    can_export: el.querySelector('.p-export').checked,
-    scope: el.querySelector('.p-scope').value,
-    hidden_fields: Array.from(el.querySelectorAll('.p-hide:checked')).map(c => c.value),
-  }));
-  const body = { first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value, phone: qs('#e-phone').value, role: qs('#e-role').value, is_active: qs('#e-active').checked, permissions };
+  const isSelf = id === Auth.user()?.id;
+  const body = { first_name: qs('#e-first_name').value, last_name: qs('#e-last_name').value, phone: qs('#e-phone').value, is_active: qs('#e-active').checked };
+  // Role and permissions aren't rendered as editable for your own row (see
+  // openUser) — the server rejects self-changes to either anyway, but this
+  // keeps the request itself from even trying.
+  if (!isSelf) {
+    body.role = qs('#e-role').value;
+    body.permissions = qsa('[data-resource]').map(el => ({
+      resource: el.dataset.resource,
+      can_view: el.querySelector('.p-view').checked,
+      can_edit: el.querySelector('.p-edit').checked,
+      can_export: el.querySelector('.p-export').checked,
+      scope: el.querySelector('.p-scope').value,
+      hidden_fields: Array.from(el.querySelectorAll('.p-hide:checked')).map(c => c.value),
+    }));
+  }
   try { await api(`/users/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); load(); } catch (err) { toast(err.message, true); }
 };
 window.deactivateUser = async (id) => { if (!confirm('Deactivate this user? They will be blocked from signing in, but their account and history stay on file.')) return; try { await api(`/users/${id}`, { method: 'DELETE' }); closeModal(); load(); } catch (err) { toast(err.message, true); } };
