@@ -12,8 +12,15 @@
 <script src="/js/app.js"></script>
 <script>
 Auth.requireAdmin();
+// Read-only (can_view but not can_edit) hides every mutating control —
+// New/Edit/Activate/Deactivate — rather than showing them and letting the
+// backend's requirePermission('forms','can_edit') 403 on click. "Locked
+// out" (no can_view at all) never reaches this page at all: the nav item
+// is hidden (see app.js's NAV_ITEMS) and the backend 403s the whole /forms
+// router before any of this runs.
+const canEditForms = Auth.can('forms', 'can_edit');
 renderShell('/admin/forms', `
-  <div class="flex-between"><h2>Form Builder</h2><button class="btn btn-primary btn-sm" id="btn-new">+ New Form</button></div>
+  <div class="flex-between"><h2>Form Builder</h2>${canEditForms ? '<button class="btn btn-primary btn-sm" id="btn-new">+ New Form</button>' : ''}</div>
   <p class="small-muted">Build custom forms and set them public, limited to a group of shuls, or a single shul/applicant.</p>
   <h3>Built-In Application Forms</h3>
   <p class="small-muted">The fixed shul, store, and applicant application pages — always live, not editable here. Copy the link to share.</p>
@@ -85,16 +92,16 @@ async function load() {
         <div class="pill-row">
           ${scheduleStatus(f)}
           <a class="btn btn-sm btn-outline" href="${previewLink(f)}" target="_blank">Preview Link</a>
-          <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">Edit</button>
+          <button class="btn btn-sm btn-outline" onclick="openEditForm('${f.id}')">${canEditForms ? 'Edit' : 'View'}</button>
           <button class="btn btn-sm btn-outline" onclick="openResponses('${f.id}')">Responses</button>
-          <button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>
+          ${canEditForms ? `<button class="btn btn-sm btn-outline" onclick="toggleForm('${f.id}', ${f.is_active ? 'false' : 'true'})">${f.is_active ? 'Deactivate' : 'Activate'}</button>` : ''}
         </div>
       </div>
     </div>`).join('') : '<p class="small-muted">No forms yet.</p>';
 }
 window.toggleForm = async (id, activate) => { try { await api(`/forms/${id}`, { method: 'PUT', body: { is_active: activate === 'true' } }); load(); } catch (err) { toast(err.message, true); } };
 
-qs('#btn-new').addEventListener('click', () => {
+qs('#btn-new')?.addEventListener('click', () => {
   fieldDraft = [{ key: '', label: '', type: 'text', required: false }];
   openModal('New Form', formBody(), `<button class="btn btn-primary btn-sm" onclick="createForm()">Create Form</button>`);
   renderFields();
@@ -104,7 +111,13 @@ window.openEditForm = (id) => {
   const f = formsCache.find(x => x.id === id);
   if (!f) return;
   fieldDraft = JSON.parse(JSON.stringify(f.schema_json));
-  openModal('Edit Form', formBody({ ...f, editing: true }), `<button class="btn btn-primary btn-sm" onclick="saveEditForm('${id}')">Save</button>`);
+  // Read-only: wrap the whole body in a disabled <fieldset> so every input,
+  // select, and the "+ Add Field"/remove-field buttons rendered inside it
+  // (including ones renderFields() adds afterward) are inert — same content,
+  // genuinely can't be touched, rather than showing live controls that just
+  // 403 on submit.
+  const body = canEditForms ? formBody({ ...f, editing: true }) : `<fieldset disabled style="border:0;padding:0;margin:0">${formBody({ ...f, editing: true })}</fieldset>`;
+  openModal(canEditForms ? 'Edit Form' : 'View Form (read-only)', body, canEditForms ? `<button class="btn btn-primary btn-sm" onclick="saveEditForm('${id}')">Save</button>` : '');
   renderFields();
 };
 window.saveEditForm = async (id) => {

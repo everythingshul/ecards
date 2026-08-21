@@ -186,6 +186,8 @@ const NAV_ITEMS = [
   // other permission alone kept it visible. Two separate resources, two
   // separate links.
   { href: '/admin/seasons', label: 'Seasons', icon: '&#9670;', resource: 'seasons' },
+  { href: '/admin/site-content', label: 'Site Content', icon: '&#9670;', resource: 'site_content' },
+  { href: '/admin/document-settings', label: 'Documents', icon: '&#9670;', resource: 'contract_settings' },
   { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resource: 'settings' },
   // 'audit' has no ROLE_DEFAULTS entry of its own (see RESOURCE_DEFAULT_OVERRIDES
   // in middleware/permissions.js) — it's denied by default for everyone but
@@ -1264,7 +1266,7 @@ async function renderPdfSigningPages(pdfUrl, fields, containerId) {
 
 // Renders the last page of the actual document at previewUrl (the org's
 // uploaded template, or a generated sample — see GET
-// /settings/signature-box/:kind/preview-pdf, shared by both the signature
+// /contract-settings/signature-box/:kind/preview-pdf, shared by both the signature
 // and contract-field placement editors since it's the same background
 // document either way) onto the given canvas as the editor's background, so
 // the draggable field boxes overlay real page content instead of a blank
@@ -1305,7 +1307,7 @@ let sigBoxState = null;
 const SIGBOX_TYPE_LABEL = { signature: 'Signature', initial: 'Initial', date: 'Date', text: 'Text' };
 window.openSignatureBoxEditor = async (kind, title) => {
   let data;
-  try { data = await api(`/settings/signature-box/${kind}`); } catch (err) { return toast(err.message, true); }
+  try { data = await api(`/contract-settings/signature-box/${kind}`); } catch (err) { return toast(err.message, true); }
   const pageSize = data.pageSize;
   let fields = (data.fields && data.fields.length) ? data.fields.map(f => ({ ...f })) : [{ id: 'signature', type: 'signature', label: 'Signature', required: true, x: 0.09, y: 0.62, width: 0.42, height: 0.22 }];
   let activeId = fields[0].id;
@@ -1329,7 +1331,7 @@ window.openSignatureBoxEditor = async (kind, title) => {
     <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt &mdash; showing the document's last page, where the signature area normally goes</p>
   `;
   openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveSignatureBox('${kind}')">Save Placement</button>`);
-  renderPdfPreviewBackground(`/settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'sigbox-canvas', 'sigbox-loading');
+  renderPdfPreviewBackground(`/contract-settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'sigbox-canvas', 'sigbox-loading');
 
   function startDrag(e, f, mode) {
     e.preventDefault(); e.stopPropagation();
@@ -1410,7 +1412,7 @@ window.saveSignatureBox = async (kind) => {
   const fields = sigBoxState?.kind === kind ? sigBoxState.get() : null;
   if (!fields || !fields.length) return;
   try {
-    await api(`/settings/signature-box/${kind}`, { method: 'PUT', body: { fields } });
+    await api(`/contract-settings/signature-box/${kind}`, { method: 'PUT', body: { fields } });
     toast('Signature placement saved');
     closeModal();
   } catch (err) { toast(err.message, true); }
@@ -1429,7 +1431,7 @@ window.saveSignatureBox = async (kind) => {
 let cfBoxState = null;
 window.openContractFieldEditor = async (kind, title) => {
   let data;
-  try { data = await api(`/settings/contract-fields/${kind}`); } catch (err) { return toast(err.message, true); }
+  try { data = await api(`/contract-settings/contract-fields/${kind}`); } catch (err) { return toast(err.message, true); }
   if (!data.hasTemplate) return toast('Upload a PDF template above first — field placement stamps values onto that document.', true);
   const pageSize = data.pageSize;
   const availableFields = data.availableFields; // [[key,label], ...]
@@ -1453,7 +1455,7 @@ window.openContractFieldEditor = async (kind, title) => {
     <p class="small-muted" style="text-align:center">Page size: ${Math.round(pageSize.width)} &times; ${Math.round(pageSize.height)} pt &mdash; showing the document's last page</p>
   `;
   openModal(title, bodyHtml, `<button class="btn btn-primary btn-sm" onclick="saveContractFields('${kind}')">Save Placement</button>`);
-  renderPdfPreviewBackground(`/settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'cfbox-canvas', 'cfbox-loading');
+  renderPdfPreviewBackground(`/contract-settings/signature-box/${kind}/preview-pdf`, mockW, mockH, 'cfbox-canvas', 'cfbox-loading');
 
   function startDrag(e, f, mode) {
     e.preventDefault(); e.stopPropagation();
@@ -1530,7 +1532,7 @@ window.saveContractFields = async (kind) => {
   const fields = cfBoxState?.kind === kind ? cfBoxState.get() : null;
   if (!fields) return;
   try {
-    await api(`/settings/contract-fields/${kind}`, { method: 'PUT', body: { fields } });
+    await api(`/contract-settings/contract-fields/${kind}`, { method: 'PUT', body: { fields } });
     toast('Field placement saved');
     closeModal();
   } catch (err) { toast(err.message, true); }

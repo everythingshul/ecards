@@ -26,6 +26,17 @@ const PORTAL_ROLES = ['shul', 'store'];
 // for accounts genuinely "under" them, never a peer or someone above.
 const ROLE_RANK = { super_admin: 4, org_admin: 3, staff: 2, shul: 1, store: 1 };
 
+// A super_admin account can only ever be edited, demoted, deactivated, or
+// deleted by another super_admin — org_admin has full resource-level access
+// elsewhere in the app, but that must never extend to controlling someone
+// who explicitly outranks them (role reassignment, permission changes,
+// deactivation, permanent deletion, mass actions — everything below except
+// the read-only GET, which stays visible so an org_admin can at least see
+// who the super admins are).
+function canManageTarget(caller, targetRole) {
+  return !(targetRole === 'super_admin' && caller.role !== 'super_admin');
+}
+
 router.use(auth, requireRole('super_admin', 'org_admin'));
 
 // Internal team members only — shul/store portal accounts are managed from
@@ -48,6 +59,9 @@ router.post('/', async (req, res) => {
   const { email, first_name, last_name, phone, role = 'staff', permissions = [] } = req.body || {};
   if (!email || !first_name) return res.status(400).json({ error: 'Email and first name are required' });
   if (!INTERNAL_ROLES.includes(role)) return res.status(400).json({ error: `Invalid role: ${role}. Shul/store accounts are created from the shul/store approval flow, not here.` });
+  // Granting super_admin is itself an act of controlling a super_admin
+  // account (a brand new one) — only an existing super_admin can create one.
+  if (role === 'super_admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: 'Only a super admin can create another super admin account' });
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'A user with this email already exists' });
   const id = uuid();
   const token = uuid();
@@ -67,6 +81,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
+  if (!canManageTarget(req.user, user.role)) return res.status(403).json({ error: 'A super admin account can only be managed by another super admin' });
   const { first_name, last_name, phone, role, is_active, permissions, assignments } = req.body || {};
   if (role !== undefined && role !== user.role) {
     if (PORTAL_ROLES.includes(user.role) || PORTAL_ROLES.includes(role)) {
@@ -74,6 +89,13 @@ router.put('/:id', (req, res) => {
     }
     if (!INTERNAL_ROLES.includes(role)) {
       return res.status(400).json({ error: `Invalid role: ${role}` });
+    }
+    // Promoting someone TO super_admin is exactly the same act as creating
+    // one — only an existing super_admin may grant it (canManageTarget above
+    // only checked the account's role as it stands now, not the role it's
+    // about to become).
+    if (role === 'super_admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only a super admin can promote someone to super admin' });
     }
   }
   db.prepare(`UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), phone = COALESCE(?, phone), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?`)
@@ -125,6 +147,7 @@ router.put('/:id/set-password', (req, res) => {
 router.delete('/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
+  if (!canManageTarget(req.user, user.role)) return res.status(403).json({ error: 'A super admin account can only be managed by another super admin' });
   db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(user.id);
   logAudit(req.user.org_id, req.user.id, 'update', 'user', user.id, { is_active: user.is_active }, { is_active: 0 }, req.ip);
   res.json({ ok: true });
@@ -142,7 +165,7 @@ router.post('/mass-deactivate', (req, res) => {
   for (const id of ids) {
     if (id === req.user.id) { skipped++; continue; }
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
-    if (!user) { skipped++; continue; }
+    if (!user || !canManageTarget(req.user, user.role)) { skipped++; continue; }
     db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(user.id);
     affectedIds.push(user.id); names.push(`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email);
     updated++;
@@ -158,7 +181,7 @@ router.post('/mass-activate', (req, res) => {
   const affectedIds = [], names = [];
   for (const id of ids) {
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
-    if (!user) { skipped++; continue; }
+    if (!user || !canManageTarget(req.user, user.role)) { skipped++; continue; }
     db.prepare('UPDATE users SET is_active = 1 WHERE id = ?').run(user.id);
     affectedIds.push(user.id); names.push(`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email);
     updated++;
@@ -179,6 +202,7 @@ router.delete('/:id/permanent', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!user) return res.status(404).json({ error: 'Not found' });
   if (user.id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
+  if (!canManageTarget(req.user, user.role)) return res.status(403).json({ error: 'A super admin account can only be managed by another super admin' });
   if (user.role === 'super_admin') {
     const otherSuperAdmins = db.prepare(`SELECT COUNT(*) c FROM users WHERE org_id = ? AND role = 'super_admin' AND id != ? AND is_active = 1`).get(req.user.org_id, user.id).c;
     if (!otherSuperAdmins) return res.status(400).json({ error: 'Cannot delete the last active super admin' });
@@ -220,7 +244,7 @@ router.post('/mass-delete-permanent', (req, res) => {
   for (const id of ids) {
     if (id === req.user.id) { skipped++; continue; }
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND org_id = ?').get(id, req.user.org_id);
-    if (!user) { skipped++; continue; }
+    if (!user || !canManageTarget(req.user, user.role)) { skipped++; continue; }
     if (user.role === 'super_admin') {
       const otherSuperAdmins = db.prepare(`SELECT COUNT(*) c FROM users WHERE org_id = ? AND role = 'super_admin' AND id != ? AND is_active = 1`).get(req.user.org_id, user.id).c;
       if (!otherSuperAdmins) { skipped++; continue; }

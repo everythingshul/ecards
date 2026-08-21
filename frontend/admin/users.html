@@ -14,11 +14,12 @@
 Auth.requireAdmin();
 // Kept in sync with PERMISSION_RESOURCES (src/middleware/permissions.js) —
 // every resource that can be gated at all gets a row here.
-const RESOURCES = ['dashboard','shuls','applicants','cards','stores','seasons','forms','tasks','emails','sms','updates','documents','users','settings','audit'];
+const RESOURCES = ['dashboard','shuls','applicants','cards','stores','seasons','forms','tasks','emails','sms','updates','documents','site_content','contract_settings','users','settings','audit'];
 const RESOURCE_LABELS = {
   dashboard: 'Dashboard', shuls: 'Shuls', applicants: 'Applicants', cards: 'Cards & Transactions', stores: 'Stores',
   seasons: 'Seasons', forms: 'Form Builder', tasks: 'Tasks', emails: 'Email Center', sms: 'SMS Center',
-  updates: 'Updates', documents: 'E-Signatures', users: 'Users & Permissions', settings: 'Settings', audit: 'Recent Actions',
+  updates: 'Updates', documents: 'E-Signatures', site_content: 'Site Content', contract_settings: 'Documents',
+  users: 'Users & Permissions', settings: 'Settings', audit: 'Recent Actions',
 };
 const HIDABLE_FIELDS = {
   shuls: ['name_en','name_he','address','ruv_first_name','ruv_last_name','ruv_phone','gabai_first_name','gabai_last_name','gabai_cell','gabai_email'],
@@ -46,11 +47,12 @@ let selected = new Set();
 async function load() {
   try {
     const { users } = await api('/users');
+    const canManage = (u) => u.role !== 'super_admin' || Auth.user()?.role === 'super_admin';
     qs('#tbody').innerHTML = users.map(u => `<tr>
-      <td onclick="event.stopPropagation()"><input type="checkbox" class="row-chk" data-id="${u.id}"></td>
+      <td onclick="event.stopPropagation()">${canManage(u) ? `<input type="checkbox" class="row-chk" data-id="${u.id}">` : ''}</td>
       <td>${esc(u.first_name)} ${esc(u.last_name)}</td><td>${esc(u.email)}</td><td>${esc(roleLabel(u.role))}</td>
       <td>${u.is_paused ? badge('paused','paused') : (u.is_active ? badge('active','active') : badge('inactive','rejected'))}</td>
-      <td><button class="btn btn-sm btn-outline" onclick="openUser('${u.id}')">Manage</button></td>
+      <td>${canManage(u) ? `<button class="btn btn-sm btn-outline" onclick="openUser('${u.id}')">Manage</button>` : `<span class="small-muted">Super admin — managed by super admins only</span>`}</td>
     </tr>`).join('');
     qsa('.row-chk').forEach(c => c.addEventListener('change', onCheck));
   } catch (err) { toast(err.message, true); }
@@ -134,7 +136,7 @@ async function openUser(id) {
       </div>
       <label>Phone <span class="small-muted">(used for SMS Center sends)</span></label><input id="e-phone" value="${esc(u.phone||'')}">
       <label>Role</label>
-      <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Admin (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option><option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option></select>
+      <select id="e-role"><option value="staff" ${u.role==='staff'?'selected':''}>Admin (limited)</option><option value="org_admin" ${u.role==='org_admin'?'selected':''}>Org Admin (full)</option>${Auth.user()?.role === 'super_admin' ? `<option value="super_admin" ${u.role==='super_admin'?'selected':''}>Super Admin</option>` : ''}</select>
       <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="e-active" ${u.is_active?'checked':''}><label style="margin:0">Active</label></div>
       <div class="divider"></div>
       <h4>Page & Field Permissions</h4>

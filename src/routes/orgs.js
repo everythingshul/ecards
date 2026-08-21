@@ -1,15 +1,10 @@
 import { Router } from 'express';
-import multer from 'multer';
-import { join } from 'path';
-import { writeFileSync } from 'fs';
-import { db, uuid, DEFAULT_ORG_ID, DATA_DIR } from '../db.js';
+import { db, DEFAULT_ORG_ID } from '../db.js';
 import { auth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
-const HOMEPAGE_DIR = join(DATA_DIR, 'homepage');
 
 // Public: org branding for the public pages (apply form, store signup, etc).
 // Single-org platform, so this always resolves to the one organization.
@@ -48,17 +43,6 @@ router.get('/resolve', (req, res) => {
 });
 
 router.use(auth, requirePermission('settings'));
-
-// Uploads the homepage's linkable image (Settings > Site Content) — returns
-// the URL to save via PUT /settings' generic key/value store, same
-// upload-then-store-URL pattern as forms.js's /upload-image.
-router.post('/homepage-image', requirePermission('settings', 'can_edit'), upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ error: 'File must be an image' });
-  const safeName = `${uuid()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  writeFileSync(join(HOMEPAGE_DIR, safeName), req.file.buffer);
-  res.json({ url: `/uploads/homepage/${safeName}` });
-});
 
 // The single organization's branding/settings — editable from Admin > Settings.
 router.get('/me', (req, res) => {

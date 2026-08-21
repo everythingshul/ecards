@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { sendMailChecked } from '../services/mail.js';
 
 const router = Router();
@@ -23,7 +24,9 @@ router.post('/', async (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-router.use(auth, requireAdmin);
+// Shown as a card on frontend/admin/site-content.html, so gated the same
+// as the rest of that page rather than a separate resource of its own.
+router.use(auth, requirePermission('site_content'));
 
 router.get('/', (req, res) => {
   const rows = db.prepare('SELECT * FROM contact_submissions WHERE org_id = ? ORDER BY created_at DESC').all(req.user.org_id);

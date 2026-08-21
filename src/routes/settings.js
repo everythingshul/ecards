@@ -1,23 +1,19 @@
 import { Router } from 'express';
-import multer from 'multer';
-import { unlinkSync, writeFileSync, readFileSync } from 'fs';
-import { PDFDocument } from 'pdf-lib';
 import { db, uuid } from '../db.js';
 import { auth, requireRole } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { CUSTOM_TEMPLATE_PATH, hasCustomTemplate, docTemplatePath, hasCustomDocTemplate, getSignatureFields, generatePreviewPdfBytes, getDataFields, getDataFieldDefs } from '../services/pdf.js';
 import { isMockMode } from '../services/giftcard.js';
 import { SYSTEM_EMAIL_TEMPLATES } from '../services/mail.js';
 import { runBackup, listBackups, backupPath } from '../services/backup.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 // Every route in this file is only ever called from the admin Settings page
-// (frontend/admin/settings.html) or its shared editor helpers (app.js's
-// signature-box/contract-field placement tools) — no shul/store portal or
-// public page calls anything here, so a blanket 'settings' view gate is
-// correct for the whole router, not just the individually-gated mutations
-// below.
+// (frontend/admin/settings.html) — no shul/store portal or public page
+// calls anything here, so a blanket 'settings' view gate is correct for the
+// whole router, not just the individually-gated mutations below. Contract/
+// agreement template config (PDF upload, signature placement, contract
+// field placement) and site content live in their own gated route files
+// now (contractSettings.js, siteContent.js) — see PERMISSION_RESOURCES.
 router.use(auth, requirePermission('settings'));
 
 // Generic org-scoped key/value settings (contract template text, gmaps key display, etc.)
@@ -42,146 +38,6 @@ router.get('/giftcard-status', (req, res) => {
   const mockMode = isMockMode();
   const missing = mockMode ? [!process.env.DISCCARDPROMOS_API_BASE && 'DISCCARDPROMOS_API_BASE', !process.env.DISCCARDPROMOS_API_KEY && 'DISCCARDPROMOS_API_KEY'].filter(Boolean) : [];
   res.json({ mockMode, missing });
-});
-
-// Custom contract PDF — uploaded once, used as the base document for every
-// shul's contract from then on (the shul/season details are no longer
-// auto-typed onto the page; the uploaded PDF is used verbatim). A signature
-// block is still stamped onto its last page at sign time.
-router.get('/contract-pdf', (req, res) => {
-  res.json({ hasCustomTemplate: hasCustomTemplate() });
-});
-
-router.post('/contract-pdf', requirePermission('settings', 'can_edit'), upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'File must be a PDF' });
-  writeFileSync(CUSTOM_TEMPLATE_PATH, req.file.buffer);
-  res.json({ ok: true, hasCustomTemplate: true });
-});
-
-router.delete('/contract-pdf', requirePermission('settings', 'can_edit'), (req, res) => {
-  try { unlinkSync(CUSTOM_TEMPLATE_PATH); } catch { /* already gone */ }
-  res.json({ ok: true, hasCustomTemplate: false });
-});
-
-// Custom document PDFs for applicants and stores — same idea as the shul
-// contract above, generalized. entityType is 'applicant' or 'store'.
-router.get('/document-pdf/:entityType', (req, res) => {
-  if (!['applicant', 'store'].includes(req.params.entityType)) return res.status(400).json({ error: 'Invalid entity type' });
-  res.json({ hasCustomTemplate: hasCustomDocTemplate(req.params.entityType) });
-});
-
-router.post('/document-pdf/:entityType', requirePermission('settings', 'can_edit'), upload.single('file'), (req, res) => {
-  const entityType = req.params.entityType;
-  if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'File must be a PDF' });
-  writeFileSync(docTemplatePath(entityType), req.file.buffer);
-  res.json({ ok: true, hasCustomTemplate: true });
-});
-
-router.delete('/document-pdf/:entityType', requirePermission('settings', 'can_edit'), (req, res) => {
-  const entityType = req.params.entityType;
-  if (!['applicant', 'store'].includes(entityType)) return res.status(400).json({ error: 'Invalid entity type' });
-  try { unlinkSync(docTemplatePath(entityType)); } catch { /* already gone */ }
-  res.json({ ok: true, hasCustomTemplate: false });
-});
-
-// Signature placement editor (Settings > Documents > drag/resize box) —
-// 'kind' is 'shul' | 'applicant' | 'store'. Coordinates are stored as
-// fractions (0-1) of the page's actual width/height, top-left origin,
-// matching the drag UI; stampSignature() in services/pdf.js converts to PDF
-// points/bottom-left-origin at sign time.
-const SIG_TEMPLATE_PATH = { shul: () => (hasCustomTemplate() ? CUSTOM_TEMPLATE_PATH : null), applicant: () => (hasCustomDocTemplate('applicant') ? docTemplatePath('applicant') : null), store: () => (hasCustomDocTemplate('store') ? docTemplatePath('store') : null) };
-
-async function templatePageSize(kind) {
-  const path = SIG_TEMPLATE_PATH[kind]?.();
-  if (path) {
-    try {
-      const doc = await PDFDocument.load(readFileSync(path));
-      const pages = doc.getPages();
-      const { width, height } = pages[pages.length - 1].getSize();
-      return { width, height };
-    } catch { /* fall through to the generated-doc default below */ }
-  }
-  return { width: 612, height: 792 }; // our generated Letter-size default (services/pdf.js buildSimplePdf)
-}
-
-const SIG_FIELD_TYPES = ['signature', 'initial', 'date', 'text'];
-
-router.get('/signature-box/:kind', async (req, res) => {
-  const kind = req.params.kind;
-  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const fields = getSignatureFields(req.user.org_id, kind);
-  const pageSize = await templatePageSize(kind);
-  res.json({ fields, pageSize });
-});
-
-// Streams the actual PDF the signature-box editor renders as its
-// background: the org's uploaded custom template if one exists for this
-// kind, otherwise a sample of our own generated document — same
-// heading/fieldLines/body layout the real thing uses, filled with
-// placeholder values since there's no specific entity behind this editor.
-// Either way, an admin dragging the box around is looking at the real page,
-// not a blank proportioned rectangle.
-router.get('/signature-box/:kind/preview-pdf', async (req, res) => {
-  const kind = req.params.kind;
-  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const templatePath = SIG_TEMPLATE_PATH[kind]?.();
-  res.type('application/pdf');
-  if (templatePath) return res.send(readFileSync(templatePath));
-  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
-  const bytes = await generatePreviewPdfBytes(req.user.org_id, org.name, kind);
-  res.send(Buffer.from(bytes));
-});
-
-// Body is the full fields array (replaces whatever was saved before) — the
-// admin editor always sends its whole current set, since fields can be
-// added/removed/reordered in the same edit session.
-router.put('/signature-box/:kind', requirePermission('settings', 'can_edit'), (req, res) => {
-  const kind = req.params.kind;
-  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const fields = req.body?.fields;
-  if (!Array.isArray(fields) || !fields.length) return res.status(400).json({ error: 'At least one field is required' });
-  for (const f of fields) {
-    if (!f.id || !SIG_FIELD_TYPES.includes(f.type)) return res.status(400).json({ error: 'Each field needs a valid id and type' });
-    if ([f.x, f.y, f.width, f.height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
-  }
-  const value = JSON.stringify(fields.map(f => ({ id: f.id, type: f.type, label: f.label || '', required: f.required !== false, x: f.x, y: f.y, width: f.width, height: f.height })));
-  db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
-    ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `signature_box_${kind}`, value);
-  res.json({ ok: true, fields: JSON.parse(value) });
-});
-
-// Contract data-field placement editor (Settings > Documents > "Edit
-// Contract Field Placement") — distinct from the signature-box editor
-// above: these fields get the entity's own record data stamped onto the
-// uploaded template PDF at generation time, not whatever the signer types.
-// Only meaningful once a custom template is uploaded (see
-// generateContractPdf/generateGenericDocumentPdf in services/pdf.js) —
-// hasTemplate tells the frontend whether to even offer this editor.
-router.get('/contract-fields/:kind', async (req, res) => {
-  const kind = req.params.kind;
-  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const fields = getDataFields(req.user.org_id, kind);
-  const pageSize = await templatePageSize(kind);
-  res.json({ fields, pageSize, availableFields: getDataFieldDefs(kind), hasTemplate: !!SIG_TEMPLATE_PATH[kind]?.() });
-});
-
-router.put('/contract-fields/:kind', requirePermission('settings', 'can_edit'), (req, res) => {
-  const kind = req.params.kind;
-  if (!['shul', 'applicant', 'store'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
-  const fields = req.body?.fields;
-  if (!Array.isArray(fields)) return res.status(400).json({ error: 'fields array required' });
-  const validKeys = new Set(getDataFieldDefs(kind).map(([key]) => key));
-  for (const f of fields) {
-    if (!f.id || !validKeys.has(f.dataField)) return res.status(400).json({ error: 'Each field needs a valid id and a recognized dataField' });
-    if ([f.x, f.y, f.width, f.height].some(v => typeof v !== 'number' || v < 0 || v > 1)) return res.status(400).json({ error: 'x/y/width/height must be numbers between 0 and 1' });
-  }
-  const value = JSON.stringify(fields.map(f => ({ id: f.id, dataField: f.dataField, x: f.x, y: f.y, width: f.width, height: f.height, fontSize: f.fontSize || null })));
-  db.prepare(`INSERT INTO settings (org_id, key, value) VALUES (?,?,?)
-    ON CONFLICT(org_id, key) DO UPDATE SET value = excluded.value`).run(req.user.org_id, `contract_data_fields_${kind}`, value);
-  res.json({ ok: true, fields: JSON.parse(value) });
 });
 
 // Auto-email message editor — every key in SYSTEM_EMAIL_TEMPLATES (contract
