@@ -196,7 +196,7 @@ qs('#btn-mass-apply').addEventListener('click', async () => {
 
 async function openApplicant(id) {
   try {
-    const { applicant: a, notes, cards, flags } = await api(`/applicants/${id}`);
+    const { applicant: a, notes, cards, flags, mergeGroup } = await api(`/applicants/${id}`);
     const body = `
       <div class="tabs" id="atabs"><button class="active" data-t="info">Info</button><button data-t="notes">Notes (${notes.length})</button><button data-t="cards">Card (${cards.length})</button><button data-t="documents">Documents</button><button data-t="messages">Messages</button><button data-t="history">History</button></div>
       <div id="atab-info">
@@ -204,6 +204,10 @@ async function openApplicant(id) {
           <div><strong>Applicant ID</strong><br><code>${esc(a.external_id||'')}</code></div>
           <div><strong>Status</strong><br>${badge(a.approval_status, a.approval_status)} ${a.is_paused ? badge('paused','paused') : ''}</div>
         </div>
+        ${mergeGroup && mergeGroup.length ? `<div class="divider"></div><div style="color:var(--text-muted);background:#f9efe0;padding:8px 12px;border-radius:6px">
+          <strong>Same person, enrolled through ${mergeGroup.length + 1} shuls${a.merge_group_id === a.id ? ' (this is the primary record — the only one with a real gift card)' : " — the primary record's shul holds the actual gift card"}:</strong>
+          ${mergeGroup.map(m => `${esc(m.first_name)} ${esc(m.last_name)} — ${esc(m.shul_name||'')}`).join(', ')}
+        </div>` : ''}
         <div class="divider"></div>
         <div class="grid-2">
           <div><label>First Name</label><input id="e-first_name" value="${esc(a.first_name||'')}"></div>
@@ -400,40 +404,90 @@ window.runImport = async () => {
   }
 };
 
-let dupFlagsCache = [];
-const APPLICANT_COMPARE_FIELDS = [
-  ['first_name','First Name'], ['last_name','Last Name'], ['shul_name','Shul'], ['marital_status','Marital Status'],
+// Keep in sync with MERGE_FIELDS in services/duplicates.js — real
+// identity/contact/demographic data an admin can pick a per-field winner
+// for when merging. shul/status/source aren't "merged"; each member keeps
+// its own.
+const APPLICANT_MERGE_FIELDS = [
+  ['first_name','First Name'], ['last_name','Last Name'], ['marital_status','Marital Status'],
   ['home_phone','Home Phone'], ['husband_cell','Husband Cell'], ['wife_cell','Wife Cell'], ['email','Email'],
-  ['address','Address'], ['city','City'], ['state','State'], ['zip','Zip'], ['num_children','Children'],
-  ['home_for_yomtov','Home for Yom Tov'], ['approval_status','Status'], ['card_amount','Card Amount'], ['source','Source'],
+  ['address','Address'], ['city','City'], ['state','State'], ['zip','Zip'],
+  ['preferred_contact_method','Preferred Contact'], ['preferred_number','Preferred Number'],
+  ['num_children','Children'], ['home_for_yomtov','Home for Yom Tov'], ['comments','Comments'], ['card_amount','Card Amount'],
 ];
 
 async function showDuplicates() {
   try {
     const { flags } = await api('/applicants/duplicates/open' + (state.season_id ? `?season_id=${state.season_id}` : ''));
-    dupFlagsCache = flags;
     const body = flags.length ? flags.map(f => `<div class="card" style="margin-bottom:10px">
-        <strong>${esc(f.entity?.first_name)} ${esc(f.entity?.last_name)}</strong> may duplicate <strong>${esc(f.matched?.first_name)} ${esc(f.matched?.last_name)}</strong><br>
+        <strong>${esc(f.entity?.first_name)} ${esc(f.entity?.last_name)}</strong> (${esc(f.entity?.shul_name||'')}) may duplicate
+        <strong>${esc(f.matched?.first_name)} ${esc(f.matched?.last_name)}</strong> (${esc(f.matched?.shul_name||'')})<br>
         <span class="small-muted">Reason: ${esc(f.reason)}</span>
         <div style="margin-top:10px">
-          <button class="btn btn-sm btn-outline" onclick="compareDup('${f.id}')">Compare Side-by-Side</button>
-          <button class="btn btn-sm btn-outline" onclick="resolveDup('${f.id}','bypass')">Bypass</button>
-          <button class="btn btn-sm btn-primary" onclick="resolveDup('${f.id}','resolve')">Mark Resolved</button>
+          <button class="btn btn-sm btn-primary" onclick="openMergeView('${f.id}')">Compare &amp; Resolve</button>
         </div>
       </div>`).join('') : '<p class="small-muted">No open duplicate flags.</p>';
     openModal('Duplicate Applicant Flags', body);
   } catch (err) { toast(err.message, true); }
 }
-window.compareDup = (flagId) => {
-  const f = dupFlagsCache.find(x => x.id === flagId);
-  if (!f) return;
-  const body = `<p class="small-muted">Reason flagged: ${esc(f.reason)}</p>` + renderCompareTable(APPLICANT_COMPARE_FIELDS, f.entity, f.matched);
-  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">Back to List</button>
-    <button class="btn btn-outline btn-sm" onclick="resolveDup('${flagId}','bypass')">Bypass</button>
-    <button class="btn btn-primary btn-sm" onclick="resolveDup('${flagId}','resolve')">Mark Resolved</button>`;
-  openModal('Compare Records', body, footer);
+
+// The merge group can be more than a pair — the same family can get
+// submitted by three, four, five different shuls in one season, so this
+// always fetches the FULL connected group for the flag, not just its two
+// original entities (see GET /applicants/duplicates/:flagId/group).
+let mergeGroupCache = null;
+window.openMergeView = async (flagId) => {
+  try {
+    const group = await api(`/applicants/duplicates/${flagId}/group`);
+    mergeGroupCache = group;
+    renderMergeView();
+  } catch (err) { toast(err.message, true); }
 };
-window.resolveDup = async (id, action) => { try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action } }); closeModal(); showDuplicates(); load(); } catch (err) { toast(err.message, true); } };
+function renderMergeView() {
+  const { flag, members, sharesPhone } = mergeGroupCache;
+  const cols = members.map((m, i) => `<th style="min-width:180px">
+      <div class="checkbox-row" style="margin-bottom:4px"><input type="radio" name="merge-primary" value="${esc(m.id)}" id="mp-${i}" ${i===0?'checked':''}>
+        <label for="mp-${i}" style="margin:0"><strong>${esc(m.first_name)} ${esc(m.last_name)}</strong></label></div>
+      <span class="small-muted">${esc(m.shul_name||'')}</span>
+    </th>`).join('');
+  const rows = APPLICANT_MERGE_FIELDS.map(([key, label]) => {
+    const cells = members.map((m, i) => {
+      const v = m[key];
+      const display = key === 'home_for_yomtov' ? (v ? 'Yes' : 'No') : (v ?? '');
+      return `<td><label class="checkbox-row" style="margin:0"><input type="radio" name="mf-${key}" value="${esc(String(v ?? ''))}" ${i===0?'checked':''}> <span>${esc(String(display))}</span></label></td>`;
+    }).join('');
+    return `<tr><td class="small-muted" style="white-space:nowrap">${esc(label)}</td>${cells}</tr>`;
+  }).join('');
+  const body = `
+    <p class="small-muted">Reason flagged: ${esc(flag.reason)}. ${members.length > 2 ? `This is a group of ${members.length} records.` : ''}
+    Pick which record is <strong>Primary</strong> (that's the one that keeps going forward as the real card-holder), then pick which value to keep for each field — you can mix and match from any record.</p>
+    ${sharesPhone ? '<p style="color:var(--danger)"><strong>These records share a phone number</strong> — they can only be resolved as a merge, not bypassed as coincidentally-similar different people.</p>' : ''}
+    <div style="overflow-x:auto"><table><thead><tr><th></th>${cols}</tr></thead><tbody>${rows}</tbody></table></div>
+  `;
+  const footer = `<button class="btn btn-outline btn-sm" onclick="showDuplicates()">Back to List</button>
+    ${sharesPhone ? '' : `<button class="btn btn-outline btn-sm" onclick="bypassDup('${flag.id}')">Bypass (not the same person)</button>`}
+    <button class="btn btn-primary btn-sm" onclick="submitMerge('${flag.id}')">Merge &amp; Resolve</button>`;
+  openModal('Compare & Merge Records', body, footer);
+}
+window.bypassDup = async (id) => {
+  try { await api(`/applicants/duplicates/${id}/resolve`, { method: 'POST', body: { action: 'bypass' } }); closeModal(); showDuplicates(); load(); }
+  catch (err) { toast(err.message, true); }
+};
+window.submitMerge = async (flagId) => {
+  const primaryId = qs('input[name="merge-primary"]:checked')?.value;
+  if (!primaryId) return toast('Pick a primary record', true);
+  const values = {};
+  for (const [key] of APPLICANT_MERGE_FIELDS) {
+    const el = qs(`input[name="mf-${key}"]:checked`);
+    if (el) values[key] = key === 'num_children' || key === 'card_amount' ? (el.value === '' ? null : +el.value)
+      : key === 'home_for_yomtov' ? (el.value === '1' || el.value === 'true' ? 1 : 0)
+      : el.value;
+  }
+  try {
+    await api(`/applicants/duplicates/${flagId}/merge`, { method: 'POST', body: { primaryId, values } });
+    toast('Merged'); closeModal(); showDuplicates(); load();
+  } catch (err) { toast(err.message, true); }
+};
 
 // Deliberately no load() in this initial-resolution .then() (only in the
 // onChange callback above, fired later by an actual reorder) — the season

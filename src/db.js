@@ -656,6 +656,15 @@ safeAlter(`ALTER TABLE shuls ADD COLUMN permanent_comments TEXT`);
 // a duplicate row, rather than creating a new incomplete copy every time the
 // action is re-run for the same shul/season pair.
 safeAlter(`ALTER TABLE applicants ADD COLUMN carried_from_applicant_id TEXT REFERENCES applicants(id)`);
+// Groups every applicant row confirmed to be the same real person across
+// however many shuls submitted them (see services/duplicates.js's
+// mergeApplicants) — set to the PRIMARY member's own id on every row in the
+// group, including the primary itself, so "is this row the primary" is just
+// `merge_group_id === id`. A duplicate can legitimately span more than two
+// shuls, so this is a group key, not a single pairwise link (that's what the
+// existing duplicate_of_applicant_id is for, and it's kept for the original
+// flagged-against reference/audit trail).
+safeAlter(`ALTER TABLE applicants ADD COLUMN merge_group_id TEXT`);
 
 // Per-season disccardpromos credentials (see services/giftcard.js) — for
 // now, each season can hold its own API base/key, entered on the season's

@@ -3,7 +3,7 @@ import multer from 'multer';
 import { db, uuid, DEFAULT_ORG_ID } from '../db.js';
 import { auth, requireAdmin } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
-import { detectAndFlag, resolveFlag } from '../services/duplicates.js';
+import { detectAndFlag, resolveFlag, getMergeGroupIds, mergeApplicants, applicantsSharePhone } from '../services/duplicates.js';
 import { sendMailChecked, renderSystemTemplate } from '../services/mail.js';
 import { sendSmsChecked } from '../services/sms.js';
 import * as giftcard from '../services/giftcard.js';
@@ -62,6 +62,14 @@ function buildProviderOpts(orgId, applicant, groupName) {
   if (allowed.includes('state')) opts.state = applicant.state;
   if (allowed.includes('zip')) opts.zip = applicant.zip;
   return opts;
+}
+
+// True if this applicant was merged into another shul's record as the same
+// real person (see services/duplicates.js's mergeApplicants) — merge_group_id
+// is set to the PRIMARY member's own id on every member of a merged group,
+// so a secondary is any row where that id differs from its own.
+function isMergedSecondary(applicant) {
+  return !!applicant.merge_group_id && applicant.merge_group_id !== applicant.id;
 }
 
 // ============================= PUBLIC ==============================
@@ -208,7 +216,14 @@ router.get('/:id', (req, res) => {
   const notes = req.user.role === 'shul' ? [] : db.prepare('SELECT n.*, u.first_name, u.last_name FROM applicant_notes n LEFT JOIN users u ON u.id=n.user_id WHERE applicant_id = ? ORDER BY n.created_at DESC').all(applicant.id);
   const cards = db.prepare('SELECT * FROM cards WHERE applicant_id = ? ORDER BY created_at DESC').all(applicant.id);
   const flags = req.user.role === 'shul' ? [] : db.prepare(`SELECT * FROM duplicate_flags WHERE entity_type='applicant' AND (entity_id=? OR matched_entity_id=?) AND status='open'`).all(applicant.id, applicant.id);
-  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags });
+  // Every other shul's record confirmed to be this same real person (see
+  // services/duplicates.js's mergeApplicants) — admin-only, per spec: a
+  // shul must never learn its applicant is enrolled anywhere else.
+  const mergeGroup = (req.user.role !== 'shul' && applicant.merge_group_id)
+    ? db.prepare(`SELECT a.id, a.first_name, a.last_name, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id
+        WHERE a.merge_group_id = ? AND a.id != ?`).all(applicant.merge_group_id, applicant.id)
+    : [];
+  res.json({ applicant: maskForShul(redact(applicant, req.permission.hidden_fields), req.user.role, req.user.org_id), notes, cards, flags, mergeGroup });
 });
 
 // Who edited this record and when — a shul viewing their own applicant
@@ -629,44 +644,61 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       ({ emailError } = await sendMailChecked(req.user.org_id, applicant.email, tmpl.subject, tmpl.body, { replyTo: tmpl.replyTo, sentBy: req.user.id }));
       if (emailError) console.error('[mail] applicant approval email failed:', emailError);
     }
-    // Writes/links the disccardpromos account for this applicant — idempotent
-    // by external_id (existing account just gets the current season added;
-    // a new one is created under a group matching the shul's English name,
-    // creating that group first if needed — see giftcard.js's
-    // upsertAccountForApproval). Best-effort: a disccardpromos hiccup here
-    // must never undo or block the approval that already committed above,
-    // same "external side-effect can fail without failing the action" pattern
-    // as the approval email right above.
-    let providerAccountError = null;
-    if (applicant.shul_id && !applicant.provider_exempt) {
-      try {
-        const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
-        const result = await giftcard.upsertAccountForApproval(applicant.season_id, buildProviderOpts(req.user.org_id, applicant, shul?.name_en || 'Unknown'));
-        if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
-      } catch (e) {
-        providerAccountError = e.message;
-        console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
-      }
-    }
-    // disccardpromos has no separate "assign/activate a card" step — crediting
-    // a customer's balance against a configured Package (Settings >
-    // Organization > Gift Card Loading) via add-funds IS how a card actually
-    // gets issued with an amount. Same best-effort pattern as the account
-    // write above: skipped if that write failed (nothing to credit yet), and
-    // never blocks/undoes the approval itself. provider_exempt applicants
-    // (one-time backfill import — see POST /import) never reach either block,
-    // permanently, no matter how many times they're approved/rejected.
-    let providerFundsError = null;
-    if (applicant.shul_id && !applicant.provider_exempt && !providerAccountError && amount > 0) {
-      const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
-      if (!discountId) {
-        providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
-      } else {
+    // A merged-duplicate secondary (see services/duplicates.js's
+    // mergeApplicants — confirmed the same real person as another shul's
+    // applicant) never gets its own disccardpromos account/card, no matter
+    // how many times it's approved — that would be exactly the double gift
+    // card merging was meant to prevent. It just links straight to whatever
+    // the primary member already has (nothing yet if the primary hasn't
+    // been approved either) so admin views show the connection.
+    let providerAccountError = null, providerFundsError = null;
+    if (isMergedSecondary(applicant)) {
+      const primary = db.prepare('SELECT provider_account_id FROM applicants WHERE id = ?').get(applicant.merge_group_id);
+      if (primary?.provider_account_id) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(primary.provider_account_id, applicant.id);
+    } else {
+      // Writes/links the disccardpromos account for this applicant — idempotent
+      // by external_id (existing account just gets the current season added;
+      // a new one is created under a group matching the shul's English name,
+      // creating that group first if needed — see giftcard.js's
+      // upsertAccountForApproval). Best-effort: a disccardpromos hiccup here
+      // must never undo or block the approval that already committed above,
+      // same "external side-effect can fail without failing the action" pattern
+      // as the approval email right above.
+      if (applicant.shul_id && !applicant.provider_exempt) {
         try {
-          await giftcard.addFunds(applicant.season_id, { externalId: applicant.external_id, discountId, amount });
+          const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
+          const result = await giftcard.upsertAccountForApproval(applicant.season_id, buildProviderOpts(req.user.org_id, applicant, shul?.name_en || 'Unknown'));
+          if (result.accountId) {
+            db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, applicant.id);
+            // This applicant is (or might become) a merge-group primary —
+            // propagate the account to any secondaries linked to it so
+            // their views catch up once this write finally happened.
+            db.prepare(`UPDATE applicants SET provider_account_id = ? WHERE merge_group_id = ? AND id != ?`).run(result.accountId, applicant.id, applicant.id);
+          }
         } catch (e) {
-          providerFundsError = e.message;
-          console.error('[giftcard] failed to load funds on approval:', e.message);
+          providerAccountError = e.message;
+          console.error('[giftcard] failed to write disccardpromos account on approval:', e.message);
+        }
+      }
+      // disccardpromos has no separate "assign/activate a card" step — crediting
+      // a customer's balance against a configured Package (Settings >
+      // Organization > Gift Card Loading) via add-funds IS how a card actually
+      // gets issued with an amount. Same best-effort pattern as the account
+      // write above: skipped if that write failed (nothing to credit yet), and
+      // never blocks/undoes the approval itself. provider_exempt applicants
+      // (one-time backfill import — see POST /import) never reach either block,
+      // permanently, no matter how many times they're approved/rejected.
+      if (applicant.shul_id && !applicant.provider_exempt && !providerAccountError && amount > 0) {
+        const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
+        if (!discountId) {
+          providerFundsError = 'No disccardpromos Package/Discount ID configured (Settings > Organization > Gift Card Loading) — card amount was not loaded.';
+        } else {
+          try {
+            await giftcard.addFunds(applicant.season_id, { externalId: applicant.external_id, discountId, amount });
+          } catch (e) {
+            providerFundsError = e.message;
+            console.error('[giftcard] failed to load funds on approval:', e.message);
+          }
         }
       }
     }
@@ -759,13 +791,21 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
     approved++;
     // Same best-effort account-write + fund-load as the single /:id/approve
     // route — see the comments there. A disccardpromos hiccup on one
-    // applicant never stops the rest of the batch.
-    if (applicant.shul_id && !applicant.provider_exempt) {
+    // applicant never stops the rest of the batch. A merged-duplicate
+    // secondary (see isMergedSecondary) never gets its own account/card —
+    // just links to whatever the primary already has.
+    if (isMergedSecondary(applicant)) {
+      const primary = db.prepare('SELECT provider_account_id FROM applicants WHERE id = ?').get(applicant.merge_group_id);
+      if (primary?.provider_account_id) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(primary.provider_account_id, id);
+    } else if (applicant.shul_id && !applicant.provider_exempt) {
       let accountOk = false;
       try {
         const shul = db.prepare('SELECT name_en FROM shuls WHERE id = ?').get(applicant.shul_id);
         const result = await giftcard.upsertAccountForApproval(applicant.season_id, buildProviderOpts(req.user.org_id, applicant, shul?.name_en || 'Unknown'));
-        if (result.accountId) db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
+        if (result.accountId) {
+          db.prepare('UPDATE applicants SET provider_account_id = ? WHERE id = ?').run(result.accountId, id);
+          db.prepare(`UPDATE applicants SET provider_account_id = ? WHERE merge_group_id = ? AND id != ?`).run(result.accountId, id, id);
+        }
         accountOk = true;
       } catch (e) {
         providerErrors++;
@@ -942,14 +982,12 @@ router.post('/import', requirePermission('applicants', 'can_edit'), upload.singl
 });
 
 // season_id (optional) scopes this to flags whose FLAGGED applicant
-// (entity_id) belongs to that season — matching is deliberately still
-// cross-season (see services/duplicates.js), so the record it matched
-// against can legitimately be from an older season; that's the whole point
-// of catching "this looks like last season's applicant again". What this
-// filters out is flags for a *different* season's applicant entirely,
-// which have nothing to do with whatever season the admin is currently
-// working in and were otherwise always mixed into this list regardless of
-// the season filter selected on the main list.
+// (entity_id) belongs to that season. Matching itself only ever happens
+// within one season to begin with (see services/duplicates.js's
+// checkApplicantDuplicate — a returning family reapplying next season isn't
+// a duplicate), so this filter is just keeping flags for a *different*
+// season's applicant entirely out of whatever season the admin is currently
+// working in.
 router.get('/duplicates/open', requireAdmin, (req, res) => {
   const { season_id } = req.query;
   const rows = season_id
@@ -966,9 +1004,43 @@ router.get('/duplicates/open', requireAdmin, (req, res) => {
 
 router.post('/duplicates/:flagId/resolve', requireAdmin, (req, res) => {
   const { action } = req.body || {};
-  const flag = resolveFlag(req.params.flagId, req.user.id, action);
+  try {
+    const flag = resolveFlag(req.params.flagId, req.user.id, action);
+    if (!flag) return res.status(404).json({ error: 'Not found' });
+    res.json({ flag });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Full merge group for a flag — every applicant confirmed (or provisionally,
+// via a chain of open flags) to be the same real person, which can be more
+// than a pair: the same family can get submitted by three, four, five
+// different shuls in one season. Used to render a merge comparison with one
+// column per member, not just two.
+router.get('/duplicates/:flagId/group', requireAdmin, (req, res) => {
+  const flag = db.prepare(`SELECT * FROM duplicate_flags WHERE id = ? AND org_id = ? AND entity_type='applicant'`).get(req.params.flagId, req.user.org_id);
   if (!flag) return res.status(404).json({ error: 'Not found' });
-  res.json({ flag });
+  const ids = getMergeGroupIds(req.user.org_id, [flag.entity_id, flag.matched_entity_id]);
+  const members = db.prepare(`SELECT a.*, s.name_en as shul_name FROM applicants a LEFT JOIN shuls s ON s.id = a.shul_id
+    WHERE a.id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+  const e = members.find(m => m.id === flag.entity_id), m = members.find(m => m.id === flag.matched_entity_id);
+  res.json({ flag, members, sharesPhone: !!(e && m && applicantsSharePhone(e, m)) });
+});
+
+// Forces this flag's whole merge group to be resolved as one confirmed
+// duplicate. `primaryId` picks which member keeps going forward as the real
+// card-holder; `values` is the admin's field-by-field chosen composite
+// (mixed and matched across members) written onto that primary only — every
+// other member's own row is left untouched, so each shul keeps seeing
+// exactly what it itself submitted.
+router.post('/duplicates/:flagId/merge', requireAdmin, (req, res) => {
+  const flag = db.prepare(`SELECT * FROM duplicate_flags WHERE id = ? AND org_id = ? AND entity_type='applicant'`).get(req.params.flagId, req.user.org_id);
+  if (!flag) return res.status(404).json({ error: 'Not found' });
+  const { primaryId, values } = req.body || {};
+  try {
+    const result = mergeApplicants(req.user.org_id, req.user.id, { primaryId, values });
+    logAudit(req.user.org_id, req.user.id, 'merge', 'applicant', primaryId, null, result, req.ip);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;
