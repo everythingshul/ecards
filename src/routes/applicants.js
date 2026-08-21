@@ -290,7 +290,7 @@ router.get('/:id/messages', requireAdmin, (req, res) => {
   res.json({ sms, emails });
 });
 
-router.post('/:id/send-sms', requireAdmin, async (req, res) => {
+router.post('/:id/send-sms', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   const { to, body } = req.body || {};
@@ -301,7 +301,7 @@ router.post('/:id/send-sms', requireAdmin, async (req, res) => {
   res.json({ ok: !emailError, emailError });
 });
 
-router.post('/:id/send-email', requireAdmin, async (req, res) => {
+router.post('/:id/send-email', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   const { to, subject, body } = req.body || {};
@@ -558,7 +558,7 @@ router.post('/mass-complete-reenrollment', requirePermission('applicants', 'can_
 // a decision was made too early/in error, or un-approving one to reconsider
 // (approved_by/approved_at/card_amount are left as-is so there's a record of
 // the prior decision; approving again overwrites them same as normal).
-router.post('/:id/set-pending', requireAdmin, async (req, res) => {
+router.post('/:id/set-pending', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='pending', updated_at=datetime('now') WHERE id=?`).run(applicant.id);
@@ -567,7 +567,7 @@ router.post('/:id/set-pending', requireAdmin, async (req, res) => {
   res.json({ applicant: db.prepare('SELECT * FROM applicants WHERE id = ?').get(applicant.id), cardLockErrors });
 });
 
-router.post('/mass-set-pending', requireAdmin, async (req, res) => {
+router.post('/mass-set-pending', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let updated = 0, skipped = 0, cardLockErrors = 0;
@@ -602,7 +602,7 @@ router.post('/mass-set-pending', requireAdmin, async (req, res) => {
 // a lock, not deleteCustomer — a customer that already had real money
 // loaded onto a card should stay on record there, just deactivated, not be
 // erased.
-router.delete('/:id/permanent', requireAdmin, async (req, res) => {
+router.delete('/:id/permanent', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   const { errors: cardLockErrors } = await lockApplicantCards(req.user.org_id, applicant);
@@ -612,7 +612,7 @@ router.delete('/:id/permanent', requireAdmin, async (req, res) => {
   res.json({ ok: true, cardLockErrors });
 });
 
-router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
+router.post('/mass-delete-permanent', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0, cardLockErrors = 0;
@@ -645,7 +645,7 @@ router.post('/mass-delete-permanent', requireAdmin, async (req, res) => {
 // instance — see services/reminders.js's identical assumption).
 const approvalsInFlight = new Set();
 
-router.post('/:id/approve', requireAdmin, async (req, res) => {
+router.post('/:id/approve', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   if (applicant.is_paused) return res.status(423).json({ error: 'Applicant has an unresolved duplicate flag' });
@@ -784,7 +784,7 @@ router.get('/:id/provider-customer-by-id', requireAdmin, async (req, res) => {
   }
 });
 
-router.post('/:id/reject', requireAdmin, async (req, res) => {
+router.post('/:id/reject', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!applicant) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE applicants SET approval_status='rejected', approved_by=?, approved_at=datetime('now') WHERE id=?`).run(req.user.id, applicant.id);
@@ -793,7 +793,7 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
   res.json({ ok: true, cardLockErrors });
 });
 
-router.post('/mass-reject', requireAdmin, async (req, res) => {
+router.post('/mass-reject', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let rejected = 0, skipped = 0, cardLockErrors = 0;
@@ -812,7 +812,7 @@ router.post('/mass-reject', requireAdmin, async (req, res) => {
 });
 
 // Mass approval — spec #5 "allow mass approval".
-router.post('/mass-approve', requireAdmin, async (req, res) => {
+router.post('/mass-approve', requirePermission('applicants', 'can_edit'), async (req, res) => {
   const { ids, card_amount } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   const discountId = db.prepare(`SELECT value FROM settings WHERE org_id = ? AND key = 'disccardpromos_discount_id'`).get(req.user.org_id)?.value;
@@ -1044,7 +1044,7 @@ router.get('/duplicates/open', requireAdmin, (req, res) => {
   res.json({ flags: withEntities });
 });
 
-router.post('/duplicates/:flagId/resolve', requireAdmin, (req, res) => {
+router.post('/duplicates/:flagId/resolve', requirePermission('applicants', 'can_edit'), (req, res) => {
   const { action } = req.body || {};
   try {
     const flag = resolveFlag(req.params.flagId, req.user.id, action);
@@ -1074,7 +1074,7 @@ router.get('/duplicates/:flagId/group', requireAdmin, (req, res) => {
 // (mixed and matched across members) written onto that primary only — every
 // other member's own row is left untouched, so each shul keeps seeing
 // exactly what it itself submitted.
-router.post('/duplicates/:flagId/merge', requireAdmin, (req, res) => {
+router.post('/duplicates/:flagId/merge', requirePermission('applicants', 'can_edit'), (req, res) => {
   const flag = db.prepare(`SELECT * FROM duplicate_flags WHERE id = ? AND org_id = ? AND entity_type='applicant'`).get(req.params.flagId, req.user.org_id);
   if (!flag) return res.status(404).json({ error: 'Not found' });
   const { primaryId, values } = req.body || {};

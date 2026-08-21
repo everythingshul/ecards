@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, uuid } from '../db.js';
-import { auth, requireAdmin } from '../middleware/auth.js';
+import { auth } from '../middleware/auth.js';
 import { requirePermission, redact } from '../middleware/permissions.js';
 import * as giftcard from '../services/giftcard.js';
 import { sendXlsx } from '../services/xlsx.js';
@@ -58,7 +58,7 @@ router.get('/export', requirePermission('cards', 'can_export'), (req, res) => {
 // org-wide "Total Loaded" stat on the dashboard — not slots_allocated, which
 // is a headcount, not a dollar figure. "Spent" mirrors the existing
 // store-spend convention elsewhere (negative card_transactions.amount = a purchase).
-router.get('/by-shul', requireAdmin, (req, res) => {
+router.get('/by-shul', (req, res) => {
   const { season_id } = req.query;
   let where = 'WHERE c.org_id = ?';
   const params = [req.user.org_id];
@@ -96,7 +96,7 @@ router.get('/:id', (req, res) => {
 // number in hand (e.g. from a batch of pre-printed cards), not something
 // this app generates — replaces the old giftcard.assignCard(), which called
 // a guessed, never-confirmed /cards/assign path.
-router.post('/assign', requireAdmin, async (req, res) => {
+router.post('/assign', requirePermission('cards', 'can_edit'), async (req, res) => {
   const { applicant_id, card_number } = req.body || {};
   if (!card_number) return res.status(400).json({ error: 'A real card number is required — disccardpromos activates an existing physical card, it does not generate one' });
   const applicant = db.prepare('SELECT * FROM applicants WHERE id = ? AND org_id = ?').get(applicant_id, req.user.org_id);
@@ -131,7 +131,7 @@ router.post('/assign', requireAdmin, async (req, res) => {
 });
 
 // Activate — the phone number the applicant/gabai provides "gets written onto their account."
-router.post('/:id/activate', requireAdmin, async (req, res) => {
+router.post('/:id/activate', requirePermission('cards', 'can_edit'), async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   const { phone } = req.body || {};
@@ -148,7 +148,7 @@ router.post('/:id/activate', requireAdmin, async (req, res) => {
   res.json({ card: db.prepare('SELECT * FROM cards WHERE id = ?').get(card.id) });
 });
 
-router.post('/:id/deactivate', requireAdmin, async (req, res) => {
+router.post('/:id/deactivate', requirePermission('cards', 'can_edit'), async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   let result;
@@ -163,7 +163,7 @@ router.post('/:id/deactivate', requireAdmin, async (req, res) => {
 });
 
 // Pull latest balance/status + transactions from disccardpromos for one card.
-router.post('/:id/sync', requireAdmin, async (req, res) => {
+router.post('/:id/sync', requirePermission('cards', 'can_edit'), async (req, res) => {
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!card) return res.status(404).json({ error: 'Not found' });
   const synced = await syncOneCard(req.user.org_id, card);
@@ -173,7 +173,7 @@ router.post('/:id/sync', requireAdmin, async (req, res) => {
 // Sweep every assigned/activated card at once — also runs automatically on a
 // background interval (see index.js) so store spend stays live without
 // anyone needing to click in.
-router.post('/sync-all', requireAdmin, async (req, res) => {
+router.post('/sync-all', requirePermission('cards', 'can_edit'), async (req, res) => {
   const result = await syncAllCards(req.user.org_id);
   // Sweeps every season's cards at once (syncAllCards resolves each card's
   // own season internally) — mockMode here is just the org-wide default for
@@ -202,7 +202,7 @@ router.get('/transactions/export', requirePermission('cards', 'can_export'), (re
 
 // All transactions across the org — "see all transactions they make in stores,
 // with all transaction info, balance, activation time, refunds — everything."
-router.get('/transactions/all', requireAdmin, (req, res) => {
+router.get('/transactions/all', (req, res) => {
   const { page = 1, pageSize = 100, type, store_id } = req.query;
   let where = 'WHERE c.org_id = ?';
   const params = [req.user.org_id];

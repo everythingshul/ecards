@@ -180,11 +180,13 @@ const NAV_ITEMS = [
   { href: '/admin/updates', label: 'Updates', icon: '&#9670;', resource: 'updates' },
   { href: '/admin/esignatures', label: 'E-Signatures', icon: '&#9670;', resource: 'documents' },
   { href: '/admin/users', label: 'Users & Permissions', icon: '&#9670;', resource: 'users' },
-  // Seasons live inside the Settings page as their own tab (see settings.html)
-  // but are gated by their own 'seasons' resource, so the nav item itself
-  // needs to show up for someone with EITHER permission — the page then
-  // hides whichever tab(s) the signed-in user doesn't actually have.
-  { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resources: ['settings', 'seasons'] },
+  // Its own standalone page/nav item, not a Settings tab — a single link
+  // shared between two independently-gated resources meant blocking just
+  // 'settings' (or just 'seasons') never actually hid the link, since the
+  // other permission alone kept it visible. Two separate resources, two
+  // separate links.
+  { href: '/admin/seasons', label: 'Seasons', icon: '&#9670;', resource: 'seasons' },
+  { href: '/admin/settings', label: 'Settings', icon: '&#9670;', resource: 'settings' },
   // 'audit' has no ROLE_DEFAULTS entry of its own (see RESOURCE_DEFAULT_OVERRIDES
   // in middleware/permissions.js) — it's denied by default for everyone but
   // super_admin until an admin explicitly grants it to a specific user via

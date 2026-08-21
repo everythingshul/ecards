@@ -172,7 +172,7 @@ router.get('/:id/season-history', requireAdmin, (req, res) => {
   res.json({ seasons });
 });
 
-router.post('/', requireAdmin, (req, res) => {
+router.post('/', requirePermission('stores', 'can_edit'), (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).json({ error: 'Store name is required' });
   const id = uuid();
@@ -187,7 +187,7 @@ router.post('/', requireAdmin, (req, res) => {
   res.status(201).json({ store });
 });
 
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', requirePermission('stores', 'can_edit'), (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
   const fields = ['name','address','city','state','zip','phone','manager_name','manager_phone','manager_email','owner_name','owner_phone','owner_email','same_person','comments','setup_status','has_provider_account','provider_store_id'];
@@ -205,7 +205,7 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 const STORE_STATUSES = ['pending', 'in_progress', 'active', 'inactive'];
-router.post('/mass-set-status', requireAdmin, (req, res) => {
+router.post('/mass-set-status', requirePermission('stores', 'can_edit'), (req, res) => {
   const { ids, setup_status } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (!STORE_STATUSES.includes(setup_status)) return res.status(400).json({ error: `setup_status must be one of: ${STORE_STATUSES.join(', ')}` });
@@ -229,7 +229,7 @@ router.post('/mass-set-status', requireAdmin, (req, res) => {
 // linked portal login is deactivated, not deleted (that's user
 // management's job). FK enforcement is ON, so every hard reference is
 // cleaned up first, wrapped in a transaction.
-router.delete('/:id/permanent', requireAdmin, (req, res) => {
+router.delete('/:id/permanent', requirePermission('stores', 'can_edit'), (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
   const del = db.transaction(() => {
@@ -244,7 +244,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
+router.post('/mass-delete-permanent', requirePermission('stores', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0;
@@ -292,7 +292,7 @@ async function inviteStoreToPortal(orgId, store, emailOverride, sentBy = null) {
 }
 
 // Invite a store to their self-service portal.
-router.post('/:id/invite', requireAdmin, async (req, res) => {
+router.post('/:id/invite', requirePermission('stores', 'can_edit'), async (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!store) return res.status(404).json({ error: 'Not found' });
   const result = await inviteStoreToPortal(req.user.org_id, store, req.body?.email, req.user.id);
@@ -300,7 +300,7 @@ router.post('/:id/invite', requireAdmin, async (req, res) => {
   res.json({ ok: true, emailError: result.emailError });
 });
 
-router.post('/mass-invite', requireAdmin, async (req, res) => {
+router.post('/mass-invite', requirePermission('stores', 'can_edit'), async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let invited = 0, skipped = 0, emailErrors = 0;
@@ -378,7 +378,7 @@ router.post('/:id/bill-submissions', billUpload.single('file'), (req, res) => {
   res.status(201).json({ bill: db.prepare('SELECT * FROM store_bill_submissions WHERE id = ?').get(id) });
 });
 
-router.put('/bill-submissions/:billId', requireAdmin, (req, res) => {
+router.put('/bill-submissions/:billId', requirePermission('stores', 'can_edit'), (req, res) => {
   const row = db.prepare(`SELECT b.* FROM store_bill_submissions b JOIN stores s ON s.id=b.store_id WHERE b.id=? AND s.org_id=?`).get(req.params.billId, req.user.org_id);
   if (!row) return res.status(404).json({ error: 'Not found' });
   const { status, admin_notes } = req.body || {};

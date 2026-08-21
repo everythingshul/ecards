@@ -13,23 +13,23 @@
 <script>
 Auth.requireAdmin();
 const isSuperAdmin = Auth.user()?.role === 'super_admin';
-// Seasons is its own gated resource, separate from the rest of this page
-// (Organization/Documents/Auto Emails/Site Content/Backups, all under
-// 'settings') — a user might have one without the other, so each tab only
-// shows up if the signed-in user can actually view it.
-const canSettings = Auth.can('settings');
-const canSeasons = Auth.can('seasons');
-const firstTab = canSettings ? 'org' : (canSeasons ? 'seasons' : null);
+// Seasons now lives on its own page (/admin/seasons), gated by its own
+// 'seasons' resource — pulled out of this page specifically because a
+// single nav link/page shared between two independently-gated resources
+// meant blocking just 'settings' didn't actually hide anything if the user
+// still had 'seasons' (its default), and vice versa. This page is 'settings' only.
+if (!Auth.can('settings')) { location.href = '/admin/dashboard'; }
 renderShell('/admin/settings', `
   <h2>Settings</h2>
-  ${firstTab ? `<div class="tabs">
-    ${canSettings ? `<button class="${firstTab==='org'?'active':''}" data-t="org">Organization</button>` : ''}
-    ${canSeasons ? `<button class="${firstTab==='seasons'?'active':''}" data-t="seasons">Seasons</button>` : ''}
-    ${canSettings ? `<button data-t="documents">Documents</button><button data-t="emails">Auto Emails</button><button data-t="content">Site Content</button>` : ''}
-    ${canSettings && isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
-  </div>` : '<div class="card"><p class="small-muted">You do not have access to any settings sections.</p></div>'}
+  <div class="tabs">
+    <button class="active" data-t="org">Organization</button>
+    <button data-t="documents">Documents</button>
+    <button data-t="emails">Auto Emails</button>
+    <button data-t="content">Site Content</button>
+    ${isSuperAdmin ? '<button data-t="backups">Backups</button>' : ''}
+  </div>
 
-  <div id="panel-org" style="display:${firstTab==='org'?'block':'none'}">
+  <div id="panel-org">
     <div class="card">
       <h3>Organization Info & Branding</h3>
       <label>Organization Name</label><input id="org-name">
@@ -98,13 +98,6 @@ renderShell('/admin/settings', `
       <h3>Full System Export</h3>
       <p class="small-muted">Download everything: every shul, applicant, card, transaction, store, billing record, task, and note, as one Excel workbook with a separate sheet per table.</p>
       <button class="btn btn-sm btn-primary" onclick="downloadFullExport()">Download Full System Export (.xlsx)</button>
-    </div>
-  </div>
-
-  <div id="panel-seasons" style="display:${firstTab==='seasons'?'block':'none'}">
-    <div class="card">
-      <div class="flex-between"><h3 style="margin:0">Seasons</h3><button class="btn btn-sm btn-primary" onclick="openNewSeason()">+ New Season</button></div>
-      <div id="seasons-list" style="margin-top:14px">Loading…</div>
     </div>
   </div>
 
@@ -271,7 +264,7 @@ renderShell('/admin/settings', `
 
 qsa('.tabs button').forEach(b => b.addEventListener('click', () => {
   qsa('.tabs button').forEach(x => x.classList.remove('active')); b.classList.add('active');
-  ['org','seasons','documents','emails','content','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
+  ['org','documents','emails','content','backups'].forEach(t => { const el = qs('#panel-'+t); if (el) el.style.display = t === b.dataset.t ? 'block' : 'none'; });
   if (b.dataset.t === 'emails') loadEmailTemplates();
   if (b.dataset.t === 'content') loadContent();
   if (b.dataset.t === 'backups') loadBackups();
@@ -588,75 +581,7 @@ window.saveOrg = async () => {
   try { await api('/orgs/me', { method: 'PUT', body }); toast('Saved'); } catch (err) { toast(err.message, true); }
 };
 
-async function loadSeasons() {
-  const { seasons } = await api('/seasons');
-  qs('#seasons-list').innerHTML = seasons.map(s => `<div class="card" style="margin-bottom:10px">
-      <div class="flex-between"><input value="${esc(s.name)}" style="font-weight:600;max-width:320px" onchange="updateSeason('${s.id}',{name:this.value})">${s.is_active ? badge('active','active') : badge('inactive','rejected')}</div>
-      <div class="grid-2" style="margin-top:10px">
-        <div><label style="margin-top:0">Start Date</label><input type="date" value="${s.start_date||''}" onchange="updateSeason('${s.id}',{start_date:this.value})"></div>
-        <div><label style="margin-top:0">End Date</label><input type="date" value="${s.end_date||''}" onchange="updateSeason('${s.id}',{end_date:this.value})"></div>
-      </div>
-      <div class="grid-2" style="margin-top:10px">
-        <div><label style="margin-top:0">Default Card Amount</label><input type="number" step="0.01" value="${s.default_card_amount ?? 0}" onchange="updateSeason('${s.id}',{default_card_amount:+this.value})"></div>
-        <div><label style="margin-top:0">Season Status</label>${s.is_active ? `<button class="btn btn-sm btn-outline" disabled>This is the active season</button>` : `<button class="btn btn-sm btn-outline" onclick="updateSeason('${s.id}',{is_active:true})">Set as Active Season</button>`}</div>
-      </div>
-      <div class="grid-2" style="margin-top:10px">
-        <div><label style="margin-top:0">Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input type="number" min="0" value="${s.max_accepted_applicants ?? ''}" placeholder="Unlimited" onchange="updateSeason('${s.id}',{max_accepted_applicants: this.value === '' ? null : +this.value})"></div>
-        <div><label style="margin-top:0">Accepted So Far</label><div style="padding:9px 0">${s.accepted_count}${s.max_accepted_applicants != null ? ` of ${s.max_accepted_applicants} (${s.remaining} remaining)${s.is_full ? ' ' + badge('full','rejected') : ''}` : ' (no cap set)'}</div></div>
-      </div>
-      <div class="checkbox-row" style="margin-top:10px"><input type="checkbox" id="s-contrib-${s.id}" ${s.require_shul_contribution?'checked':''} onchange="updateSeason('${s.id}',{require_shul_contribution:this.checked})">
-        <label for="s-contrib-${s.id}" style="margin:0">Require shuls to report &amp; confirm a minimum contribution before an applicant can be approved</label></div>
-      <p class="small-muted">When on, a shul must enter how much they personally gave a family and check a confirmation box before that applicant can be approved. The minimum amount required (set per shul, overridable per applicant) is never shown to the shul.</p>
-      <div class="divider"></div>
-      <button class="btn btn-sm btn-outline" onclick="openSeasonNotes('${s.id}','${esc(s.name).replace(/'/g,"\\'")}')">Notes</button>
-      <button class="btn btn-sm btn-outline" onclick="openSeasonGiftCardApi('${s.id}','${esc(s.name).replace(/'/g,"\\'")}', ${JSON.stringify(s.disccardpromos_api_base||'')}, ${!!s.has_disccardpromos_api_key})">Gift Card API${s.disccardpromos_api_base && s.has_disccardpromos_api_key ? ' ' + badge('configured','active') : ''}</button>
-    </div>`).join('') || '<p class="small-muted">No seasons yet.</p>';
-}
-window.updateSeason = async (id, body) => { try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); loadSeasons(); } catch (err) { toast(err.message, true); } };
-window.openSeasonNotes = async (id, name) => {
-  try {
-    const { notes } = await api(`/seasons/${id}/notes`);
-    const body = `
-      <div style="display:flex;gap:8px"><input id="new-season-note" placeholder="Add a note about this season…"><button class="btn btn-sm btn-primary" onclick="addSeasonNote('${id}','${name.replace(/'/g,"\\'")}')">Add</button></div>
-      <div style="margin-top:14px">${notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${esc(n.note)}</div><div class="small-muted">${esc(n.first_name||'')} ${esc(n.last_name||'')} · ${fmtDateTime(n.created_at)}</div></div>`).join('') || '<p class="small-muted">No notes yet.</p>'}</div>
-    `;
-    openModal(`${name}: Notes`, body);
-  } catch (err) { toast(err.message, true); }
-};
-window.addSeasonNote = async (id, name) => {
-  const note = qs('#new-season-note').value.trim();
-  if (!note) return;
-  try { await api(`/seasons/${id}/notes`, { method: 'POST', body: { note } }); openSeasonNotes(id, name); } catch (err) { toast(err.message, true); }
-};
-// Per-season disccardpromos credentials (see services/giftcard.js) — for
-// now, each season can hold its own API base/key, falling back to the
-// org-wide DISCCARDPROMOS_API_BASE/KEY env vars when left blank. The key
-// itself is never sent back from the server once saved (same treatment as
-// a password) — the field just shows a placeholder indicating one is set,
-// and is left untouched unless a new value is typed.
-window.openSeasonGiftCardApi = (id, name, apiBase, hasKey) => {
-  const body = `
-    <p class="small-muted">Leave both blank to use the org-wide default (Settings above). Both must be set for this season's override to take effect.</p>
-    <label>API Base URL</label><input id="sg-base" value="${esc(apiBase)}" placeholder="https://api.disccardpromos.com">
-    <label>API Key</label><input id="sg-key" type="password" placeholder="${hasKey ? 'Already set — leave blank to keep it' : 'Not set — inherits the org-wide key'}">
-  `;
-  openModal(`${name}: Gift Card API`, body, `<button class="btn btn-primary btn-sm" onclick="saveSeasonGiftCardApi('${id}')">Save</button>`);
-};
-window.saveSeasonGiftCardApi = async (id) => {
-  const body = { disccardpromos_api_base: qs('#sg-base').value };
-  const key = qs('#sg-key').value;
-  if (key) body.disccardpromos_api_key = key;
-  try { await api(`/seasons/${id}`, { method: 'PUT', body }); toast('Saved'); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
-};
-window.openNewSeason = () => {
-  const body = `<label>Season Name *</label><input id="s-name" placeholder="e.g. 5787 / 2026-27"><label>Default Card Amount</label><input id="s-amount" type="number" step="0.01" value="0">
-    <label>Max Accepted Applicants <span class="small-muted">(blank = unlimited)</span></label><input id="s-cap" type="number" min="0" placeholder="Unlimited">`;
-  openModal('New Season', body, `<button class="btn btn-primary btn-sm" onclick="createSeason()">Create</button>`);
-};
-window.createSeason = async () => {
-  const cap = qs('#s-cap').value;
-  try { await api('/seasons', { method: 'POST', body: { name: qs('#s-name').value, default_card_amount: +qs('#s-amount').value, max_accepted_applicants: cap === '' ? null : +cap } }); closeModal(); loadSeasons(); } catch (err) { toast(err.message, true); }
-};
+// Seasons management now lives on its own page — /admin/seasons.html.
 
 async function loadContractAtSignup() {
   const { settings } = await api('/settings');
@@ -782,14 +707,8 @@ window.uploadFullImport = async (input) => {
   input.value = '';
 };
 
-// Only load a tab's data if the signed-in user can actually see that tab —
-// the rest of these all hit /orgs/me or /settings, which now 403 for a
-// seasons-only user who lacks the 'settings' permission (see canSettings above).
-if (canSettings) {
-  loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadNewSignupNotifyEmails(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadContractText(); loadContractPdfStatus(); loadContractAtSignup();
-  loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
-}
-if (canSeasons) loadSeasons();
+loadOrg(); loadZipRestriction(); loadDefaultReplyTo(); loadNewSignupNotifyEmails(); loadSmsOwnNumber(); loadDiscountId(); loadPushFields(); loadPopup(); loadShulCardAmountVisible(); loadContractText(); loadContractPdfStatus(); loadContractAtSignup();
+loadDocPdfStatus('applicant'); loadDocPdfStatus('store'); loadDocText('applicant'); loadDocText('store');
 </script>
 </body>
 </html>

@@ -300,7 +300,7 @@ router.get('/:id/messages', requireAdmin, (req, res) => {
   res.json({ sms, emails });
 });
 
-router.post('/:id/send-sms', requireAdmin, async (req, res) => {
+router.post('/:id/send-sms', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const { to, body } = req.body || {};
@@ -311,7 +311,7 @@ router.post('/:id/send-sms', requireAdmin, async (req, res) => {
   res.json({ ok: !emailError, emailError });
 });
 
-router.post('/:id/send-email', requireAdmin, async (req, res) => {
+router.post('/:id/send-email', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const { to, subject, body } = req.body || {};
@@ -469,7 +469,7 @@ async function carryForwardShul(orgId, userId, source, targetSeason, { slotsAllo
   return { shul: target, shulCreated, duplicate: !!flag, emailError, contractEmailError, applicantsCarried, applicantsSkipped };
 }
 
-router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
+router.post('/:id/carry-forward', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const source = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!source) return res.status(404).json({ error: 'Not found' });
   const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(req.body?.season_id, req.user.org_id);
@@ -486,7 +486,7 @@ router.post('/:id/carry-forward', requireAdmin, async (req, res) => {
 // season. Shuls whose current season already IS the target, or that hit a
 // validation error (e.g. needing slots_allocated), are skipped rather than
 // failing the whole batch.
-router.post('/mass-carry-forward', requireAdmin, async (req, res) => {
+router.post('/mass-carry-forward', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const { ids, season_id, slots_allocated } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   const targetSeason = db.prepare('SELECT * FROM seasons WHERE id = ? AND org_id = ?').get(season_id, req.user.org_id);
@@ -510,7 +510,7 @@ router.post('/mass-carry-forward', requireAdmin, async (req, res) => {
   res.json({ carried, skipped, duplicatesFlagged, applicantsCarried, applicantsSkipped });
 });
 
-router.post('/', requireAdmin, (req, res) => {
+router.post('/', requirePermission('shuls', 'can_edit'), (req, res) => {
   const b = req.body || {};
   if (b.ruv_phone !== undefined) b.ruv_phone = normalizePhone(b.ruv_phone);
   if (b.gabai_cell !== undefined) b.gabai_cell = normalizePhone(b.gabai_cell);
@@ -558,7 +558,7 @@ router.put('/:id', (req, res) => {
 });
 
 // Approve: sets slot allocation, creates the shul portal login, emails set-up link.
-router.post('/:id/approve', requireAdmin, async (req, res) => {
+router.post('/:id/approve', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   if (shul.is_paused) return res.status(423).json({ error: 'This shul has an unresolved duplicate flag and cannot be approved yet' });
@@ -580,7 +580,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
 // first send silently failed (e.g. no email provider configured at the
 // time) and there's no "unapprove" action to redo the approve step with.
 // Refreshes the invite token/expiry in case the original one already expired.
-router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
+router.post('/:id/resend-welcome', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   if (shul.status !== 'approved' || !shul.portal_user_id) return res.status(400).json({ error: 'This shul has not been approved yet' });
@@ -597,7 +597,7 @@ router.post('/:id/resend-welcome', requireAdmin, async (req, res) => {
   res.json({ ok: true, emailError });
 });
 
-router.post('/:id/reject', requireAdmin, (req, res) => {
+router.post('/:id/reject', requirePermission('shuls', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE shuls SET status='rejected', updated_at=datetime('now') WHERE id=?`).run(shul.id);
@@ -605,7 +605,7 @@ router.post('/:id/reject', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/mass-reject', requireAdmin, (req, res) => {
+router.post('/mass-reject', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let rejected = 0, skipped = 0; const affectedIds = [], names = [];
@@ -624,7 +624,7 @@ router.post('/mass-reject', requireAdmin, (req, res) => {
 // slots_allocated applied to every selected shul (a per-shul prompt isn't
 // practical for a bulk action). Paused shuls (unresolved duplicate flag,
 // same rule as the single-shul approve route) are skipped, not blocked.
-router.post('/mass-approve', requireAdmin, async (req, res) => {
+router.post('/mass-approve', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const { ids, slots_allocated } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   if (slots_allocated === undefined || slots_allocated === null) return res.status(400).json({ error: 'slots_allocated is required to approve' });
@@ -649,7 +649,7 @@ router.post('/mass-approve', requireAdmin, async (req, res) => {
 
 // Manually move a shul back to 'submitted' (the pending-review state before
 // approve/reject) — for un-rejecting or un-approving one to reconsider it.
-router.post('/:id/set-pending', requireAdmin, (req, res) => {
+router.post('/:id/set-pending', requirePermission('shuls', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE shuls SET status='submitted', updated_at=datetime('now') WHERE id=?`).run(shul.id);
@@ -657,7 +657,7 @@ router.post('/:id/set-pending', requireAdmin, (req, res) => {
   res.json({ ok: true, shul: db.prepare('SELECT * FROM shuls WHERE id = ?').get(shul.id) });
 });
 
-router.post('/mass-set-pending', requireAdmin, (req, res) => {
+router.post('/mass-set-pending', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let updated = 0, skipped = 0; const affectedIds = [], names = [];
@@ -680,7 +680,7 @@ router.post('/mass-set-pending', requireAdmin, (req, res) => {
 // A linked portal login is deactivated (not deleted) since that's the
 // user-management flow's job, not this one's. FK enforcement is ON, so
 // every hard reference is cleaned up first, wrapped in a transaction.
-router.delete('/:id/permanent', requireAdmin, (req, res) => {
+router.delete('/:id/permanent', requirePermission('shuls', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const del = db.transaction(() => hardDeleteShul(shul));
@@ -689,7 +689,7 @@ router.delete('/:id/permanent', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/mass-delete-permanent', requireAdmin, (req, res) => {
+router.post('/mass-delete-permanent', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let deleted = 0, skipped = 0; const affectedIds = [], names = [];
@@ -750,7 +750,7 @@ async function sendContractForShul(orgId, shul, toEmail, { setStatus = true, sen
   return { contract: db.prepare('SELECT * FROM contracts WHERE id = ?').get(id), emailError };
 }
 
-router.post('/:id/send-contract', requireAdmin, async (req, res) => {
+router.post('/:id/send-contract', requirePermission('shuls', 'can_edit'), async (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const to = req.body.email || shul.gabai_email;
@@ -765,7 +765,7 @@ router.post('/:id/send-contract', requireAdmin, async (req, res) => {
 // signing link so it can be signed again; doesn't email anyone
 // automatically, and deliberately leaves the shul's own status alone (an
 // already-approved shul stays approved) since that's a separate decision.
-router.post('/:id/contract/retract', requireAdmin, (req, res) => {
+router.post('/:id/contract/retract', requirePermission('shuls', 'can_edit'), (req, res) => {
   const shul = db.prepare('SELECT * FROM shuls WHERE id = ? AND org_id = ?').get(req.params.id, req.user.org_id);
   if (!shul) return res.status(404).json({ error: 'Not found' });
   const contract = db.prepare('SELECT * FROM contracts WHERE shul_id = ? ORDER BY created_at DESC LIMIT 1').get(shul.id);
@@ -796,17 +796,17 @@ router.post('/:id/notes', (req, res) => {
   res.status(201).json({ note: db.prepare('SELECT * FROM shul_notes WHERE id = ?').get(id) });
 });
 
-router.post('/:id/pause', requireAdmin, (req, res) => {
+router.post('/:id/pause', requirePermission('shuls', 'can_edit'), (req, res) => {
   db.prepare('UPDATE shuls SET is_paused = 1 WHERE id = ? AND org_id = ?').run(req.params.id, req.user.org_id);
   db.prepare('UPDATE users SET is_paused = 1 WHERE shul_id = ?').run(req.params.id);
   res.json({ ok: true });
 });
-router.post('/:id/unpause', requireAdmin, (req, res) => {
+router.post('/:id/unpause', requirePermission('shuls', 'can_edit'), (req, res) => {
   db.prepare('UPDATE shuls SET is_paused = 0 WHERE id = ? AND org_id = ?').run(req.params.id, req.user.org_id);
   db.prepare('UPDATE users SET is_paused = 0 WHERE shul_id = ?').run(req.params.id);
   res.json({ ok: true });
 });
-router.post('/mass-pause', requireAdmin, (req, res) => {
+router.post('/mass-pause', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let paused = 0, skipped = 0;
@@ -819,7 +819,7 @@ router.post('/mass-pause', requireAdmin, (req, res) => {
   }
   res.json({ paused, skipped });
 });
-router.post('/mass-unpause', requireAdmin, (req, res) => {
+router.post('/mass-unpause', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
   let unpaused = 0, skipped = 0;
@@ -853,7 +853,7 @@ router.get('/duplicates/open', requireAdmin, (req, res) => {
   res.json({ flags: withEntities });
 });
 
-router.post('/duplicates/:flagId/resolve', requireAdmin, (req, res) => {
+router.post('/duplicates/:flagId/resolve', requirePermission('shuls', 'can_edit'), (req, res) => {
   const { action } = req.body || {}; // 'bypass' | 'resolve'
   const flag = resolveFlag(req.params.flagId, req.user.id, action);
   if (!flag) return res.status(404).json({ error: 'Not found' });
@@ -886,7 +886,7 @@ const SHUL_UPDATABLE_FIELDS = {
   slots_allocated: r => (r.slots_allocated !== '' && r.slots_allocated != null ? Number(r.slots_allocated) : ''),
 };
 
-router.post('/import', requireAdmin, upload.single('file'), async (req, res) => {
+router.post('/import', requirePermission('shuls', 'can_edit'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   if (!/\.xlsx$/i.test(req.file.originalname || '')) return res.status(400).json({ error: 'Only .xlsx files are accepted (CSV does not reliably support Hebrew text).' });
   const jobId = uuid();

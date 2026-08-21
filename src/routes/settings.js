@@ -12,7 +12,13 @@ import { runBackup, listBackups, backupPath } from '../services/backup.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
-router.use(auth);
+// Every route in this file is only ever called from the admin Settings page
+// (frontend/admin/settings.html) or its shared editor helpers (app.js's
+// signature-box/contract-field placement tools) — no shul/store portal or
+// public page calls anything here, so a blanket 'settings' view gate is
+// correct for the whole router, not just the individually-gated mutations
+// below.
+router.use(auth, requirePermission('settings'));
 
 // Generic org-scoped key/value settings (contract template text, gmaps key display, etc.)
 router.get('/', (req, res) => {
